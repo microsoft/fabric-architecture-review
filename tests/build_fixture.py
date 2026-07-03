@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generate the committed test fixture as fully-synthetic mock data.
 
 This is a developer convenience, not part of the runtime. It writes a small,

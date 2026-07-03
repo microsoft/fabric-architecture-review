@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Shared analyzer registry for the golden-file tests and the golden generator.
 
 Maps each analyzer module to the findings file basename it produces, so both

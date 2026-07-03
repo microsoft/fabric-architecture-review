@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Build Mermaid diagrams + architecture tables describing the client's Fabric estate.
 
 Each builder is independent: it inspects ``output/raw/`` for the JSON file it

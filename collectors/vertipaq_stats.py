@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """VertiPaq Analyzer statistics for semantic models (Import + Direct Lake).
 
 Runs **inside Fabric** and uses semantic-link-labs'

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Merge every output/findings_*.json into output/findings.json (flat list).
 
 Run after all analyzers have produced their per-dimension files.

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Data Gateways inventory (on-prem / VNet / personal).
 
 Endpoints (Power BI REST, scope == signed-in user):

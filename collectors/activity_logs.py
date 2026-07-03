@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Fabric / Power BI Admin Activity Log (last N days).
 
 Endpoint:

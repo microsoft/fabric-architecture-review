@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Provide the navigation-map background for the report Home page.
 
 The home page is a designed illustration set as the page *background image*;

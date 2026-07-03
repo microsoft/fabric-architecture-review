@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Heuristic notebook source-code review.
 
 Reads decoded notebooks from ``output/raw/pipeline_definitions.json`` and

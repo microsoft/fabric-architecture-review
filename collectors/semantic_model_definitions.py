@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Fetch TMDL/BIM definitions for Import-mode semantic models via the Fabric
 ``getDefinition`` API, so the storage-mode analyzer can audit each model for
 DirectLake-migration blockers (M-based partitions, calculated columns,

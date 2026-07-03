@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Interactive user authentication for the Fabric and Power BI REST APIs.
 
 Acts as a normal signed-in user. To the client tenant, every API call from

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Workspace-level inventory: items, role assignments, capacity assignment.
 
 This is the REST-API fallback / complement to ``collectors.scanner_api``. Where

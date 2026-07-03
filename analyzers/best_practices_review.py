@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Best-practice / health review (BPA, Direct Lake fallback, Delta, unused, capacity).
 
 Reads ``best_practices.json`` (produced by ``collectors.best_practices`` inside

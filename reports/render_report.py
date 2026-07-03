@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Render findings JSON to a single Markdown report using Jinja2 templates.
 
 Inputs:

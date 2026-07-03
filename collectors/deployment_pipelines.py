@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Fabric / Power BI Deployment Pipelines inventory.
 
 Endpoints (Power BI REST, available to Fabric Admin / pipeline admin):

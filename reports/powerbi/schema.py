@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Single source of truth for the gold-layer tables that back the Direct Lake
 governance semantic model and report.
 

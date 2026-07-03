@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generate / refresh the committed golden findings from the sample fixture.
 
 Run this whenever the fixture or an analyzer's expected output changes:

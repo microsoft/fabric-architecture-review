@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Build the Fabric **Ontology** item definition (base64 JSON parts).
 
 A Fabric Ontology (part of Fabric IQ) is a first-class Fabric item that models a

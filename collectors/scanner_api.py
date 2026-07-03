@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Workspace + item metadata via the Power BI / Fabric Admin Scanner API.
 
 Pipeline:

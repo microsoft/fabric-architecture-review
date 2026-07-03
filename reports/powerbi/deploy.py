@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Fabric REST helpers for deploying the governance semantic model + report.
 
 Imported by ``fabric/setup.ipynb``. Kept dependency-light: callers pass in

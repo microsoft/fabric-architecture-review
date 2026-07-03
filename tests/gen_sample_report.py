@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generate the committed sample report from the golden findings.
 
 Produces a brand-free Markdown + PDF report under ``samples/`` using the

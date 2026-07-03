@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Release / version tracking for the Fabric Architecture Review (FAR) accelerator.
 
 A single ``VERSION`` file at the repository root is the canonical release string

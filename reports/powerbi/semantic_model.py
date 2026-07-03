@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generate the Direct Lake governance semantic model as TMSL (``model.bim``).
 
 We emit TMSL (one JSON object) rather than multi-file TMDL because a single

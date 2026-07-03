@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Pipeline + Notebook inventory and recent job-run history.
 
 Endpoints:

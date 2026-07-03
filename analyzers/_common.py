@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Shared helpers for analyzers."""
 from __future__ import annotations
 

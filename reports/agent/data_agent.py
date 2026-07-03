@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Build the Fabric **Data Agent** item definition (base64 JSON parts).
 
 A Fabric Data Agent is a normal Fabric item created/updated through the generic

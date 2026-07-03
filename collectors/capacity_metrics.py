@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Capacity inventory + REST-accessible utilization signals.
 
 Endpoints:

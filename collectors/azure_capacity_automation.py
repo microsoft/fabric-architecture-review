@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Detect Fabric capacity Pause/Resume automation in the Azure subscription.
 
 When the reviewer attests ``CAPACITY_AUTO_PAUSE_CONFIGURED=true`` we go one

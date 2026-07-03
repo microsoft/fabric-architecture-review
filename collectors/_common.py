@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Shared helpers for collectors.
 
 Loads ``.env`` and exposes ``WORKSPACE_IDS`` scoping.

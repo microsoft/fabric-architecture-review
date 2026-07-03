@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Best-practice / health analysis for semantic models, reports and capacities.
 
 Runs **inside Fabric** and uses semantic-link-labs to capture the same checks a

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Architecture review.
 
 Evaluates workspace layering, capacity assignment, Git integration, workspace

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Fetch full pipeline and notebook definitions via the Fabric ``getDefinition`` API.
 
 Endpoints (Long Running Operation):

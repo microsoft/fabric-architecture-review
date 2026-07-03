@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generic Markdown -> HTML -> Puppeteer -> PDF generator with Mermaid + configurable branding.
 
 Any markdown report (executive summary, findings, recommendations, or a merged

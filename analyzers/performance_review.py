@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Performance review.
 
 Reads semantic_models.json + capacity_metrics.json and emits findings on

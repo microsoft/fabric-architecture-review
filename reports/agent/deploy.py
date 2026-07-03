@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Assemble the Fabric Data Agent item definition for deployment.
 
 Thin wrapper over :mod:`reports.agent.data_agent` that binds the agent to the two

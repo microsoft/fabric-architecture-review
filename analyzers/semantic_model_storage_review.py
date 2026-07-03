@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Storage-mode review for semantic models — DirectLake feasibility audit.
 
 Reads ``semantic_models.json`` (catalog + storage mode) and

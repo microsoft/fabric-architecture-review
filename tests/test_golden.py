@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Golden-file tests: run every analyzer against the synthetic sample fixture
 and assert the finding counts and statuses match the committed golden output.
 

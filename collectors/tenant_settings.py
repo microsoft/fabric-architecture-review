@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Collect tenant-wide Fabric / Power BI tenant settings.
 
 Endpoint: GET https://api.fabric.microsoft.com/v1/admin/tenantsettings

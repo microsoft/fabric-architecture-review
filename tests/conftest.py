@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Pytest configuration for the fabric-arch-review test suite.
 
 Ensures the repository root is importable so ``import analyzers...`` works

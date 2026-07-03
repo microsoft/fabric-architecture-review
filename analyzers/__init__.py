@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Rule evaluation against the collected metadata.
 
 Each analyzer module reads JSON from `output/raw/`, applies the rules from

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Evaluate tenant-wide Fabric / Power BI settings against the security & governance baseline.
 
 Reads:  output/raw/tenant_settings.json

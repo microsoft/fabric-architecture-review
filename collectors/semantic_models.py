@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Semantic model inventory + refresh history via Power BI REST API.
 
 Endpoints (admin-tenant scope):

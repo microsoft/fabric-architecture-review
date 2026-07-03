@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Real-Time Intelligence + mirroring inventory per workspace.
 
 Endpoints (Fabric REST, all workspace-scoped):

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Build the gold-layer records that back the Direct Lake governance report.
 
 Pure Python (no Spark, no pandas) so it can be unit-tested on a workstation.

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Query the Fabric Capacity Metrics App semantic model via Power BI REST.
 
 This collector runs as the signed-in user (same `TokenProvider` chain the

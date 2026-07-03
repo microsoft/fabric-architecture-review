@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Generate the *Fabric Arch Review - Governance* report in PBIR format.
 
 PBIR (the enhanced report format) stores the report as many small JSON files:

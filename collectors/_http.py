@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """Shared HTTP helpers for collectors.
 
 DATA SAFETY: This module performs HTTP only. It does not interpret payloads
