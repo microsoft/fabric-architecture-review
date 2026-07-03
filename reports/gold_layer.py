@@ -724,6 +724,38 @@ def build_gold(
             elif sev == "high":
                 agg["high"] += 1
 
+    # gold_finding_targets: Finding -> Workspace edges. Reverse-map each finding's
+    # evidence workspace names to workspace ids (name_to_wid) so the ontology can
+    # walk from a workspace to the exact rules it triggers (id-based, not free-text).
+    _ft_seen: set = set()
+    for f in findings:
+        rid = f.get("rule_id") or ""
+        if not rid:
+            continue
+        sev = (f.get("severity") or "medium").lower()
+        st = (f.get("status") or "info").lower()
+        for nm in _finding_workspace_names(f.get("evidence") or {}):
+            widl = name_to_wid.get(nm)
+            if not widl:
+                continue
+            m = ws_meta.get(widl, {})
+            wid = m.get("id") or ""
+            if not wid or (rid, widl) in _ft_seen:
+                continue
+            _ft_seen.add((rid, widl))
+            tables["gold_finding_targets"].append(_coerce_row("gold_finding_targets", {
+                **meta,
+                "rule_id": rid,
+                "title": f.get("title"),
+                "dimension": f.get("dimension"),
+                "severity": sev,
+                "severity_rank": SEVERITY_RANK.get(sev, 2),
+                "status": st,
+                "is_fail": 1 if st == "fail" else 0,
+                "workspace_id": wid,
+                "workspace_name": m.get("name") or "",
+            }))
+
     # gold_workspace_risk: one roll-up row per workspace.
     for widl in sorted(set(ws_meta) | set(scan_ws)):
         m = ws_meta.get(widl, {})

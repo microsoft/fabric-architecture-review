@@ -393,6 +393,25 @@ GOLD_TABLES: List[Table] = [
         "(backs the ontology ModelFeedsReport relationship).",
     ),
     Table(
+        "gold_finding_targets",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("rule_id"),
+            _c("title"),
+            _c("dimension"),
+            _c("severity"),
+            _c("severity_rank", "int64"),
+            _c("status"),
+            _c("is_fail", "int64"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+        ],
+        "Finding->Workspace edges (a finding's evidence workspace names reverse-"
+        "mapped to workspace ids) - backs the ontology AffectsWorkspace relationship "
+        "so you can walk from a workspace to the exact rules it triggers.",
+    ),
+    Table(
         "gold_workspace_risk",
         [
             _c("run_id"),

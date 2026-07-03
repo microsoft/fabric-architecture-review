@@ -35,6 +35,7 @@ foreign keys within the same ``run_id`` so every review run is its own graph):
 * **Lakehouse -LakehouseInWorkspace-> Workspace**   (``gold_lakehouses``)
 * **Owner -OwnerAdministersWorkspace-> Workspace**  (``gold_owner_edges``)
 * **SemanticModel -ModelFeedsReport-> Report**      (``gold_lineage_edges``)
+* **Finding -AffectsWorkspace-> Workspace**         (``gold_finding_targets``)
 
 Definition parts (per the Fabric "Ontology item definition" schema)::
 
@@ -330,6 +331,14 @@ RELATIONSHIPS: List[Relationship] = [
         table="gold_lineage_edges",
         source_keys=[KeyBinding("model_id", "ModelId"), KeyBinding("run_id", "RunId")],
         target_keys=[KeyBinding("report_id", "ReportId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="AffectsWorkspace",
+        source="Finding",
+        target="Workspace",
+        table="gold_finding_targets",
+        source_keys=[KeyBinding("rule_id", "RuleId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
     ),
 ]
 
