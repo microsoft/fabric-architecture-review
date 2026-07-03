@@ -28,6 +28,7 @@ that first if you have not yet — everything there applies here too.
 - [Pipeline parameters (selectable at run time)](#-pipeline-parameters-selectable-at-run-time)
 - [The gold layer + Direct Lake governance report](#-the-gold-layer--direct-lake-governance-report)
 - [Ask the data agent (conversational Q&A)](#-ask-the-data-agent-conversational-qa)
+- [Build the estate graph (Fabric IQ ontology)](#-build-the-estate-graph-fabric-iq-ontology)
 - [Optional: Azure (ARM) auth for capacity Pause/Resume detection](#-optional-azure-arm-auth-for-capacity-pauseresume-detection)
 - [Workspace logo (optional)](#-workspace-logo-optional)
 - [Versioning & updates](#-versioning--updates)
@@ -231,6 +232,65 @@ Set `DEPLOY_DATA_AGENT="false"` to skip it.
 
 > **First run:** the agent answers meaningfully only after the pipeline has run **once** (it reads the
 > same gold tables as the report). Deploy it now; it lights up with the first run.
+
+---
+
+## 🕸️ Build the estate graph (Fabric IQ ontology)
+
+Setup deploys a **Fabric IQ ontology** item (`Fabric_Arch_Review_Estate_Ontology`) with the entity
+types and relationships already defined. **Fabric IQ does not auto-materialise the graph from the item
+definition** — the graph is *built* in the ontology editor (a preview, UI-only step). So after the
+pipeline has run once, do this one-time build:
+
+**Prerequisites**
+
+- The **"Users can create Ontology (preview) items"** tenant setting is enabled (Fabric admin portal).
+- The **pipeline has run at least once**, so the gold tables hold data (an empty ontology can't build).
+
+**Steps (≈2 minutes, one time)**
+
+1. Open **`Fabric_Arch_Review_Estate_Ontology`** → switch to the **Model** mode → **Get data** and select
+   **`gold_graph_nodes`** and **`gold_graph_edges`** from the **`fabric_arch_review_lh`** lakehouse.
+   These two tables model the whole estate as one nodes table + one edges table (edges reference nodes
+   by the same `node_id`), so you only define **one node** and **one edge**:
+2. **Add node** → `EstateNode`:
+
+   | Field | Value |
+   |---|---|
+   | Source table | `gold_graph_nodes` |
+   | Key | `node_id` *(add `run_id` as a 2nd key column if you've run the pipeline more than once)* |
+   | Properties | `node_name`, `node_type`, `status`, `workspace_name`, `capacity_name`, `risk_score`, `issue_count` |
+
+3. **Add edge** → `RelatedTo`:
+
+   | Field | Value |
+   |---|---|
+   | Source table | `gold_graph_edges` |
+   | Source | `EstateNode` on `source_id` → `node_id` |
+   | Target | `EstateNode` on `target_id` → `node_id` |
+   | Properties | `relationship`, `source_type`, `target_type`, `is_lineage` |
+
+4. **Save**, then switch to **Query** mode → select the **EstateNode** / **RelatedTo** components →
+   **Run query**. The graph materialises (the internal store fills on save/run — that's expected; the
+   source tables stay in `fabric_arch_review_lh`).
+
+**Explore it**
+
+- **Path query** for lineage: Start `EstateNode` filter `nodeType = Capacity` → End `EstateNode`
+  (optionally filter `nodeType = Report`), Direction `->`, Trail, **1–4 hops** → draws the
+  Capacity → Workspace → SemanticModel → Report chains.
+- **Add filter** to declutter the full graph: `nodeType`, `status = red`, or `risk_score > 20`;
+  filter edge `relationship` (`hosts`/`contains`/`administers`/`feeds`).
+
+**Notes**
+
+- Styling is **per node type**. Because `EstateNode` is a single type, all nodes share one colour;
+  use **filters** / **path queries** to focus. For a colour-per-type map, model each `nodeType`
+  (Capacity, Workspace, SemanticModel, …) as its own node against its dimension table
+  (`gold_capacities`, `gold_workspaces`, …) — more setup, prettier result.
+- The data is **run-partitioned**: `gold_graph_edges` holds edges for every run, so multiple runs
+  overlay. Filter to a single run (or rebuild the node/edge on a latest-run view) to keep it a single
+  clean estate.
 
 ---
 
