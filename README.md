@@ -139,7 +139,7 @@ can also run any module directly (see [Running a single stage](#running-a-single
 
 ```powershell
 # 1. Clone the accelerator for this engagement
-git clone https://github.com/biro98/fabric-architecture-review.git fabric-review-<client>
+git clone https://github.com/microsoft/fabric-architecture-review.git fabric-review-<client>
 cd fabric-review-<client>
 
 # 2. Python environment
@@ -155,7 +155,7 @@ npm install -g puppeteer
 
 ```bash
 # 1. Clone the accelerator for this engagement
-git clone https://github.com/biro98/fabric-architecture-review.git fabric-review-<client>
+git clone https://github.com/microsoft/fabric-architecture-review.git fabric-review-<client>
 cd fabric-review-<client>
 
 # 2. Python environment
