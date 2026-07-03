@@ -573,29 +573,33 @@ fabric-arch-review/
 
 ## 🤝 Contributing
 
-This project welcomes contributions and suggestions. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the workflow and the mandatory **data-safety contract**. This project follows its
-[Code of Conduct](CODE_OF_CONDUCT.md).
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
+Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
+the rights to use your contribution. For details, visit <https://cla.opensource.microsoft.com>. When
+you submit a pull request, a CLA bot will automatically determine whether you need to provide a CLA
+and decorate the PR appropriately. You only need to do this once across all repos using our CLA.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and the mandatory **data-safety contract**.
+This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/);
+see [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## 🛡️ Security
 
 To report a security vulnerability, **do not** open a public issue — follow the process in
 [SECURITY.md](SECURITY.md). For help and questions, see [SUPPORT.md](SUPPORT.md).
 
-## ™️ Trademarks & affiliation
+## ™️ Trademarks
 
-This is an **independent, community-built** accelerator. It is **not affiliated with,
-endorsed by, or sponsored by Microsoft**. "Microsoft", "Microsoft Fabric", "Power BI",
-"Azure", and related names and logos are trademarks of Microsoft Corporation; they are used
-here only to describe the services this tool reviews. Any other trademarks are the property
-of their respective owners. Do not ship third-party logos with this project unless you have
-the right to do so — the report carries no brand by default (see
-[Customizing the PDF & branding](#-configuration-reference)).
+This project may contain trademarks or logos for projects, products, or services. Authorized use of
+Microsoft trademarks or logos is subject to and must follow
+[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
+Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or
+imply Microsoft sponsorship. Any use of third-party trademarks or logos are subject to those
+third-party's policies.
 
 ## 📄 License
 
 Licensed under the [MIT License](LICENSE).
 
-> **Disclaimer:** This accelerator is provided **as-is**, without warranty of any kind. It
-> is an independent community accelerator, **not** an official Microsoft product, and is not
-> covered by any Microsoft support agreement or SLA.
+> **Disclaimer:** This project is provided **as-is**, without warranty of any kind, and is not
+> covered by a Microsoft support agreement or SLA.

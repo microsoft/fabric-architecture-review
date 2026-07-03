@@ -3,17 +3,16 @@
 ## How to file issues and get help
 
 This project uses [GitHub Issues](../../issues) to track bugs and feature requests. Please
-search the existing issues before filing new ones to avoid duplicates. For new issues,
-file your bug or feature request as a new issue.
+search the existing issues before filing new issues to avoid duplicates. For new issues, file
+your bug or feature request as a new Issue.
 
 For help and questions about using this project, please open a
 [GitHub Discussion](../../discussions) or a GitHub Issue with the `question` label.
 
-## Support policy
+## Microsoft Support Policy
 
-This is an open-source **accelerator** provided **as-is**, without any warranty or SLA.
-It is an independent, community-built project and is **not** an official Microsoft product.
-Support is limited to the resources in this repository and the community.
+Support for this project is limited to the resources listed above. It is released as open
+source **as-is**; there is no SLA or dedicated Microsoft support channel for it.
 
 For issues with the underlying Microsoft Fabric or Power BI services themselves, use the
 official [Microsoft Fabric support](https://support.fabric.microsoft.com/) channels.
