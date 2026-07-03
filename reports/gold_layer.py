@@ -984,6 +984,49 @@ def build_gold(
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       lid, lname, "Lakehouse", "contains")
 
+    # ---- ontology dimension/edge tables (derived from the estate graph) --
+    # One binding table per ontology entity/relationship type, so the Fabric IQ
+    # ontology can model each estate item kind as its own typed entity.
+    _node_dim = {
+        "Report": ("gold_reports", "report_id", "report_name", True),
+        "Notebook": ("gold_notebooks", "notebook_id", "notebook_name", True),
+        "Pipeline": ("gold_pipelines", "pipeline_id", "pipeline_name", False),
+        "Lakehouse": ("gold_lakehouses", "lakehouse_id", "lakehouse_name", False),
+    }
+    owner_seen: set = set()
+    for n in tables["gold_graph_nodes"]:
+        spec = _node_dim.get(n["node_type"])
+        if spec:
+            tname, id_col, name_col, with_risk = spec
+            row = {
+                "run_id": run_id, "run_timestamp": run_timestamp,
+                id_col: n["node_id"], name_col: n["node_name"],
+                "workspace_id": n["workspace_id"], "workspace_name": n["workspace_name"],
+            }
+            if with_risk:
+                row.update(status=n["status"], risk_score=n["risk_score"],
+                           issue_count=n["issue_count"])
+            tables[tname].append(_coerce_row(tname, row))
+        elif n["node_type"] == "Owner" and n["node_id"] not in owner_seen:
+            owner_seen.add(n["node_id"])
+            tables["gold_owners"].append(_coerce_row("gold_owners", {
+                "run_id": run_id, "run_timestamp": run_timestamp,
+                "owner_id": n["node_id"], "owner_name": n["node_name"],
+            }))
+    for e in tables["gold_graph_edges"]:
+        if e["relationship"] == "administers":
+            tables["gold_owner_edges"].append(_coerce_row("gold_owner_edges", {
+                "run_id": run_id, "run_timestamp": run_timestamp,
+                "owner_id": e["source_id"], "owner_name": e["source_name"],
+                "workspace_id": e["target_id"], "workspace_name": e["target_name"],
+            }))
+        elif e["relationship"] == "feeds":
+            tables["gold_lineage_edges"].append(_coerce_row("gold_lineage_edges", {
+                "run_id": run_id, "run_timestamp": run_timestamp,
+                "model_id": e["source_id"], "model_name": e["source_name"],
+                "report_id": e["target_id"], "report_name": e["target_name"],
+            }))
+
     return tables
 
 

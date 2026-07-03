@@ -10,21 +10,31 @@ helper it already uses.
 
 Rather than a single generic node type, the ontology mirrors the real gold tables
 as distinct **entity types**, so the graph explorer shows a proper estate model
-(capacities, workspaces, semantic models, the tables inside them, and findings)
 instead of one opaque box:
 
 * **Capacity**      <- ``gold_capacities``         key ``(capacity_id, run_id)``
 * **Workspace**     <- ``gold_workspaces``         key ``(workspace_id, run_id)``
 * **SemanticModel** <- ``gold_semantic_models``    key ``(model_id, run_id)``
 * **ModelTable**    <- ``gold_model_tables``       key ``(model_id, table_name, run_id)``
+* **Report**        <- ``gold_reports``            key ``(report_id, run_id)``
+* **Notebook**      <- ``gold_notebooks``          key ``(notebook_id, run_id)``
+* **Pipeline**      <- ``gold_pipelines``          key ``(pipeline_id, run_id)``
+* **Lakehouse**     <- ``gold_lakehouses``         key ``(lakehouse_id, run_id)``
+* **Owner**         <- ``gold_owners``             key ``(owner_id, run_id)``
 * **Finding**       <- ``gold_findings``           key ``(rule_id, run_id)``
 
 and the relationships that connect them (each bound to a table that carries both
 foreign keys within the same ``run_id`` so every review run is its own graph):
 
-* **Workspace  -HostedOnCapacity-> Capacity**    (bound to ``gold_workspaces``)
-* **SemanticModel -InWorkspace-> Workspace**     (bound to ``gold_semantic_models``)
-* **ModelTable -BelongsToModel-> SemanticModel** (bound to ``gold_model_tables``)
+* **Workspace  -HostedOnCapacity-> Capacity**       (``gold_workspaces``)
+* **SemanticModel -InWorkspace-> Workspace**        (``gold_semantic_models``)
+* **ModelTable -BelongsToModel-> SemanticModel**    (``gold_model_tables``)
+* **Report -ReportInWorkspace-> Workspace**         (``gold_reports``)
+* **Notebook -NotebookInWorkspace-> Workspace**     (``gold_notebooks``)
+* **Pipeline -PipelineInWorkspace-> Workspace**     (``gold_pipelines``)
+* **Lakehouse -LakehouseInWorkspace-> Workspace**   (``gold_lakehouses``)
+* **Owner -OwnerAdministersWorkspace-> Workspace**  (``gold_owner_edges``)
+* **SemanticModel -ModelFeedsReport-> Report**      (``gold_lineage_edges``)
 
 Definition parts (per the Fabric "Ontology item definition" schema)::
 
@@ -171,6 +181,75 @@ ENTITIES: List[Entity] = [
             Prop("IsFail", "is_fail", "BigInt"),
         ],
     ),
+    Entity(
+        name="Report",
+        table="gold_reports",
+        id_props=("ReportId", "RunId"),
+        display="ReportName",
+        props=[
+            Prop("ReportId", "report_id", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("ReportName", "report_name", "String"),
+            Prop("WorkspaceId", "workspace_id", "String"),
+            Prop("WorkspaceName", "workspace_name", "String"),
+            Prop("Status", "status", "String"),
+            Prop("RiskScore", "risk_score", "Double"),
+            Prop("IssueCount", "issue_count", "BigInt"),
+        ],
+    ),
+    Entity(
+        name="Notebook",
+        table="gold_notebooks",
+        id_props=("NotebookId", "RunId"),
+        display="NotebookName",
+        props=[
+            Prop("NotebookId", "notebook_id", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("NotebookName", "notebook_name", "String"),
+            Prop("WorkspaceId", "workspace_id", "String"),
+            Prop("WorkspaceName", "workspace_name", "String"),
+            Prop("Status", "status", "String"),
+            Prop("RiskScore", "risk_score", "Double"),
+            Prop("IssueCount", "issue_count", "BigInt"),
+        ],
+    ),
+    Entity(
+        name="Pipeline",
+        table="gold_pipelines",
+        id_props=("PipelineId", "RunId"),
+        display="PipelineName",
+        props=[
+            Prop("PipelineId", "pipeline_id", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("PipelineName", "pipeline_name", "String"),
+            Prop("WorkspaceId", "workspace_id", "String"),
+            Prop("WorkspaceName", "workspace_name", "String"),
+        ],
+    ),
+    Entity(
+        name="Lakehouse",
+        table="gold_lakehouses",
+        id_props=("LakehouseId", "RunId"),
+        display="LakehouseName",
+        props=[
+            Prop("LakehouseId", "lakehouse_id", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("LakehouseName", "lakehouse_name", "String"),
+            Prop("WorkspaceId", "workspace_id", "String"),
+            Prop("WorkspaceName", "workspace_name", "String"),
+        ],
+    ),
+    Entity(
+        name="Owner",
+        table="gold_owners",
+        id_props=("OwnerId", "RunId"),
+        display="OwnerName",
+        props=[
+            Prop("OwnerId", "owner_id", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("OwnerName", "owner_name", "String"),
+        ],
+    ),
 ]
 
 # Relationship types. Each binds to a table that carries BOTH foreign keys plus
@@ -203,6 +282,54 @@ RELATIONSHIPS: List[Relationship] = [
             KeyBinding("run_id", "RunId"),
         ],
         target_keys=[KeyBinding("model_id", "ModelId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="ReportInWorkspace",
+        source="Report",
+        target="Workspace",
+        table="gold_reports",
+        source_keys=[KeyBinding("report_id", "ReportId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="NotebookInWorkspace",
+        source="Notebook",
+        target="Workspace",
+        table="gold_notebooks",
+        source_keys=[KeyBinding("notebook_id", "NotebookId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="PipelineInWorkspace",
+        source="Pipeline",
+        target="Workspace",
+        table="gold_pipelines",
+        source_keys=[KeyBinding("pipeline_id", "PipelineId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="LakehouseInWorkspace",
+        source="Lakehouse",
+        target="Workspace",
+        table="gold_lakehouses",
+        source_keys=[KeyBinding("lakehouse_id", "LakehouseId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="OwnerAdministersWorkspace",
+        source="Owner",
+        target="Workspace",
+        table="gold_owner_edges",
+        source_keys=[KeyBinding("owner_id", "OwnerId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("workspace_id", "WorkspaceId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="ModelFeedsReport",
+        source="SemanticModel",
+        target="Report",
+        table="gold_lineage_edges",
+        source_keys=[KeyBinding("model_id", "ModelId"), KeyBinding("run_id", "RunId")],
+        target_keys=[KeyBinding("report_id", "ReportId"), KeyBinding("run_id", "RunId")],
     ),
 ]
 

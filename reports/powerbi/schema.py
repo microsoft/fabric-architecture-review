@@ -298,6 +298,101 @@ GOLD_TABLES: List[Table] = [
         "is_lineage marks the curated data-lineage chain Capacity->Workspace->Model->Report.",
     ),
     Table(
+        "gold_reports",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("report_id"),
+            _c("report_name"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+            _c("status"),
+            _c("risk_score", "double"),
+            _c("issue_count", "int64"),
+        ],
+        "Power BI / Fabric reports in the estate, keyed to their workspace "
+        "(backs the ontology Report entity).",
+    ),
+    Table(
+        "gold_notebooks",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("notebook_id"),
+            _c("notebook_name"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+            _c("status"),
+            _c("risk_score", "double"),
+            _c("issue_count", "int64"),
+        ],
+        "Notebooks in the estate, keyed to their workspace "
+        "(backs the ontology Notebook entity).",
+    ),
+    Table(
+        "gold_pipelines",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("pipeline_id"),
+            _c("pipeline_name"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+        ],
+        "Data pipelines in the estate, keyed to their workspace "
+        "(backs the ontology Pipeline entity).",
+    ),
+    Table(
+        "gold_lakehouses",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("lakehouse_id"),
+            _c("lakehouse_name"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+        ],
+        "Lakehouses in the estate, keyed to their workspace "
+        "(backs the ontology Lakehouse entity).",
+    ),
+    Table(
+        "gold_owners",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("owner_id"),
+            _c("owner_name"),
+        ],
+        "Distinct workspace owners/admins seen in the estate "
+        "(backs the ontology Owner entity).",
+    ),
+    Table(
+        "gold_owner_edges",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("owner_id"),
+            _c("owner_name"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+        ],
+        "Owner->Workspace 'administers' edges "
+        "(backs the ontology OwnerAdministersWorkspace relationship).",
+    ),
+    Table(
+        "gold_lineage_edges",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("model_id"),
+            _c("model_name"),
+            _c("report_id"),
+            _c("report_name"),
+        ],
+        "SemanticModel->Report 'feeds' lineage edges "
+        "(backs the ontology ModelFeedsReport relationship).",
+    ),
+    Table(
         "gold_workspace_risk",
         [
             _c("run_id"),
