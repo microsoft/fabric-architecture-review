@@ -133,6 +133,7 @@ GOLD_TABLES: List[Table] = [
             _c("run_timestamp", "dateTime"),
             _c("model_id"),
             _c("model_name"),
+            _c("workspace_id"),
             _c("workspace_name"),
             _c("storage_mode"),
             _c("is_refreshable", "boolean"),

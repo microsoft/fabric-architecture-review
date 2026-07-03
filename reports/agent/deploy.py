@@ -15,6 +15,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from reports.powerbi.schema import GOLD_TABLES
+from reports.ontology.ontology import entity_type_names
 from reports.agent.data_agent import (
     DEFAULT_LAKEHOUSE_FEWSHOTS,
     agent_publish_description,
@@ -37,6 +38,8 @@ def data_agent_sources(
     model_name: str,
     lakehouse_name: str,
     tables: Optional[List[str]] = None,
+    ontology_id: Optional[str] = None,
+    ontology_name: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     tbls = tables if tables is not None else [t.name for t in GOLD_TABLES]
     semantic = data_source(
@@ -70,7 +73,27 @@ def data_agent_sources(
         ),
         description="Gold Delta tables backing the governance model.",
     )
-    return [semantic, lakehouse]
+    sources = [semantic, lakehouse]
+    if ontology_id:
+        sources.append(data_source(
+            source_type="ontology",
+            name=_slug(ontology_name or "ontology"),
+            artifact_id=ontology_id,
+            workspace_id=workspace_id,
+            tables=entity_type_names(),
+            display_name=ontology_name or "Estate Ontology",
+            instructions=(
+                "Use the estate ontology to reason over relationships between "
+                "capacities, workspaces, semantic models, their tables and findings "
+                "(e.g. which models live in a workspace, which workspace is on which "
+                "capacity). Prefer it for graph / lineage questions."
+            ),
+            description=(
+                "Fabric IQ knowledge graph of the reviewed estate (Capacity, "
+                "Workspace, SemanticModel, ModelTable, Finding entities)."
+            ),
+        ))
+    return sources
 
 
 def data_agent_definition(
@@ -81,13 +104,21 @@ def data_agent_definition(
     model_name: str,
     lakehouse_name: str,
     tables: Optional[List[str]] = None,
+    ontology_id: Optional[str] = None,
+    ontology_name: Optional[str] = None,
     version: str = "",
     publish: bool = True,
 ) -> Dict[str, Any]:
-    """Full Data Agent item definition (``{"parts": [...]}``) bound to both sources."""
+    """Full Data Agent item definition (``{"parts": [...]}``) bound to its sources.
+
+    When ``ontology_id`` is provided the Fabric IQ estate ontology is added as a
+    third source (preview). Callers that cannot guarantee the ontology exists
+    should omit it or wrap the upsert best-effort.
+    """
     sources = data_agent_sources(
         model_id, lakehouse_id, workspace_id,
         model_name=model_name, lakehouse_name=lakehouse_name, tables=tables,
+        ontology_id=ontology_id, ontology_name=ontology_name,
     )
     return build_definition(
         ai_instructions=compose_instructions(version),

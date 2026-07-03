@@ -524,6 +524,7 @@ def build_gold(
             **meta,
             "model_id": model_id,
             "model_name": model_name,
+            "workspace_id": ws_id,
             "workspace_name": workspace_name,
             "storage_mode": d.get("targetStorageMode"),
             "is_refreshable": d.get("isRefreshable"),

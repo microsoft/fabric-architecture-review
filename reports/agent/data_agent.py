@@ -48,6 +48,8 @@ _TABLE_ELEMENT_TYPE = {
     "semantic_model": "semantic_model.table",
     "lakehouse": "lakehouse_tables.table",
     "data_warehouse": "warehouse_tables.table",
+    # Ontology (Fabric IQ) is preview; the element token lists entity types.
+    "ontology": "ontology.entity_type",
 }
 
 
