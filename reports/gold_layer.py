@@ -449,16 +449,33 @@ def build_gold(
             item_counts[str(wid).lower()] = len(ws.get("items") or []) or sum(
                 len(ws.get(k) or []) for k in ("reports", "datasets", "dashboards", "dataflows", "lakehouses")
             )
+    # Most-recent activity-log event per workspace (ISO-8601 UTC strings sort
+    # chronologically), so we can flag workspaces with no activity in the window.
+    _acts = _load(raw, "activity_logs.json") or {}
+    last_activity_by_wid: Dict[str, str] = {}
+    for ev in _acts.get("events") or []:
+        _wl = str(ev.get("WorkspaceId") or "").lower()
+        _ct = ev.get("CreationTime")
+        if _wl and _ct and _ct > last_activity_by_wid.get(_wl, ""):
+            last_activity_by_wid[_wl] = _ct
     ws_name_by_id: Dict[str, str] = {}
     for ws in wsi.get("workspaces") or []:
         wid = ws.get("id")
+        _widl = str(wid).lower() if wid else ""
+        _admins = sum(
+            1 for u in (ws.get("users") or [])
+            if (u.get("groupUserAccessRight") or "") == "Admin"
+        )
         tables["gold_workspaces"].append(_coerce_row("gold_workspaces", {
             **meta,
             "workspace_id": wid,
             "workspace_name": ws.get("name"),
             "capacity_id": ws.get("capacityId"),
             "on_capacity": ws.get("isOnDedicatedCapacity"),
-            "item_count": item_counts.get(str(wid).lower(), 0),
+            "item_count": item_counts.get(_widl, 0),
+            "admin_count": _admins,
+            "last_activity": last_activity_by_wid.get(_widl),
+            "is_inactive": bool(_widl) and _widl not in last_activity_by_wid,
             "description": ws.get("description"),
         }))
         if wid:

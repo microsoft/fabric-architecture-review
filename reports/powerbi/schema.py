@@ -118,9 +118,13 @@ GOLD_TABLES: List[Table] = [
             _c("capacity_id"),
             _c("on_capacity", "boolean"),
             _c("item_count", "int64"),
+            _c("admin_count", "int64"),
+            _c("last_activity", "dateTime"),
+            _c("is_inactive", "boolean"),
             _c("description"),
         ],
-        "Workspaces in the review scope.",
+        "Workspaces in the review scope, with admin count and last-activity so "
+        "single-admin and unused/archival-candidate workspaces are directly queryable.",
     ),
     Table(
         "gold_semantic_models",

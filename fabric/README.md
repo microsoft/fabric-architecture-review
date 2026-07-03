@@ -27,6 +27,7 @@ that first if you have not yet — everything there applies here too.
 - [Deploy it from inside Fabric (no workstation needed)](#-deploy-it-from-inside-fabric-no-workstation-needed)
 - [Pipeline parameters (selectable at run time)](#-pipeline-parameters-selectable-at-run-time)
 - [The gold layer + Direct Lake governance report](#-the-gold-layer--direct-lake-governance-report)
+- [Ask the data agent (conversational Q&A)](#-ask-the-data-agent-conversational-qa)
 - [Optional: Azure (ARM) auth for capacity Pause/Resume detection](#-optional-azure-arm-auth-for-capacity-pauseresume-detection)
 - [Workspace logo (optional)](#-workspace-logo-optional)
 - [Versioning & updates](#-versioning--updates)
@@ -68,9 +69,10 @@ workspace (see the table above).
    - creates (or reuses) the Lakehouse `fabric_arch_review_lh` that holds the run output,
    - deploys the four stage notebooks — `FabricArchReview_01_Collect`, `FabricArchReview_02_Analyze`, `FabricArchReview_03_Report`, `FabricArchReview_04_Gold` — each pre-attached to that Lakehouse,
    - creates (or updates) the **Fabric Arch Review Pipeline** that chains *Collect → Analyze → Gold → Report* (each step depends on the previous one succeeding), passing a shared `RUN_ID` so all stages read/write the same run folder,
-   - deploys a **Direct Lake semantic model + Power BI report** named *Fabric Arch Review - Governance* over the gold-layer Delta tables. Set `DEPLOY_GOLD_REPORT="false"` to skip this.
+   - deploys a **Direct Lake semantic model + Power BI report** named *Fabric Arch Review - Governance* over the gold-layer Delta tables. Set `DEPLOY_GOLD_REPORT="false"` to skip this,
+   - deploys and **publishes a Fabric data agent** (*Fabric Arch Review - Data Agent*) so the team can ask the review results in plain English — grounded on both the semantic model and the gold lakehouse. Set `DEPLOY_DATA_AGENT="false"` to skip it. Optionally set `ENDORSE_MODEL` (`Promoted`/`Certified`) and `SENSITIVITY_LABEL_ID` (a label GUID) to endorse + label the deployed items.
 
-   It is idempotent — re-running it upserts the notebooks, pipeline, model and report instead of duplicating them.
+   It is idempotent — re-running it upserts the notebooks, pipeline, model, report **and data agent** instead of duplicating them.
 4. **Run the pipeline.** Open *Fabric Arch Review Pipeline* → *Run*. The Run dialog lists every parameter (pre-filled with the defaults you set in step 2) so you can adjust scope per run, or *Schedule* it for unattended runs. The collect stage clones this repo, installs `requirements.txt`, authenticates as the **executing identity** via `notebookutils` (no `az login`), gathers metadata into the Lakehouse, then analyze, gold, and report stages run in turn.
 5. **Read the output** two ways: the consultant-style **`report.md`** in `Files/fabric-arch-review/<run-id>/` (raw JSON alongside in `raw/`), and the interactive **Fabric Arch Review - Governance** report (open it from the workspace).
 
@@ -127,7 +129,7 @@ from the shared schema in [../reports/powerbi/schema.py](../reports/powerbi/sche
 | `gold_run_summary` | one row per run | the run slicer + headline scorecard |
 | `gold_dimension_summary` | one row per dimension per run | the *Overview* maturity radar + severity heatmap |
 | `gold_capacities` | capacities at scan time | *Cost* / *Performance* pages |
-| `gold_workspaces` | workspaces in scope | *Governance* page |
+| `gold_workspaces` | workspaces in scope (+ admin count, last activity, inactive flag) | *Governance* page + data agent |
 | `gold_semantic_models` | models + storage mode + VertiPaq size / column counts | *Architecture* + *Semantic Models* pages |
 | `gold_model_tables` | one row per model table (VertiPaq) | *Model detail* page |
 | `gold_model_columns` | one row per model column (size, encoding, data type, cardinality) | *Model detail* page |
@@ -181,6 +183,49 @@ dashboard**:
 > **First run:** the model + report are deployed empty. They light up after the pipeline runs **once**
 > (the `04_Gold` stage creates the Delta tables the Direct Lake model reads). On a brand-new Lakehouse the
 > setup notebook waits for the SQL analytics endpoint to provision before deploying the model.
+
+---
+
+## 🤖 Ask the data agent (conversational Q&A)
+
+Alongside the report, setup deploys a **Fabric data agent** named *Fabric Arch Review - Data Agent*
+so anyone on the team can ask the review results in plain English instead of reading pages of findings.
+Set `DEPLOY_DATA_AGENT="false"` to skip it.
+
+**Grounded on two sources** (up to five are allowed; the agent picks the right one per question):
+
+- the **Direct Lake governance semantic model** — governed measures + rich column descriptions drive
+  natural-language → DAX for scores, counts and roll-ups;
+- the **gold lakehouse tables** — natural-language → SQL for open drill-down, with ~17 built-in
+  example question/query pairs (few-shots are only honoured on non-semantic-model sources).
+
+**Ask things like:**
+
+- *“What's our best-practice score and the top critical findings?”*
+- *“How can I improve the architecture design / reduce cost?”*
+- *“How do I improve the semantic model ‘X’ / the notebook ‘Y’?”*
+- *“Are we being throttled — do we need a bigger or smaller capacity?”* (PERF-001/002/011)
+- *“Which workspaces are unused and could be closed?”* (empty or inactive workspaces + GOV-006)
+- *“Which workspaces have only one admin?”* (`admin_count = 1` + GOV-001)
+
+**Enterprise posture**
+
+- **Read-only.** The agent only generates read queries; it never writes or changes data.
+- **Data-safe.** Its model contains *only* the review's findings and metadata — never customer
+  business data — and the instructions tell it not to surface the reviewer's identity or raw
+  evidence UPNs.
+- **Governed.** Answers stay within the caller's Fabric permissions and any Microsoft Purview
+  policies (row/column-level security and sensitivity labels are enforced upstream); interactions
+  are auditable via Purview.
+- **Traceable.** The published agent is stamped with the deployed FAR release version.
+- **Endorsable.** Optionally endorse (Promoted / Certified) and apply a sensitivity label to the
+  model, report and agent via the `ENDORSE_MODEL` and `SENSITIVITY_LABEL_ID` setup parameters
+  (off by default; requires admin rights and a valid tenant label GUID).
+- **Prerequisites:** a paid **F2+** (or P1+) capacity and the **cross-geo processing/storing for AI**
+  tenant setting enabled (Fabric admin portal). Re-running setup re-publishes the agent idempotently.
+
+> **First run:** the agent answers meaningfully only after the pipeline has run **once** (it reads the
+> same gold tables as the report). Deploy it now; it lights up with the first run.
 
 ---
 

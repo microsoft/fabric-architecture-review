@@ -47,9 +47,96 @@ RELEASE_TABLE = "gold_release"
 # them as clickable hyperlinks.
 _WEB_URL_COLUMNS = {"microsoft_learn_url", "notebook_url"}
 
+# Ontology layer: plain-language business meaning of the columns, surfaced as
+# TMSL column ``description`` so both report authors and the Fabric data agent
+# (natural-language -> DAX) can reason over the model. Descriptions that name
+# the allowed values ("one of: ...") are deliberate - they steer NL2DAX toward
+# correct filters. Keyed by bare column name; the same column carries the same
+# meaning across the run-partitioned gold tables. Per-table overrides (where a
+# name is reused with a different meaning) live in ``_COLUMN_DESCRIPTIONS_BY_TABLE``.
+_COLUMN_DESCRIPTIONS: Dict[str, str] = {
+    "run_id": "Unique id of the review run this row belongs to; the join key to gold_run_summary (the run dimension).",
+    "run_timestamp": "UTC timestamp when the review run executed. Use for trend-over-time analysis.",
+    "client_name": "Name of the reviewed customer / tenant for this engagement.",
+    "engagement_name": "Name of the architecture-review engagement.",
+    "reviewer_name": "Person who ran the review.",
+    "is_latest": "True on the single most recent review run; filter on this to show current-state answers.",
+    "rule_id": "Checklist rule identifier, e.g. ARCH-009, PERF-004, SEC-008. The prefix is the dimension (ARCH/PERF/COST/GOV/SEC/TENANT/NBCODE).",
+    "dimension": "Assessment area. One of: architecture, performance, cost, governance, security, tenant_settings, notebook_code.",
+    "severity": "Finding severity, worst first. One of: critical, high, medium, low, info.",
+    "severity_rank": "Numeric severity ordering (higher number = more severe); use to sort.",
+    "status": "Check outcome. One of: pass, fail, info.",
+    "is_fail": "1 when status = fail, otherwise 0. Sum this to count failing rules.",
+    "title": "Short human-readable finding title.",
+    "recommendation": "Recommended remediation action for the finding.",
+    "rule_description": "Plain-language description of what the checklist rule verifies.",
+    "microsoft_learn_url": "Microsoft Learn documentation link for the rule.",
+    "affected": "Short summary of the workspaces / items the finding affects.",
+    "evidence_json": "Raw evidence for the finding as a JSON string (detailed drill-down).",
+    "total_findings": "Total checklist rules evaluated in the run.",
+    "total": "Total checklist rules evaluated for this dimension in the run.",
+    "pass_count": "Number of rules that passed.",
+    "fail_count": "Number of rules that failed.",
+    "info_count": "Number of informational (neither pass nor fail) findings.",
+    "critical_fail": "Number of failing rules with critical severity.",
+    "high_fail": "Number of failing rules with high severity.",
+    "medium_fail": "Number of failing rules with medium severity.",
+    "low_fail": "Number of failing rules with low severity.",
+    "score": "Best-practice score 0-100 (pass rate: pass / (pass + fail) x 100). 80+ healthy, 50-79 needs review, under 50 poor.",
+    "worst_severity": "Most severe outcome seen for this dimension in the run.",
+    "capacity_id": "Fabric/Power BI capacity identifier.",
+    "capacity_name": "Fabric/Power BI capacity display name.",
+    "sku": "Capacity SKU size, e.g. F2, F64, P1, PP3.",
+    "kind": "Capacity class: Fabric, Premium, Premium Per User, Embedded, or Trial.",
+    "is_dedicated": "True for a dedicated capacity; false for the per-user PPU reservation.",
+    "state": "Capacity state at scan time, e.g. Active, Paused.",
+    "region": "Azure region the capacity is provisioned in.",
+    "workspace_id": "Fabric workspace identifier.",
+    "workspace_name": "Fabric workspace display name.",
+    "on_capacity": "True when the workspace is assigned to a dedicated capacity.",
+    "item_count": "Number of Fabric items (models, reports, notebooks, pipelines, lakehouses) in the workspace.",
+    "admin_count": "Number of workspace admins. 1 = single owner / orphan risk (governance rule GOV-001).",
+    "last_activity": "Most recent activity-log event for the workspace; blank if there was none in the review window.",
+    "is_inactive": "True when the workspace had no activity in the review window - an archival / close candidate (GOV-006).",
+    "model_id": "Semantic model identifier.",
+    "model_name": "Semantic model display name.",
+    "storage_mode": "Semantic model storage mode: Import/Abf, DirectQuery, DirectLake, or Fabric.Warehouse.",
+    "is_refreshable": "True when the semantic model has a refreshable (Import) partition.",
+    "total_size": "In-memory VertiPaq size in bytes.",
+    "table_count": "Number of tables in the semantic model.",
+    "column_count": "Number of columns.",
+    "calc_column_count": "Number of calculated columns (a common refresh + memory cost driver).",
+    "max_refresh_seconds": "Longest observed refresh duration in seconds.",
+    "risk_score": "Workspace risk score 0-100 (higher = worse); weighted from failing findings.",
+    "status_rank": "Risk status ordering: 3 red, 2 amber, 1 green, 0 blue, -1 grey. >= 2 means at risk.",
+    "issue_count": "Number of failing findings attributed to this workspace.",
+    "critical_count": "Number of critical failing findings.",
+    "high_count": "Number of high failing findings.",
+    "node_type": "Estate-graph node type, e.g. Capacity, Workspace, SemanticModel, Report, Notebook, Pipeline, Lakehouse, Owner.",
+    "relationship": "Estate-graph edge type, e.g. hosts, administers, contains, feeds.",
+    "deployed_version": "Installed FAR (Fabric Architecture Review) release version.",
+    "latest_version": "Latest FAR release available on the source repository.",
+    "update_available": "True when a newer FAR release than the deployed one exists.",
+}
+
+# Per-(table, column) overrides where a bare column name would otherwise be
+# ambiguous or wrong.
+_COLUMN_DESCRIPTIONS_BY_TABLE: Dict[tuple, str] = {
+    ("gold_workspaces", "description"): "Workspace description text set by its owner.",
+    ("gold_model_columns", "cardinality"): "Distinct-value count of the column (drives dictionary size).",
+    ("gold_model_columns", "encoding"): "VertiPaq column encoding: VALUE (numeric) or HASH (dictionary).",
+    ("gold_model_columns", "data_type"): "Column data type in the semantic model.",
+    ("gold_release", "status"): "Deployed-version status line, e.g. 'FAR v2026.06.0 - up to date'.",
+    ("gold_release", "update_note"): "Upgrade guidance shown only when a newer release exists.",
+}
+
 
 def _lineage(*parts: str) -> str:
     return str(uuid.uuid5(_NS, "|".join(parts)))
+
+
+def _column_description(table: str, name: str) -> str:
+    return _COLUMN_DESCRIPTIONS_BY_TABLE.get((table, name)) or _COLUMN_DESCRIPTIONS.get(name, "")
 
 
 def _column(table: str, name: str, kind: str) -> Dict[str, Any]:
@@ -64,6 +151,9 @@ def _column(table: str, name: str, kind: str) -> Dict[str, Any]:
         col["formatString"] = "0" if kind == "int64" else "0.0"
     if name in _WEB_URL_COLUMNS:
         col["dataCategory"] = "WebUrl"
+    desc = _column_description(table, name)
+    if desc:
+        col["description"] = desc
     return col
 
 
@@ -359,6 +449,8 @@ def _table(table) -> Dict[str, Any]:
             },
         }],
     }
+    if getattr(table, "description", ""):
+        t["description"] = table.description
     if table.name == FACT_TABLE:
         t["measures"] = _measures()
     if table.name == MODEL_TABLE:
