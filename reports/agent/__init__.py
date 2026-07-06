@@ -3,7 +3,8 @@
 
 """Fabric Data Agent packaging for the Fabric Architecture Review.
 
-Dependency-free (json / base64 / uuid only) so it is safe to import inside the
-in-Fabric setup notebook without any pip install, exactly like
-:mod:`reports.powerbi`.
+``data_agent`` (agent content: instructions + few-shots) and ``evaluate`` (the
+deterministic self-eval) are dependency-free and safe to import anywhere.
+``sdk_deploy`` drives the ``fabric-data-agent-sdk`` and is imported only inside
+Fabric (the ``05_Agent`` notebook), where that SDK is installed.
 """

@@ -321,6 +321,48 @@ rules:
       overload events - capacity health can only be assessed point-in-time via REST.
     microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/metrics-app-install
 
+  - id: GOV-008
+    dimension: governance
+    severity: low
+    description: >
+      A healthy share of content is endorsed (Promoted or Certified) so consumers can
+      distinguish governed, trusted datasets and reports from ad-hoc content. Endorsement
+      is a maturity signal surfaced as advisory (info), not a hard failure.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/governance/endorsement-overview
+
+  - id: GOV-009
+    dimension: governance
+    severity: medium
+    description: >
+      Semantic models in production workspaces are endorsed (Certified/Promoted). Production
+      content that downstream reports depend on should be certified so consumers trust it.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/governance/endorsement-promote-certify
+
+  # ==================== OPERATIONAL EXCELLENCE / ALM ====================
+  - id: OPS-001
+    dimension: operational_excellence
+    severity: high
+    description: >
+      Production workspaces are attached to a deployment pipeline so content is promoted from
+      validated lower stages instead of being edited directly in production.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines
+
+  - id: OPS-002
+    dimension: operational_excellence
+    severity: high
+    description: >
+      Production workspaces are connected to Git (Azure DevOps / GitHub) for version history,
+      code review and rollback - the backbone of Fabric application lifecycle management.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration
+
+  - id: OPS-003
+    dimension: operational_excellence
+    severity: medium
+    description: >
+      At least one multi-stage deployment pipeline (e.g. Development -> Test -> Production) exists
+      so changes are validated before reaching production.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/cicd/deployment-pipelines/understand-the-deployment-process
+
   # ==================== SECURITY ====================
   - id: SEC-001
     dimension: security
@@ -450,6 +492,24 @@ rules:
     description: >
       Large capacities (F64 and above) with very few assigned workspaces (< 5) are
       candidates for SKU downgrade or workspace consolidation.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/optimize-capacity
+
+  - id: COST-006
+    dimension: cost
+    severity: medium
+    description: >
+      Trial and Embedded capacities are not hosting real workspaces. Trial capacities expire
+      (content and settings are lost); Embedded is sized for app embedding, not interactive use.
+      Real content belongs on a right-sized Fabric (F) capacity.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/licenses
+
+  - id: COST-007
+    dimension: cost
+    severity: low
+    description: >
+      Several small dedicated F-SKUs (F1-F16) can often be consolidated into one right-sized
+      capacity so CU smoothing and bursting are shared across workloads - usually more cost
+      efficient and easier to govern than many isolated small capacities. Advisory (info).
     microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/optimize-capacity
 
   # ==================== TENANT SETTINGS ====================

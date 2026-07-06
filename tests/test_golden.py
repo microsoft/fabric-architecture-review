@@ -33,9 +33,10 @@ EXPECTED_COUNTS: Dict[str, int] = {
     "findings_architecture": 14,
     "findings_performance": 12,
     "findings_storage_mode": 4,
-    "findings_governance": 7,
+    "findings_governance": 9,
+    "findings_operational_excellence": 3,
     "findings_security": 9,
-    "findings_cost": 5,
+    "findings_cost": 7,
     "findings_notebook_code": 6,
     "findings_best_practices": 7,
 }
@@ -59,6 +60,25 @@ def test_golden_present() -> None:
         assert (GOLDEN_DIR / f"{basename}.json").is_file(), (
             f"missing golden {basename}.json — run `python -m tests.gen_golden`"
         )
+
+
+@pytest.mark.parametrize("module_name", list(ANALYZERS))
+def test_analyzer_has_cli_entrypoint(module_name: str) -> None:
+    """Each analyzer must expose a callable ``main``.
+
+    The Fabric ``02_Analyze`` notebook runs every analyzer as a subprocess
+    (``python -m analyzers.<name>``), which executes the ``__main__`` block and
+    calls ``main()``. A missing ``def main`` raises ``NameError`` at runtime and
+    silently drops that whole dimension's findings — invisible to the other
+    tests, which call ``analyze()`` directly.
+    """
+    import importlib
+
+    module = importlib.import_module(module_name)
+    assert callable(getattr(module, "main", None)), (
+        f"{module_name} has no callable main() — `python -m {module_name}` would "
+        f"crash and write no findings"
+    )
 
 
 @pytest.mark.parametrize(("module_name", "basename"), list(ANALYZERS.items()))

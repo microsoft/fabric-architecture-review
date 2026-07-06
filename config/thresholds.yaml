@@ -112,6 +112,22 @@ governance:
   # env: GOV_SHARE_VOLUME_THRESHOLD
   share_volume_warn: 100
 
+  # GOV-008 — endorsement is a maturity signal, never a hard fail: PASS when at
+  # least this fraction of endorsable items are Certified/Promoted, else INFO.
+  endorsement_min_ratio: 0.3
+
+  # GOV-009 — a PRODUCTION workspace FAILS when fewer than this fraction of its
+  # semantic models are endorsed (Certified/Promoted). Prod content should be trusted.
+  prod_endorsement_min_ratio: 0.5
+
+operational_excellence:
+  # OPS-001 — PASS when at least this fraction of PRODUCTION workspaces are attached
+  # to a deployment pipeline. Only production-named, non-empty workspaces are scored.
+  prod_pipeline_min_ratio: 0.8
+
+  # OPS-002 — PASS when at least this fraction of PRODUCTION workspaces are Git-connected.
+  prod_git_min_ratio: 0.8
+
 security:
   # SEC-005 — FAIL when a workspace has MORE than this many individual (non-group)
   # principals with access — convert broad direct access to security groups.
@@ -128,3 +144,7 @@ cost:
   # COST-005 — a large capacity (F64+) hosting FEWER than this many workspaces is
   # a downsize / consolidation candidate.   env: COST_SMALL_WORKSPACE_THRESHOLD
   large_sku_min_workspaces: 5
+
+  # COST-007 — INFO (advisory) when there are at least this many small, active,
+  # dedicated F-SKUs (F1..F16) — often consolidatable into one right-sized capacity.
+  consolidation_min_small_capacities: 3

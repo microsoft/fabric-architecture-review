@@ -31,6 +31,7 @@ try {
     Invoke-Analyzer "analyzers.performance_review"     "Performance review"       "findings_performance.json"
     Invoke-Analyzer "analyzers.semantic_model_storage_review" "Semantic model storage-mode / DirectLake feasibility" "findings_storage_mode.json"
     Invoke-Analyzer "analyzers.governance_review"      "Governance review"        "findings_governance.json"
+    Invoke-Analyzer "analyzers.operational_excellence_review" "Operational Excellence review" "findings_operational_excellence.json"
     Invoke-Analyzer "analyzers.security_review"        "Security review"          "findings_security.json"
     Invoke-Analyzer "analyzers.cost_review"            "Cost review"              "findings_cost.json"
     Invoke-Analyzer "analyzers.notebook_code_review"   "Notebook code smells (heuristic)" "findings_notebook_code.json"

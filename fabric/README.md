@@ -7,7 +7,7 @@
 
 Run the **Fabric Architecture Review Accelerator** entirely **from inside a Microsoft Fabric
 workspace** — no workstation, no local install. You import **one** setup notebook, run it once,
-and it deploys a Lakehouse, four stage notebooks, an orchestration pipeline, and a Direct Lake
+and it deploys a Lakehouse, five notebooks, an orchestration pipeline, and a Direct Lake
 governance report for you. Then you trigger the pipeline (on demand or on a schedule) and read a
 client-ready `report.md` plus an interactive Power BI report.
 
@@ -65,22 +65,21 @@ hand is the **Fabric workspace** itself. Remember: the review targets the tenant
 workspace (see the table above).
 
 1. **Import the setup notebook** — Fabric workspace → *New* → *Import notebook* → upload [setup.ipynb](setup.ipynb).
-2. **Set its parameters** (parameters cell): the GitHub repo/branch to clone, `WORKSPACE_ID` (leave blank to use the current workspace), and the baked-in pipeline defaults (`TENANT_ID`, `CLIENT_NAME`, `ENGAGEMENT_NAME`, `REVIEWER_NAME`, optional `WORKSPACE_IDS`, the `CAPACITY_*` flags). These become the **pipeline's default parameter values** — every one stays overridable at run time (see [Pipeline parameters](#-pipeline-parameters-selectable-at-run-time)). The repo is public, so the clone needs no token.
+2. **Set its parameters** (parameters cell): the GitHub repo/branch to clone, `WORKSPACE_ID` (leave blank to use the current workspace), and the baked-in pipeline defaults (`TENANT_ID`, `CLIENT_NAME`, `ENGAGEMENT_NAME`, `REVIEWER_NAME`, optional `WORKSPACE_IDS`, the `CAPACITY_*` flags). These become the **pipeline's default parameter values** — every one stays overridable at run time (see [Pipeline parameters](#-pipeline-parameters-selectable-at-run-time)).
 3. **Run all cells.** Using the Fabric REST API, the setup notebook:
    - creates (or reuses) the Lakehouse `fabric_arch_review_lh` that holds the run output,
-   - deploys the four stage notebooks — `FabricArchReview_01_Collect`, `FabricArchReview_02_Analyze`, `FabricArchReview_03_Report`, `FabricArchReview_04_Gold` — each pre-attached to that Lakehouse,
-   - creates (or updates) the **Fabric Arch Review Pipeline** that chains *Collect → Analyze → Gold → Report* (each step depends on the previous one succeeding), passing a shared `RUN_ID` so all stages read/write the same run folder,
+   - deploys the four stage notebooks — `FabricArchReview_01_Collect`, `FabricArchReview_02_Analyze`, `FabricArchReview_03_Report`, `FabricArchReview_04_Gold` — plus a standalone `FabricArchReview_05_Agent` notebook, each pre-attached to that Lakehouse,
+   - creates (or updates) the **Fabric Arch Review Pipeline** that chains *Collect → Analyze → Report → Gold* (each step depends on the previous one succeeding), passing a shared `RUN_ID` so all stages read/write the same run folder,
    - deploys a **Direct Lake semantic model + Power BI report** named *Fabric Arch Review - Governance* over the gold-layer Delta tables. Set `DEPLOY_GOLD_REPORT="false"` to skip this,
-   - deploys and **publishes a Fabric data agent** (*Fabric Arch Review - Data Agent*) so the team can ask the review results in plain English — grounded on both the semantic model and the gold lakehouse. Set `DEPLOY_DATA_AGENT="false"` to skip it. Optionally set `ENDORSE_MODEL` (`Promoted`/`Certified`) and `SENSITIVITY_LABEL_ID` (a label GUID) to endorse + label the deployed items.
-,
+   - prepares a **Fabric data agent** (*Fabric Arch Review - Data Agent*) so the team can ask the review results in plain English — grounded on both the semantic model and the gold lakehouse. It is deployed by the standalone **`FabricArchReview_05_Agent`** notebook that runs the [fabric-data-agent-sdk](https://pypi.org/project/fabric-data-agent-sdk/) **after the pipeline** (so the backend enumerates the datasource schema against populated tables — the only reliable way to reference tables). Optionally set `ENDORSE_MODEL` (`Promoted`/`Certified`) and `SENSITIVITY_LABEL_ID` (a label GUID) to endorse + label the deployed items.
    - deploys a **Fabric IQ estate ontology** (`Fabric_Arch_Review_Estate_Ontology`) — a knowledge graph whose entity types mirror the real estate: **Capacity**, **Workspace**, **SemanticModel**, **ModelTable**, **Report**, **Notebook**, **Pipeline**, **Lakehouse**, **Owner** and **Finding**, connected by the estate relationships (`HostedOnCapacity`, `InWorkspace`, `BelongsToModel`, `ReportInWorkspace`, `NotebookInWorkspace`, `PipelineInWorkspace`, `LakehouseInWorkspace`, `OwnerAdministersWorkspace`, `ModelFeedsReport`, `AffectsWorkspace`). `AffectsWorkspace` links each **Finding** to the workspaces it triggers (by reverse-mapped id), so you can walk from a workspace to its exact failing rules. Set `DEPLOY_ONTOLOGY="false"` to skip it. *(Ontology item names allow only letters, numbers and underscores.)*
 
    > **Grounding the data agent on the ontology (optional, manual).** Adding an ontology as a data-agent source is a Fabric preview whose item-definition API isn't documented, so setup does **not** wire it automatically. To do it: run the pipeline once so the ontology has data, then open the **Fabric Arch Review - Data Agent** → **＋ Data source** → select `Fabric_Arch_Review_Estate_Ontology` → pick its entity types → **Save** and **Publish**. The agent already answers estate/lineage questions from the semantic model + lakehouse; the ontology source is a graph-reasoning enhancement.
 
-   > **⚠️ Ontology prerequisite (tenant admin).** The ontology is a preview feature, so before running you must enable **"Users can create Ontology (preview) items"** in the Fabric **Admin portal → Tenant settings** (scoped to your identity/security group). Without it the ontology deploy returns `403 FeatureNotAvailable` — the rest of the setup (notebooks, pipeline, model, report, data agent) still succeeds and the ontology step is skipped best-effort. Re-run the setup once the setting has propagated (can take a few minutes).
+   > **⚠️ Ontology prerequisite (tenant admin).** The ontology is a preview feature, so before running you must enable **"Users can create Ontology (preview) items"** in the Fabric **Admin portal → Tenant settings** (scoped to your identity/security group). Without it the ontology deploy returns `403 FeatureNotAvailable` — the rest of the setup (notebooks, pipeline, model, report) still succeeds and the ontology step is skipped best-effort. Re-run the setup once the setting has propagated (can take a few minutes).
 
-   It is idempotent — re-running it upserts the notebooks, pipeline, model, report, **data agent and ontology** instead of duplicating them.
-4. **Run the pipeline.** Open *Fabric Arch Review Pipeline* → *Run*. The Run dialog lists every parameter (pre-filled with the defaults you set in step 2) so you can adjust scope per run, or *Schedule* it for unattended runs. The collect stage clones this repo, installs `requirements.txt`, authenticates as the **executing identity** via `notebookutils` (no `az login`), gathers metadata into the Lakehouse, then analyze, gold, and report stages run in turn.
+   It is idempotent — re-running it upserts the notebooks (including the `05_Agent` deployer), pipeline, model, report **and ontology** instead of duplicating them. (The data agent itself is deployed later, by running the `05_Agent` notebook.)
+4. **Run the pipeline.** Open *Fabric Arch Review Pipeline* → *Run*. The Run dialog lists every parameter (pre-filled with the defaults you set in step 2) so you can adjust scope per run, or *Schedule* it for unattended runs. The collect stage clones this repo, installs `requirements.txt`, authenticates as the **executing identity** via `notebookutils` (no `az login`), gathers metadata into the Lakehouse, then analyze, report, and gold stages run in turn.
 5. **Read the output** two ways: the consultant-style **`report.md`** in `Files/fabric-arch-review/<run-id>/` (raw JSON alongside in `raw/`), and the interactive **Fabric Arch Review - Governance** report (open it from the workspace).
 
 > **Auth in Fabric:** the executing identity needs the same roles the framework documents (Fabric Administrator for tenant-wide collectors; Workspace Member+ for per-workspace ones). The Power BI token audience covers both the Fabric and Power BI admin REST endpoints.
@@ -149,6 +148,7 @@ from the shared schema in [../reports/powerbi/schema.py](../reports/powerbi/sche
 | `gold_bpa_violations` | one row per individual BPA / Direct Lake / Delta / health violation | *Best Practices* page |
 | `gold_graph_nodes` | estate entities (capacity, workspace, items, owners) | *Estate Map* inventory |
 | `gold_graph_edges` | relationships between estate entities | *Estate Map* relationships |
+| `gold_agent_eval` | one row per data-agent evaluation case per run (question, gold-derived expected answer, agent answer, passed) | *Agent Eval* page + accuracy KPI |
 
 The `gold_semantic_models`, `gold_model_*` tables are populated from `vertipaq_stats.json` (the
 **Fabric-only** `collectors.vertipaq_stats` collector). When that collector did not run — or no models
@@ -166,7 +166,7 @@ informational.
 The **Fabric Arch Review - Governance** semantic model
 ([../reports/powerbi/semantic_model.py](../reports/powerbi/semantic_model.py)) binds to these tables in
 **Direct Lake** mode (no import, no scheduled refresh) and the report
-([../reports/powerbi/report.py](../reports/powerbi/report.py)) is a **15-page platform-assessment
+([../reports/powerbi/report.py](../reports/powerbi/report.py)) is a **17-page platform-assessment
 dashboard**:
 
 | Page | What it shows |
@@ -175,12 +175,13 @@ dashboard**:
 | **Overview** | Executive cockpit: platform-maturity **radar** by dimension, best-practice-score **gauge**, fails-by-severity **donut**, dimension × severity **heatmap**, top-risk-workspace **ranked bar**, and the full findings table |
 | **Trends** | Run-over-run history — best-practice score, fails by severity, and per-dimension posture trended across every pipeline run |
 | **Estate Map** | Workspace-risk hotspots (scatter), failures by dimension & severity, and the estate inventory / relationships tables |
-| **Architecture, Performance, Cost, Governance, Security, Tenant Settings** | One page per review dimension — KPI cards, a severity donut, a ranked bar of failing checks, a dimension-specific detail table, and the dimension-filtered findings list |
+| **Architecture, Performance, Cost, Governance, Operational Excellence, Security, Tenant Settings** | One page per review dimension — KPI cards, a severity donut, a ranked bar of failing checks, a dimension-specific detail table, and the dimension-filtered findings list |
 | **Best Practices** | Fabric-only BPA outcomes — a violation-count KPI and a breakdown of model/report BPA, Direct Lake fallback, Delta health, unused objects, and capacity SKU readiness |
 | **Semantic Models** | Per-model VertiPaq burden (size, column / calculated-column counts, storage mode) with a size-by-model bar and a model-hotspot **scatter** (size vs. refresh, sized by columns) |
 | **Model detail** | Pick a model + table from slicers and inspect every column the way DAX Studio's VertiPaq Analyzer does — data type, encoding, cardinality, size |
 | **Model internals** | Per-model partitions, relationships, and user hierarchies |
 | **Notebooks** | NBCODE code-smell matches with a severity donut and a top-notebooks ranked bar |
+| **Agent Eval** | Data-agent accuracy — pass-rate KPI, passed-by-category bar, and the per-case table (question, gold-derived expected answer, agent answer, pass/fail) for the latest run |
 
 > **Custom visual note:** the *Overview* maturity radar uses the Microsoft-certified **Radar Chart**
 > public custom visual (declared via `publicCustomVisuals`). If your tenant blocks custom visuals it
@@ -195,9 +196,12 @@ dashboard**:
 
 ## 🤖 Ask the data agent (conversational Q&A)
 
-Alongside the report, setup deploys a **Fabric data agent** named *Fabric Arch Review - Data Agent*
+Alongside the report, setup prepares a **Fabric data agent** named *Fabric Arch Review - Data Agent*
 so anyone on the team can ask the review results in plain English instead of reading pages of findings.
-Set `DEPLOY_DATA_AGENT="false"` to skip it.
+It is deployed by the standalone **`FabricArchReview_05_Agent`** notebook, which uses the `fabric-data-agent-sdk` and must
+run **after the pipeline's first run**: the SDK lets the Fabric backend *enumerate* each datasource's
+schema, so the agent references real, populated tables (a hand-authored table list gets flagged
+*"table has been deleted or you don't have permission"*). Run the pipeline once, then run the `05_Agent` notebook.
 
 **Grounded on two sources** (up to five are allowed; the agent picks the right one per question):
 
@@ -212,8 +216,8 @@ Set `DEPLOY_DATA_AGENT="false"` to skip it.
 - *“How can I improve the architecture design / reduce cost?”*
 - *“How do I improve the semantic model ‘X’ / the notebook ‘Y’?”*
 - *“Are we being throttled — do we need a bigger or smaller capacity?”* (PERF-001/002/011)
-- *“Which workspaces are unused and could be closed?”* (empty or inactive workspaces + GOV-006)
-- *“Which workspaces have only one admin?”* (`admin_count = 1` + GOV-001)
+- *“Which workspaces are unused and could be closed?”* (empty workspaces + GOV-006)
+- *“Which workspaces have only one admin?”* (GOV-001)
 
 **Enterprise posture**
 
@@ -233,6 +237,18 @@ Set `DEPLOY_DATA_AGENT="false"` to skip it.
 
 > **First run:** the agent answers meaningfully only after the pipeline has run **once** (it reads the
 > same gold tables as the report). Deploy it now; it lights up with the first run.
+
+### Self-checking accuracy (deterministic eval)
+
+The agent ships with a **deterministic, self-checking evaluation**
+([../reports/agent/evaluate.py](../reports/agent/evaluate.py)): a fixed set of questions whose
+**expected answers are computed from the same gold tables the agent is grounded on**, so the ground
+truth is re-derived each run and can never drift. There is **no LLM judge and no hand-maintained answer
+key** — numbers are matched by value, names by substring, and a prompt-injection case checks the agent
+*refuses*. Results land in `gold_agent_eval` and surface on the report's **Agent Eval** page (pass-rate
+KPI + per-case table). The **`05_Agent`** notebook runs this evaluation right after it publishes the
+agent (it calls the published agent via the `fabric-data-agent-sdk`, scores each answer, and writes
+`gold_agent_eval`), so the Agent Eval page populates as soon as you run that notebook.
 
 ---
 
@@ -414,6 +430,7 @@ update. If the matching tag does not exist, deploy falls back to the branch tip 
 
 | Symptom | Cause / fix |
 | --- | --- |
+| `git clone` exit 128 when running a stage notebook standalone | Stage notebooks are meant to run **inside the pipeline** (it injects `GITHUB_REF`). Run the pipeline, or set `GITHUB_BRANCH` / `GITHUB_REF` to a valid ref. |
 | pip prints a dependency-resolver warning, then continues | Harmless — Fabric's `trident_env` ships pinned packages. pip still exits 0; the next line confirms "Repo + deps ready". |
 | *Semantic Models* / *Model detail* / *Model internals* pages are empty | The `vertipaq_stats` collector did not run, or no models were resident in memory at scan time. |
 | *Overview* maturity radar shows a "can't display this visual" placeholder | Your tenant blocks custom visuals. The radar is the only custom visual; every other visual still renders. Allow the Microsoft-certified *Radar Chart* in **Admin portal → Tenant settings → custom visuals**, or ignore it. |

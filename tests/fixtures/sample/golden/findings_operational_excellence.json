@@ -1,0 +1,47 @@
+[
+  {
+    "rule_id": "OPS-001",
+    "dimension": "operational_excellence",
+    "severity": "high",
+    "status": "pass",
+    "title": "Production workspaces covered by a deployment pipeline",
+    "evidence": {
+      "productionWorkspaces": 1,
+      "coveredRatio": 1.0,
+      "minRatio": 0.8,
+      "uncoveredCount": 0,
+      "examples": []
+    },
+    "recommendation": "Attach every production workspace to a deployment pipeline so content is promoted from validated lower stages instead of edited directly in production.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines"
+  },
+  {
+    "rule_id": "OPS-002",
+    "dimension": "operational_excellence",
+    "severity": "high",
+    "status": "pass",
+    "title": "Production workspaces under Git source control",
+    "evidence": {
+      "productionWorkspaces": 1,
+      "connectedRatio": 1.0,
+      "minRatio": 0.8,
+      "disconnectedCount": 0,
+      "examples": []
+    },
+    "recommendation": "Connect production workspaces to Git (Azure DevOps / GitHub) for version history, code review and rollback - the backbone of Fabric ALM.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration"
+  },
+  {
+    "rule_id": "OPS-003",
+    "dimension": "operational_excellence",
+    "severity": "medium",
+    "status": "pass",
+    "title": "A dev -> prod promotion path (multi-stage deployment pipeline) exists",
+    "evidence": {
+      "pipelineCount": 1,
+      "multiStagePipelines": 1
+    },
+    "recommendation": "Create at least one multi-stage deployment pipeline (Development -> Test -> Production) so changes are validated before reaching production.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/deployment-pipelines/understand-the-deployment-process"
+  }
+]

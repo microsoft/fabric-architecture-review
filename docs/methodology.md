@@ -9,7 +9,7 @@ The Fabric Architecture Review is aligned to the [Azure Well-Architected Framewo
 | Reliability | Architecture, Performance | Capacity headroom, refresh failure rate, pipeline retry behavior, Git integration enabling rollback |
 | Security | Security, Tenant Settings | Tenant-wide vs scoped settings, workspace role membership, sensitivity labels, guest access |
 | Cost Optimization | Cost, Performance | SKU right-sizing vs sustained CU%, pause/resume on non-prod, orphaned items |
-| Operational Excellence | Governance, Architecture | Naming conventions, Git integration, deployment pipelines, monitoring |
+| Operational Excellence | Operational Excellence, Governance, Architecture | ALM maturity: deployment-pipeline coverage, Git source control, dev→prod promotion path; naming conventions, monitoring |
 | Performance Efficiency | Performance | Throttling events, semantic model size, refresh SLOs, small-file problem, VertiPaq column/table footprint (size, encoding, cardinality) |
 
 ## Phases

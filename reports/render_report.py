@@ -33,7 +33,7 @@ except Exception:  # pragma: no cover - version file should always be present
     _far_version = "unknown"
 
 SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-DIMENSIONS = ["architecture", "performance", "governance", "security", "cost", "tenant_settings", "notebook_code"]
+DIMENSIONS = ["architecture", "performance", "governance", "operational_excellence", "security", "cost", "tenant_settings", "notebook_code"]
 
 DIMENSION_TITLES = {
     "architecture": "Architecture",
@@ -41,6 +41,7 @@ DIMENSION_TITLES = {
     "governance": "Governance",
     "security": "Security",
     "cost": "Cost",
+    "operational_excellence": "Operational Excellence",
     "tenant_settings": "Tenant Settings",
     "notebook_code": "Notebook Code Review (heuristic)",
 }

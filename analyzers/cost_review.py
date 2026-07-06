@@ -9,6 +9,8 @@ Rule coverage:
   COST-003 Dev/test/sandbox capacities flagged for pause schedule
   COST-004 Workspaces with prod-like names on PPU / personal capacities
   COST-005 Large capacities (F64+) hosting few workspaces
+  COST-006 Trial / Embedded capacities hosting workspaces
+  COST-007 Small-capacity sprawl (consolidation opportunity)             -> info
 
 Inputs: capacity_metrics.json, scanner.json (or workspace_inventory.json).
 """
@@ -20,12 +22,14 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity
+from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
 
 NONPROD_PATTERN = re.compile(r"(dev|test|qa|uat|sbx|sandbox|poc|demo)", re.IGNORECASE)
 PROD_PATTERN = re.compile(r"(prod|production|live)", re.IGNORECASE)
 LARGE_SKU_PATTERN = re.compile(r"^F(64|128|256|512|1024|2048)$", re.IGNORECASE)
+SMALL_SKU_PATTERN = re.compile(r"^F(1|2|4|8|16)$", re.IGNORECASE)
 SMALL_WORKSPACE_THRESHOLD = threshold("cost", "large_sku_min_workspaces", 5, env="COST_SMALL_WORKSPACE_THRESHOLD", cast=int)
+CONSOLIDATION_MIN_SMALL_CAPS = threshold("cost", "consolidation_min_small_capacities", 3, env="COST_CONSOLIDATION_MIN_SMALL_CAPS", cast=int)
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
@@ -228,6 +232,53 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                           "capacities": [{"name": c.get("displayName"), "sku": c.get("sku"),
                                           "workspaces": c.get("assignedWorkspaceCount")} for c in under]},
                 recommendation="Right-size: either consolidate workspaces onto this capacity or downgrade the SKU."
+            ))
+
+    # --- COST-006 trial / embedded capacities hosting content ---
+    rule = rules.get("COST-006")
+    if rule:
+        if not capacities:
+            findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
+        else:
+            interim = [c for c in capacities
+                       if capacity_kind(c.get("sku")) in ("Trial", "Embedded")
+                       and (c.get("assignedWorkspaceCount", 0) or 0) > 0]
+            status = "pass" if not interim else "fail"
+            findings.append(make_finding(
+                rule, dimension="cost", status=status,
+                title="Trial / Embedded capacities hosting workspaces",
+                evidence={"count": len(interim),
+                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku"),
+                                          "kind": capacity_kind(c.get("sku")),
+                                          "workspaces": c.get("assignedWorkspaceCount")} for c in interim]},
+                recommendation=("Move real content off Trial capacities (they expire - content and settings are "
+                                "lost) and off Embedded capacities (sized for app embedding, not interactive use) "
+                                "onto a right-sized Fabric (F) capacity.")
+            ))
+
+    # --- COST-007 small-capacity sprawl (consolidation opportunity) ---
+    rule = rules.get("COST-007")
+    if rule:
+        if not capacities:
+            findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
+        else:
+            small = [c for c in capacities
+                     if is_dedicated_capacity(c.get("sku"))
+                     and SMALL_SKU_PATTERN.match((c.get("sku") or "").strip())
+                     and (c.get("state") or "").lower() == "active"]
+            # Advisory: many small capacities often cost more (and are harder to govern)
+            # than one right-sized capacity with bursting/smoothing across workloads.
+            status = "pass" if len(small) < CONSOLIDATION_MIN_SMALL_CAPS else "info"
+            findings.append(make_finding(
+                rule, dimension="cost", status=status,
+                title="Small capacities that may be candidates for consolidation",
+                evidence={"smallCapacityCount": len(small),
+                          "threshold": CONSOLIDATION_MIN_SMALL_CAPS,
+                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku"),
+                                          "workspaces": c.get("assignedWorkspaceCount")} for c in small]},
+                recommendation=("Consider consolidating several small F-SKUs into one right-sized capacity: "
+                                "CU smoothing and bursting are shared across workloads, often improving both cost "
+                                "efficiency and headroom versus many isolated small capacities.")
             ))
 
     return findings

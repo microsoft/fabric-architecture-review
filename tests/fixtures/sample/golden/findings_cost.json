@@ -89,5 +89,38 @@
     },
     "recommendation": "Right-size: either consolidate workspaces onto this capacity or downgrade the SKU.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/optimize-capacity"
+  },
+  {
+    "rule_id": "COST-006",
+    "dimension": "cost",
+    "severity": "medium",
+    "status": "pass",
+    "title": "Trial / Embedded capacities hosting workspaces",
+    "evidence": {
+      "count": 0,
+      "capacities": []
+    },
+    "recommendation": "Move real content off Trial capacities (they expire - content and settings are lost) and off Embedded capacities (sized for app embedding, not interactive use) onto a right-sized Fabric (F) capacity.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/licenses"
+  },
+  {
+    "rule_id": "COST-007",
+    "dimension": "cost",
+    "severity": "low",
+    "status": "pass",
+    "title": "Small capacities that may be candidates for consolidation",
+    "evidence": {
+      "smallCapacityCount": 1,
+      "threshold": 3,
+      "capacities": [
+        {
+          "name": "Capacity Dev",
+          "sku": "F2",
+          "workspaces": 1
+        }
+      ]
+    },
+    "recommendation": "Consider consolidating several small F-SKUs into one right-sized capacity: CU smoothing and bursting are shared across workloads, often improving both cost efficiency and headroom versus many isolated small capacities.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/optimize-capacity"
   }
 ]

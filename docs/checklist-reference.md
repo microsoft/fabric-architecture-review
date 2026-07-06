@@ -59,6 +59,18 @@ decided and the override precedence.
 | GOV-005 | medium | Sharing activity is within expected volume | [Learn](https://learn.microsoft.com/fabric/admin/track-user-activities) |
 | GOV-006 | medium | Workspaces show recent activity in the admin activity log | [Learn](https://learn.microsoft.com/fabric/admin/track-user-activities) |
 | GOV-007 | medium | The Microsoft Fabric Capacity Metrics app is installed in the tenant | [Learn](https://learn.microsoft.com/fabric/enterprise/metrics-app-install) |
+| GOV-008 | low | A healthy share of discoverable items (semantic models, reports, dataflows, lakehouses, warehouses) are endorsed (Promoted / Certified) | [Learn](https://learn.microsoft.com/fabric/governance/endorsement-overview) |
+| GOV-009 | medium | Production semantic models are Certified so consumers can trust the sanctioned source of truth | [Learn](https://learn.microsoft.com/fabric/governance/endorsement-certify) |
+
+## Operational Excellence
+
+Scoped to *production* workspaces only — dev / test / sandbox / personal workspaces are never flagged for lacking ALM controls.
+
+| ID | Severity | Description | Reference |
+|---|---|---|---|
+| OPS-001 | high | Production workspaces are covered by a Fabric deployment pipeline for controlled dev→test→prod promotion | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines) |
+| OPS-002 | high | Production workspaces are connected to Git source control so changes are versioned and reviewable | [Learn](https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration) |
+| OPS-003 | medium | At least one multi-stage deployment pipeline exists, evidencing a real dev→prod promotion path | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines) |
 
 ## Security
 
@@ -85,6 +97,8 @@ decided and the override precedence.
 | COST-003 | medium | Non-production capacities (dev/test/sandbox indicators in name) use Pause/Resume to avoid 24x7 charges | [Learn](https://learn.microsoft.com/fabric/enterprise/pause-resume) |
 | COST-004 | medium | Production-like workspaces (prod / production in name) are not hosted on PPU (per-user) capacities, which do not scale and are tied to a single user license | [Learn](https://learn.microsoft.com/power-bi/enterprise/service-premium-per-user-faq) |
 | COST-005 | medium | Large capacities (F64 and above) with very few assigned workspaces (< 5) are candidates for SKU downgrade or workspace consolidation | [Learn](https://learn.microsoft.com/fabric/enterprise/optimize-capacity) |
+| COST-006 | medium | Trial and Embedded capacities are not hosting real workspaces (trials expire; Embedded is sized for app embedding, not interactive use) | [Learn](https://learn.microsoft.com/fabric/enterprise/licenses) |
+| COST-007 | low | Several small dedicated F-SKUs (F1-F16) can often be consolidated into one right-sized capacity for shared CU smoothing and simpler governance | [Learn](https://learn.microsoft.com/fabric/enterprise/optimize-capacity) |
 
 ## Tenant Settings
 

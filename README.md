@@ -10,16 +10,17 @@ tenant and turns the results into a client-ready report — **without ever readi
 business data**. Clone it per engagement, point it at the in-scope tenant/workspaces, run
 the pipeline, and hand over a branded PDF plus structured JSON findings.
 
-It evaluates seven review dimensions against a documented rule catalog:
+It evaluates eight review dimensions against a documented rule catalog:
 
 | | Dimension | Example checks |
 |---|---|---|
 | 🏛️ | **Architecture** | Medallion layering, capacity assignment, shortcuts, Git, deployment pipelines, storage mode |
 | ⚡ | **Performance** | Throttling, CU%, model size, refresh SLOs, VertiPaq footprint, job reliability |
 | 🛡️ | **Security** | Tenant settings, workspace access, gateways, private connectivity |
-| 🧭 | **Governance** | Admin coverage, sensitivity labels, naming, sharing volume, workspace lifecycle |
-| 💰 | **Cost** | SKU right-sizing, pause/resume, non-prod consolidation |
-| ⚙️ | **Tenant Settings** | Tenant-wide vs scoped switches, external sharing, custom visuals |
+| 🧭 | **Governance** | Admin coverage, sensitivity labels, naming, sharing volume, workspace lifecycle, endorsement |
+| ⚙️ | **Operational Excellence** | ALM for production: deployment-pipeline coverage, Git source control, dev→prod promotion path |
+| 💰 | **Cost** | SKU right-sizing, pause/resume, non-prod consolidation, trial/embedded misuse |
+| 🧷 | **Tenant Settings** | Tenant-wide vs scoped switches, external sharing, custom visuals |
 | ✅ | **Best Practices** | Model/report BPA, Direct Lake fallback, Delta table health, unused objects, P→F capacity readiness (Fabric runs) |
 
 ---
@@ -235,16 +236,22 @@ Open `output/fabric-arch-review.pdf` to see the result.
 
 Run the entire review **inside a Fabric workspace** — no local machine required — by
 importing a single setup notebook that deploys the Lakehouse, the four stage notebooks
-(Collect → Analyze → Gold → Report), the orchestration pipeline, and an interactive
+(Collect → Analyze → Report → Gold), the orchestration pipeline, and an interactive
 **Direct Lake Power BI report** over a gold-layer history. This is the right
 mode when the client runs it themselves, for a tenant-resident reviewer, or for
 unattended/scheduled runs.
 
-The deployed Power BI report is a 15-page platform-assessment dashboard — an executive
+The deployed Power BI report is a 17-page platform-assessment dashboard — a navigable **Home**, an executive
 **Overview** (platform-maturity radar, best-practice-score gauge, severity heatmap, top-risk
 workspaces), a **Trends** history, an **Estate Map**, a page per review dimension (plus a
-Fabric-only **Best Practices** page), and **Semantic Models / Model detail / Model internals /
-Notebooks** deep-dives — all live over the Lakehouse with no scheduled refresh.
+Fabric-only **Best Practices** page), **Semantic Models / Model detail / Model internals /
+Notebooks** deep-dives, and a data-agent **Agent Eval** accuracy page — all live over the
+Lakehouse with no scheduled refresh.
+
+Setup also stands up a conversational **Fabric data agent** (ask the findings in plain
+English, deployed from the standalone `05_Agent` notebook) and a **Fabric IQ estate
+ontology** — a queryable knowledge graph of the tenant's capacities, workspaces, models,
+and findings.
 
 Full deployment steps, the gold-table schema, the report page guide, and the optional Azure
 (ARM) service-principal setup for the capacity Pause/Resume scan are in
@@ -453,7 +460,7 @@ JSON is present (each builder skips itself with a friendly note when its input i
 
 ## 📋 Rule catalog & status
 
-All seven dimensions are implemented end-to-end. Every collector runs against documented
+All eight dimensions are implemented end-to-end. Every collector runs against documented
 Fabric / Power BI REST endpoints; every analyzer emits findings against the rule catalog in
 [config/review-checklist.yaml](config/review-checklist.yaml). The reader-friendly index
 with Microsoft Learn references is in [docs/checklist-reference.md](docs/checklist-reference.md).
@@ -463,9 +470,10 @@ with Microsoft Learn references is in [docs/checklist-reference.md](docs/checkli
 | Tenant Settings | `tenant_settings` | `tenant_settings_review` (`SEC-001/002`, `TENANT-001..005`) | ✅ |
 | Architecture | `scanner_api`, `workspace_inventory`, `git_integration`, `lakehouse_warehouse`, `deployment_pipelines`, `realtime_intelligence`, `semantic_models`, `pipeline_definitions` | `architecture_review` (`ARCH-001..014`) | ✅ |
 | Performance | `semantic_models`, `capacity_metrics`, `capacity_metrics_app` (opt-in), `pipelines_notebooks`, `semantic_model_definitions`, `vertipaq_stats` (Fabric) | `performance_review`, `semantic_model_storage_review` (`PERF-001..014`) | ✅ |
-| Governance | `scanner_api`, `git_integration`, `activity_logs` | `governance_review` (`GOV-001..007`) | ✅ |
+| Governance | `scanner_api`, `git_integration`, `activity_logs` | `governance_review` (`GOV-001..009`) | ✅ |
+| Operational Excellence | `scanner_api`, `deployment_pipelines`, `git_integration` | `operational_excellence_review` (`OPS-001..003`) | ✅ |
 | Security | `scanner_api`, `tenant_settings`, `gateways` | `security_review` (`SEC-003..011`) | ✅ |
-| Cost | `capacity_metrics`, `scanner_api`, `azure_capacity_automation` (opt-in) | `cost_review` (`COST-001..005`) | ✅ |
+| Cost | `capacity_metrics`, `scanner_api`, `azure_capacity_automation` (opt-in) | `cost_review` (`COST-001..007`) | ✅ |
 | Notebook code (heuristic) | `pipeline_definitions` (decoded `.py` / `.ipynb` source) | `notebook_code_review` (`NBCODE-001..006`) | ✅ |
 | Best Practices (Fabric) | `best_practices` (BPA / Direct Lake fallback / Delta / capacity via `semantic-link-labs`) | `best_practices_review` (`BPA-001..007`) | ✅ |
 
@@ -482,8 +490,11 @@ with Microsoft Learn references is in [docs/checklist-reference.md](docs/checkli
 - **Direct Lake fallback** (`PERF-013`) — models relying on implicit DirectQuery fallback instead of explicit `directLakeBehavior`.
 - **Workspace lifecycle** (`GOV-006`) — orphaned workspaces (content present, no admin activity in window).
 - **Capacity Metrics App** (`GOV-007`) — verifies the first-party app is installed.
+- **Endorsement coverage** (`GOV-008/009`) — a healthy share of discoverable content is endorsed (Promoted / Certified), and production semantic models are Certified.
+- **ALM maturity** (`OPS-001..003`) — production workspaces covered by a deployment pipeline and Git source control, with at least one real multi-stage dev→prod promotion path.
 - **Gateway posture** (`SEC-008/009/010/011`) — single-member cluster SPOF, VNet/private connectivity, version currency, personal-mode credential hygiene.
 - **Tenant baseline** (`TENANT-003..005`) — external data sharing, uncertified custom visuals, R/Python visual & script runtime.
+- **Capacity hygiene** (`COST-006/007`) — Trial / Embedded capacities flagged when they host real workspaces (trials expire; Embedded is sized for app embedding), and clusters of small F-SKUs surfaced as consolidation candidates.
 - **Notebook code-smell scan** (`NBCODE-001..006`) — heuristic regex over decoded notebook source: hard-coded secrets, inline `%pip install`, `.collect()`/`.toPandas()`/`display()`, Databricks-only APIs, hard-coded `abfss://` paths/GUIDs, non-Delta writes. Findings reference notebook name + cell index only — cell content never leaves the analyzer (marked `heuristic: true`).
 - **VertiPaq footprint** (`vertipaq_stats`, **Fabric-only**) — storage-engine scan of every Import / Direct Lake model (per-table/column size, encoding, data type, optional cardinality). Powers the report's VertiPaq Footprint section. Metadata only; cardinality opt-in.
 
@@ -530,7 +541,7 @@ python -m pytest tests/ -v
 | Path | Purpose |
 |---|---|
 | `tests/fixtures/sample/raw/` | Fully synthetic raw inputs (18 files) — invented GUIDs/emails and notebook/TMDL source; no customer data. |
-| `tests/fixtures/sample/golden/` | Frozen expected findings per analyzer (71 total). |
+| `tests/fixtures/sample/golden/` | Frozen expected findings per analyzer (78 total). |
 | `tests/test_golden.py` | Asserts each analyzer's `(rule_id, dimension, status)` projection matches golden. |
 | `tests/build_fixture.py` | Regenerates the synthetic fixture from scratch (`python -m tests.build_fixture`) — no engagement source needed. |
 | `tests/gen_golden.py` | Regenerates the golden files after an intended analyzer change (`python -m tests.gen_golden`). |

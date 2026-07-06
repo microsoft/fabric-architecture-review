@@ -11,6 +11,8 @@ Rule coverage:
   GOV-005 Sharing activity volume
   GOV-006 Orphaned workspaces (content but no recent activity)
   GOV-007 Fabric Capacity Metrics app installed
+  GOV-008 Endorsement (Certified / Promoted) coverage of content (advisory)
+  GOV-009 Uncertified semantic models in production workspaces
 
 Inputs: scanner.json (or workspace_inventory.json), git_integration.json, activity_logs.json.
 
@@ -37,6 +39,26 @@ MIN_ADMINS = threshold("governance", "min_admins", 2, cast=int)
 LABEL_COVERAGE_MIN_RATIO = threshold("governance", "label_coverage_min_ratio", 0.5, cast=float)
 NAMING_COVERAGE_MIN_RATIO = threshold("governance", "naming_coverage_min_ratio", 0.5, cast=float)
 GIT_COVERAGE_MIN_RATIO = threshold("governance", "git_coverage_min_ratio", 0.5, cast=float)
+ENDORSEMENT_MIN_RATIO = threshold("governance", "endorsement_min_ratio", 0.3, env="GOV_ENDORSEMENT_MIN_RATIO", cast=float)
+PROD_ENDORSEMENT_MIN_RATIO = threshold("governance", "prod_endorsement_min_ratio", 0.5, env="GOV_PROD_ENDORSEMENT_MIN_RATIO", cast=float)
+
+# Production workspaces (name markers) carry a stronger expectation of endorsed content.
+PROD_PATTERN = re.compile(r"(prod|production)", re.IGNORECASE)
+# Item kinds that can be endorsed (Certified / Promoted) in Fabric / Power BI.
+_ENDORSABLE_KINDS = ("datasets", "reports", "dataflows", "lakehouses", "warehouses")
+
+
+def _endorsement(item: Dict[str, Any]) -> str:
+    """The endorsement label of a scanner item ('Certified' | 'Promoted' | '')."""
+    det = item.get("endorsementDetails") or {}
+    return (det.get("endorsement") or "").strip()
+
+
+def _endorsable_items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for kind in _ENDORSABLE_KINDS:
+        out.extend(ws.get(kind) or [])
+    return out
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
@@ -269,6 +291,63 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                             "overload events can be monitored over time - it is the primary tool for diagnosing "
                             "capacity health and right-sizing.")
         ))
+
+    # --- GOV-008 endorsement coverage (advisory) ---
+    rule = rules.get("GOV-008")
+    if rule:
+        if not workspaces:
+            findings.append(missing_raw_finding(rule, "governance", "scanner.json"))
+        else:
+            total = 0
+            endorsed = 0
+            for w in workspaces:
+                if w.get("type") == "PersonalGroup":
+                    continue
+                for item in _endorsable_items(w):
+                    total += 1
+                    if _endorsement(item) in ("Certified", "Promoted"):
+                        endorsed += 1
+            ratio = (endorsed / total) if total else 0.0
+            # Advisory maturity signal: PASS when adopted, otherwise INFO (never a hard fail).
+            status = "pass" if (total and ratio >= ENDORSEMENT_MIN_RATIO) else ("info" if total else "info")
+            findings.append(make_finding(
+                rule, dimension="governance", status=status,
+                title="Endorsement (Certified / Promoted) coverage of content",
+                evidence={"endorsableItems": total, "endorsedItems": endorsed,
+                          "ratio": round(ratio, 2), "minRatio": ENDORSEMENT_MIN_RATIO},
+                recommendation=("Endorse trusted datasets/reports as Promoted, and the authoritative ones as "
+                                "Certified, so consumers can tell governed content from ad-hoc content.")
+            ))
+
+    # --- GOV-009 uncertified content in production workspaces ---
+    rule = rules.get("GOV-009")
+    if rule:
+        if not workspaces:
+            findings.append(missing_raw_finding(rule, "governance", "scanner.json"))
+        else:
+            prod_ws = [w for w in workspaces
+                       if w.get("type") != "PersonalGroup" and PROD_PATTERN.search(w.get("name") or "")]
+            offenders: List[Dict[str, Any]] = []
+            evaluated = 0
+            for w in prod_ws:
+                datasets = w.get("datasets") or []
+                if not datasets:
+                    continue
+                evaluated += 1
+                endorsed = sum(1 for d in datasets if _endorsement(d) in ("Certified", "Promoted"))
+                ratio = endorsed / len(datasets)
+                if ratio < PROD_ENDORSEMENT_MIN_RATIO:
+                    offenders.append({"name": w.get("name"), "datasets": len(datasets),
+                                      "endorsed": endorsed, "ratio": round(ratio, 2)})
+            status = "pass" if (not evaluated or not offenders) else "fail"
+            findings.append(make_finding(
+                rule, dimension="governance", status=status,
+                title="Production workspaces without endorsed semantic models",
+                evidence={"productionWorkspaces": evaluated, "minRatio": PROD_ENDORSEMENT_MIN_RATIO,
+                          "offenderCount": len(offenders), "examples": offenders[:20]},
+                recommendation=("Certify the authoritative semantic models in production workspaces so downstream "
+                                "reports build on governed, trusted data.")
+            ))
 
     return findings
 

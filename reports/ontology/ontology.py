@@ -501,7 +501,7 @@ def build_definition(lakehouse_id: str, workspace_id: str, *, name: str) -> Dict
 
 
 def ontology_definition(lakehouse_id: str, workspace_id: str, *, name: str) -> Dict[str, Any]:
-    """Alias used by ``setup.ipynb`` (mirrors reports.agent.deploy naming)."""
+    """Alias used by ``setup.ipynb`` (mirrors the model/report deploy naming)."""
     return build_definition(lakehouse_id, workspace_id, name=name)
 
 

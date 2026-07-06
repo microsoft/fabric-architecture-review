@@ -103,6 +103,7 @@ ACCENT = {
     "Performance": "#038387",
     "Cost": "#CA7A25",
     "Governance": "#8764B8",
+    "OperationalExcellence": "#0E7C66",
     "Security": "#C43D57",
     "TenantSettings": "#2D79FF",
     "BestPractices": "#107C41",
@@ -110,6 +111,7 @@ ACCENT = {
     "ModelDetail": "#1E8A97",
     "ModelInternals": "#1E8A97",
     "Notebooks": "#B88745",
+    "AgentEval": "#7A4FBF",
 }
 
 
@@ -743,6 +745,9 @@ _DIMENSION_ACTIONS = {
     "governance": "Close ownership and operating-model gaps: assign workspace admins, "
                   "align to domains, and enforce naming/description coverage. Treat orphaned "
                   "assets as governance risk.",
+    "operational_excellence": "Bring production workspaces under ALM: put them on a "
+                  "deployment pipeline and Git, with a dev -> test -> prod promotion path. "
+                  "Dev/sandbox workspaces are intentionally out of scope.",
     "security": "Severity-first. Remediate critical/high exposure now: broad access, "
                 "missing gateways and stale credentials. Reduce blast radius before "
                 "expanding sharing.",
@@ -755,8 +760,14 @@ _DIMENSION_ACTIONS = {
 }
 
 
-def _dimension_page(dimension: str, display: str, detail: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    page = display
+def _dimension_page(dimension: str, display: str, detail: Optional[Dict[str, Any]],
+                    *, name: Optional[str] = None) -> Dict[str, Any]:
+    # ``name`` is the PBIR page identifier (folder name + page-navigation target)
+    # and MUST be space-free; ``display`` is the human title. They differ for
+    # multi-word dimensions (name "OperationalExcellence" / display "Operational
+    # Excellence") so page navigation resolves — a space in the page name breaks
+    # the nav button with "not a valid destination".
+    page = name or display
     visuals = [_banner(
         page, f"{display} review",
         f"Best-practice checks for the {display.lower()} dimension of your Fabric estate.",
@@ -792,6 +803,16 @@ def _dimension_page(dimension: str, display: str, detail: Optional[Dict[str, Any
             "item_count", "risk_score", "issue_count", "status",
             592, by, PAGE_W - 592 - 16, bh,
             "Estate hotspots — items vs risk, sized by issues", 8))
+    elif dimension == "operational_excellence":
+        # ALM is estate-wide: rank the failing ALM checks and surface the same
+        # workspace-hotspot scatter so you can see WHERE promotion/Git gaps live.
+        visuals.append(_bar(page, "byrule", "gold_findings", "rule_id", "is_fail",
+                            264, by, 320, bh, "Failing checks by rule (ranked)", 7))
+        visuals.append(_scatter(
+            page, "hotspot", "gold_workspace_risk", "workspace_name",
+            "item_count", "risk_score", "issue_count", "status",
+            592, by, PAGE_W - 592 - 16, bh,
+            "Workspace hotspots — items vs risk, sized by issues", 8))
     elif dimension == "governance":
         # Maturity radar across dimensions gives governance the estate-wide context.
         visuals.append(_bar(page, "byrule", "gold_findings", "rule_id", "is_fail",
@@ -882,12 +903,14 @@ _HOME_TILES = [
     ("Performance", "Performance", "Capacity & query speed", "#038387"),
     ("Cost", "Cost", "Capacity spend & efficiency", "#CA5010"),
     ("Governance", "Governance", "Workspaces & ownership", "#8764B8"),
+    ("OperationalExcellence", "Operational Excellence", "ALM: pipelines & Git", "#0E7C66"),
     ("Security", "Security", "Access & data exposure", "#C50F1F"),
     ("TenantSettings", "Tenant Settings", "Admin tenant switches", "#4F6BED"),
     ("BestPractices", "Best Practices", "BPA, Delta & capacity health", "#107C41"),
     ("SemanticModels", "Semantic models", "VertiPaq memory footprint", GOOD),
     ("ModelDetail", "Model detail", "Tables, columns & encoding", "#00787A"),
     ("Notebooks", "Notebooks", "Spark code anti-patterns", "#8E562E"),
+    ("AgentEval", "Agent Eval", "Data-agent accuracy", "#7A4FBF"),
 ]
 
 
@@ -944,7 +967,9 @@ def _home_page() -> Dict[str, Any]:
     quick = [
         ("EstateMap", "\U0001F5FA  Estate map", ACCENT["EstateMap"]),
         ("Trends", "\U0001F4C8  Trends", ACCENT["Trends"]),
+        ("OperationalExcellence", "\U0001F503  Operational excellence", ACCENT["OperationalExcellence"]),
         ("BestPractices", "\u2705  Best practices", ACCENT["BestPractices"]),
+        ("AgentEval", "\U0001F916  Agent eval", ACCENT["AgentEval"]),
     ]
     qw, qh, qgap = 288, 34, 8
     qx = PAGE_W - 16 - qw  # right-aligned, separated from the KPI cards by hero space
@@ -1090,6 +1115,52 @@ def _trends_page() -> Dict[str, Any]:
                           ["run_timestamp", "score", "fail_count", "critical_fail", "high_fail"], [],
                           656, b2y, PAGE_W - 656 - 16, b2h, "Review history", 9))
     return {"name": page, "display": "Trends", "visuals": visuals, "filters": []}
+
+
+def _agent_eval_page() -> Dict[str, Any]:
+    """Data Agent accuracy page. The agent's expected answers are computed from
+    the gold tables (self-checking, no hand-maintained ground truth), so the
+    pass rate is a trustworthy KPI for how well the natural-language agent
+    grounds its answers. KPI cards + per-case table show the latest run; the
+    line tracks accuracy across runs."""
+    page = "AgentEval"
+    visuals = [_banner(
+        page, "Data Agent accuracy — self-checking evaluation",
+        "Each question's correct answer is derived from the same gold tables the "
+        "agent is grounded on, so the pass rate never drifts from the data.",
+    )]
+    for i, (key, measure, label) in enumerate([
+        ("passrate", "Agent Eval Pass Rate", "Pass rate"),
+        ("passcount", "Agent Eval Pass Count", "Cases passed"),
+        ("casecount", "Agent Eval Case Count", "Cases evaluated"),
+    ]):
+        visuals.append(_card(page, key, "gold_agent_eval", measure,
+                             16 + i * 216, _ROW_KPI_Y, label, 1 + i))
+    visuals.append(_info(
+        page, "how", "How this stays honest",
+        "Every case's expected answer is recomputed from the gold tables each run "
+        "and compared to the agent's reply (numbers by value, names by match, the "
+        "prompt-injection case by refusal). No LLM judge, no static answer key.",
+        16 + 3 * 216, _ROW_KPI_Y, PAGE_W - (16 + 3 * 216) - 16, _KPI_H, 5,
+    ))
+    # Left column: a radial accuracy gauge (the WOW hero, matching the Overview
+    # score gauge) above a passed-by-category donut; right column: the per-case
+    # transcript so you can read exactly what the agent answered.
+    b1y, b1h = _CONTENT_Y, PAGE_H - _CONTENT_Y - 16
+    col_w = 360
+    gauge_h = 236
+    visuals.append(_gauge(page, "acc", "gold_agent_eval", "Agent Eval Pass Rate",
+                          16, b1y, col_w, gauge_h, "Agent accuracy", 6,
+                          target="Agent Eval Target", maxv="Agent Eval Max"))
+    visuals.append(_donut(page, "bycat", "gold_agent_eval", "category", "Agent Eval Pass Count",
+                          16, b1y + gauge_h + 12, col_w, b1h - gauge_h - 12,
+                          "Cases passed by category", 7, measure=True))
+    visuals.append(_table(page, "cases", "gold_agent_eval",
+                          ["category", "question", "expected", "answer", "passed"], [],
+                          16 + col_w + 16, b1y, PAGE_W - (16 + col_w + 16) - 16, b1h,
+                          "Latest evaluation cases", 8))
+    return {"name": page, "display": "Agent Eval", "visuals": visuals,
+            "filters": [_latest_run_filter(page)]}
 
 
 def _estate_map_page() -> Dict[str, Any]:
@@ -1410,6 +1481,8 @@ def _pages() -> List[Dict[str, Any]]:
         _dimension_page("governance", "Governance",
                         {"entity": "gold_workspaces", "title": "Workspaces",
                          "cols": ["workspace_name", "on_capacity", "item_count"]}),
+        _dimension_page("operational_excellence", "Operational Excellence", None,
+                        name="OperationalExcellence"),
         _dimension_page("security", "Security", None),
         _tenant_settings_page(),
         _best_practices_page(),
@@ -1417,6 +1490,7 @@ def _pages() -> List[Dict[str, Any]]:
         _model_detail_page(),
         _model_internals_page(),
         _notebook_page(),
+        _agent_eval_page(),
     ]
     # Persistent "Home" button (top-right, over the banner) on every page except
     # the map itself, so you can always jump back to the navigation map.
@@ -1693,5 +1767,12 @@ def build_parts(semantic_model_id: str) -> List[Dict[str, str]]:
     dupes = sorted(path for path, n in seen.items() if n > 1)
     if dupes:
         raise ValueError("Duplicate PBIR part paths (give the visuals unique keys): " + ", ".join(dupes))
+
+    # A page ``name`` is the folder name AND the page-navigation target, so it
+    # must be a space-free identifier (a space breaks nav with "not a valid
+    # destination"). Fail fast here rather than shipping a broken report.
+    bad_names = sorted(p["name"] for p in pages if " " in p["name"])
+    if bad_names:
+        raise ValueError("Page names must be space-free identifiers: " + ", ".join(bad_names))
 
     return parts

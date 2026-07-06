@@ -486,6 +486,24 @@ GOLD_TABLES: List[Table] = [
         "One row per run - deployed FAR version vs latest published release; "
         "backs the report version banner / update notice.",
     ),
+    Table(
+        "gold_agent_eval",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("case_id"),
+            _c("category"),
+            _c("question"),
+            _c("expected"),
+            _c("answer"),
+            _c("passed", "int64"),
+            _c("detail"),
+        ],
+        "One row per Data Agent evaluation case per run. The expected answer is "
+        "computed deterministically from the gold tables (self-checking, no "
+        "hand-maintained ground truth); 'passed'=1 when the agent's reply "
+        "matches. Backs the agent-accuracy trend in the report.",
+    ),
 ]
 
 

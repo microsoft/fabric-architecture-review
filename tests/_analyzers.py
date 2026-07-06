@@ -26,6 +26,7 @@ ANALYZERS: Dict[str, str] = {
     "analyzers.performance_review": "findings_performance",
     "analyzers.semantic_model_storage_review": "findings_storage_mode",
     "analyzers.governance_review": "findings_governance",
+    "analyzers.operational_excellence_review": "findings_operational_excellence",
     "analyzers.security_review": "findings_security",
     "analyzers.cost_review": "findings_cost",
     "analyzers.notebook_code_review": "findings_notebook_code",

@@ -45,7 +45,8 @@ BPA_TABLE = "gold_bpa_violations"
 SEVERITY_MATRIX_TABLE = "gold_severity_matrix"
 # Table that carries the deployed-version banner measures (Home page footer).
 RELEASE_TABLE = "gold_release"
-
+# Table that carries the deterministic Data Agent evaluation results.
+AGENT_EVAL_TABLE = "gold_agent_eval"
 # Columns that hold http(s) links; flagged as Web URLs so report tables render
 # them as clickable hyperlinks.
 _WEB_URL_COLUMNS = {"microsoft_learn_url", "notebook_url"}
@@ -382,6 +383,39 @@ def _bpa_measures() -> List[Dict[str, Any]]:
     return out
 
 
+def _agent_eval_measures() -> List[Dict[str, Any]]:
+    """Deterministic Data Agent accuracy measures on ``gold_agent_eval``.
+
+    Each row is one evaluation case whose expected answer is computed from the
+    gold tables, so ``passed`` is a trustworthy ground truth. These roll the
+    per-case results up into a pass rate the report and the agent can cite.
+    """
+    defs = [
+        ("Agent Eval Case Count", "COUNTROWS(gold_agent_eval)", "0",
+         "Number of Data Agent evaluation cases in context."),
+        ("Agent Eval Pass Count", "CALCULATE(COUNTROWS(gold_agent_eval), gold_agent_eval[passed] = 1)", "0",
+         "Evaluation cases the agent answered correctly (matched the gold-derived expected answer)."),
+        ("Agent Eval Pass Rate",
+         "DIVIDE(CALCULATE(COUNTROWS(gold_agent_eval), gold_agent_eval[passed] = 1), COUNTROWS(gold_agent_eval))",
+         "0.0%",
+         "Share of Data Agent evaluation cases answered correctly - the agent-accuracy KPI."),
+        ("Agent Eval Target", "1", "0.0%",
+         "Target accuracy for the agent gauge (100%)."),
+        ("Agent Eval Max", "1", "0.0%",
+         "Full-scale maximum for the agent accuracy gauge (100%)."),
+    ]
+    out = []
+    for name, expr, fmt, desc in defs:
+        out.append({
+            "name": name,
+            "expression": expr,
+            "formatString": fmt,
+            "description": desc,
+            "lineageTag": _lineage("measure", name),
+        })
+    return out
+
+
 def _release_measures() -> List[Dict[str, Any]]:
     """Deployed-version banner measure placed on ``gold_release``.
 
@@ -472,6 +506,8 @@ def _table(table) -> Dict[str, Any]:
         t["measures"] = _severity_matrix_measures()
     if table.name == RELEASE_TABLE:
         t["measures"] = _release_measures()
+    if table.name == AGENT_EVAL_TABLE:
+        t["measures"] = _agent_eval_measures()
     if table.name in (PARTITION_TABLE, RELATIONSHIP_TABLE, HIERARCHY_TABLE):
         t["measures"] = _internals_measures(table.name)
     return t

@@ -105,5 +105,42 @@
     },
     "recommendation": "Install the Microsoft Fabric Capacity Metrics app so capacity CU, throttling, and overload events can be monitored over time - it is the primary tool for diagnosing capacity health and right-sizing.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/metrics-app-install"
+  },
+  {
+    "rule_id": "GOV-008",
+    "dimension": "governance",
+    "severity": "low",
+    "status": "info",
+    "title": "Endorsement (Certified / Promoted) coverage of content",
+    "evidence": {
+      "endorsableItems": 6,
+      "endorsedItems": 0,
+      "ratio": 0.0,
+      "minRatio": 0.3
+    },
+    "recommendation": "Endorse trusted datasets/reports as Promoted, and the authoritative ones as Certified, so consumers can tell governed content from ad-hoc content.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/endorsement-overview"
+  },
+  {
+    "rule_id": "GOV-009",
+    "dimension": "governance",
+    "severity": "medium",
+    "status": "fail",
+    "title": "Production workspaces without endorsed semantic models",
+    "evidence": {
+      "productionWorkspaces": 1,
+      "minRatio": 0.5,
+      "offenderCount": 1,
+      "examples": [
+        {
+          "name": "data-gold-prod",
+          "datasets": 2,
+          "endorsed": 0,
+          "ratio": 0.0
+        }
+      ]
+    },
+    "recommendation": "Certify the authoritative semantic models in production workspaces so downstream reports build on governed, trusted data.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/endorsement-promote-certify"
   }
 ]

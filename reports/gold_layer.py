@@ -29,6 +29,7 @@ DIMENSIONS = [
     "performance",
     "cost",
     "governance",
+    "operational_excellence",
     "security",
     "tenant_settings",
     "best_practices",
