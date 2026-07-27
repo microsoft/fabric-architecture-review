@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 # Evaluate raw outputs against the review checklist and merge findings.
 # bash equivalent of scripts/02_analyze.ps1
 set -uo pipefail

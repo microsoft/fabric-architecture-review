@@ -1,6 +1,6 @@
 # Fabric Architecture Review Accelerator
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.TXT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Local + Fabric](https://img.shields.io/badge/runs-Local%20%7C%20In--Fabric-00BCF2.svg)](#-running-the-review)
 [![Data: metadata-only](https://img.shields.io/badge/data-metadata--only-success.svg)](#-data-safety-read-this-first)
@@ -610,7 +610,7 @@ third-party's policies.
 
 ## 📄 License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](LICENSE.TXT).
 
 > **Disclaimer:** This project is provided **as-is**, without warranty of any kind, and is not
 > covered by a Microsoft support agreement or SLA.

@@ -1,4 +1,6 @@
-﻿# Render the findings to a merged Markdown report and then to PDF.
+﻿# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Render the findings to a merged Markdown report and then to PDF.
 $ErrorActionPreference = "Stop"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))

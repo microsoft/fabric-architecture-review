@@ -1,4 +1,6 @@
-﻿# Evaluate raw outputs against the review checklist and merge findings.
+﻿# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Evaluate raw outputs against the review checklist and merge findings.
 $ErrorActionPreference = "Continue"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))

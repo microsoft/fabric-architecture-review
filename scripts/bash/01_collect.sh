@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 # Collect metadata, configuration, and (REST-accessible) metrics from the Fabric tenant.
 # DATA SAFETY: Every collector below reads metadata only. Customer data is never queried.
 # bash equivalent of scripts/01_collect.ps1

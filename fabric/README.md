@@ -1,6 +1,6 @@
 # Running the Review Inside Microsoft Fabric
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE.TXT)
 [![Runs: In-Fabric](https://img.shields.io/badge/runs-In--Fabric-00BCF2.svg)](#-deploy-it-from-inside-fabric-no-workstation-needed)
 [![Pattern: single--notebook](https://img.shields.io/badge/pattern-single--notebook-blueviolet.svg)](#-deploy-it-from-inside-fabric-no-workstation-needed)
 [![Data: metadata-only](https://img.shields.io/badge/data-metadata--only-success.svg)](../README.md#-data-safety-read-this-first)

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 # Render the findings to a merged Markdown report and then to PDF.
 # bash equivalent of scripts/03_report.ps1
 set -euo pipefail

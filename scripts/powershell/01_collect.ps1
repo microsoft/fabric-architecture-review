@@ -1,4 +1,6 @@
-﻿# Collect metadata, configuration, and (REST-accessible) metrics from the Fabric tenant.
+﻿# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+# Collect metadata, configuration, and (REST-accessible) metrics from the Fabric tenant.
 # DATA SAFETY: Every collector below reads metadata only. Customer data is never queried.
 $ErrorActionPreference = "Continue"
 
