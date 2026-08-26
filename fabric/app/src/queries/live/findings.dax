@@ -1,0 +1,18 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_findings', 'gold_findings'[run_id] = LatestRun && 'gold_findings'[is_fail] = 1),
+        "rule_id", 'gold_findings'[rule_id],
+        "dimension", 'gold_findings'[dimension],
+        "severity", 'gold_findings'[severity],
+        "severity_rank", 'gold_findings'[severity_rank],
+        "title", 'gold_findings'[title],
+        "affected", 'gold_findings'[affected],
+        "recommendation", 'gold_findings'[recommendation]
+    ),
+    [severity_rank], ASC,
+    [rule_id], ASC
+)

@@ -1,0 +1,7 @@
+activeProfile: default
+profiles:
+  default:
+    semanticModels:
+      reviewModel:
+        workspaceId: "<review-workspace-id>"
+        itemId: "<review-semantic-model-id>"

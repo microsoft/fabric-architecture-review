@@ -1,0 +1,10 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+SELECTCOLUMNS(
+    FILTER('gold_finding_targets', 'gold_finding_targets'[run_id] = LatestRun && 'gold_finding_targets'[is_fail] = 1),
+    "rule_id", 'gold_finding_targets'[rule_id],
+    "workspace_id", 'gold_finding_targets'[workspace_id],
+    "workspace_name", 'gold_finding_targets'[workspace_name]
+)
+ORDER BY [workspace_name], [rule_id]

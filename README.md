@@ -29,6 +29,7 @@ It evaluates eight review dimensions against a documented rule catalog:
 
 - [Data safety — read this first](#-data-safety-read-this-first)
 - [How it works](#-how-it-works)
+- [Interactive FAR app](#interactive-far-app)
 - [Getting started](#-getting-started)
   - [Prerequisites](#prerequisites)
   - [Install](#install)
@@ -120,6 +121,28 @@ flowchart LR
 
 The PowerShell scripts under `scripts/` orchestrate each stage end-to-end on Windows; you
 can also run any module directly (see [Running a single stage](#running-a-single-stage)).
+
+---
+
+<a id="interactive-far-app"></a>
+
+## 🏙️ Interactive FAR app
+
+The repository also includes **FAR**, a production-oriented Fabric app that turns the review's gold model into an interactive decision workspace. It complements the PDF and Power BI report with a navigable estate, workspace-scoped findings, governance accountability, notebook rule-to-cell detail, semantic-model engineering statistics, and focused architecture, performance, and cost views.
+
+```mermaid
+flowchart LR
+  Pipeline["Collect → Analyze → Report → Gold"] --> Model["Review semantic model"]
+  Model --> App["FAR interactive workbench"]
+  App --> Estate["3D workspace estate"]
+  App --> Decisions["Findings and specialist analysis"]
+```
+
+FAR uses the same metadata-only safety contract as the accelerator. It does not query or display customer business rows, and tenant-specific connection and deployment values remain outside source control.
+
+- **Explore the app:** [fabric/app/README.md](./fabric/app/README.md)
+- **Run the anonymous local showcase:** `cd fabric/app; npm ci; npm run dev -- --host 127.0.0.1`, then open `http://127.0.0.1:5173/?preview=1`
+- **Connect and deploy:** follow the semantic-model registration, Rayfin deployment, and Fabric validation steps in the app guide
 
 ---
 
@@ -563,7 +586,7 @@ fabric-arch-review/
 ├── scripts/       # Pipeline orchestration — scripts/powershell/ (.ps1) + scripts/bash/ (.sh)
 ├── tests/         # Golden-file tests + synthetic fixture + generators
 ├── samples/       # Synthetic example report (md + PDF)
-├── fabric/        # In-Fabric run: setup notebook + stage notebooks (see fabric/README.md)
+├── fabric/        # In-Fabric pipeline, gold model, reports, ontology, and FAR app
 ├── docs/          # Methodology, checklist reference, auth setup, data safety
 └── output/        # Generated artifacts (gitignored)
 ```
@@ -579,6 +602,7 @@ fabric-arch-review/
 | [docs/auth-setup.md](docs/auth-setup.md) | Authentication and per-collector role prerequisites. |
 | [docs/data-safety.md](docs/data-safety.md) | Full allow / deny list of API endpoints. |
 | [fabric/README.md](fabric/README.md) | Running the review entirely inside a Fabric workspace. |
+| [fabric/app/README.md](./fabric/app/README.md) | Running, connecting, deploying, and validating the interactive FAR app. |
 
 ---
 

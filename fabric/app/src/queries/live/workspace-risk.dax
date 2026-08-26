@@ -1,0 +1,19 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_workspace_risk', 'gold_workspace_risk'[run_id] = LatestRun),
+        "workspace_id", 'gold_workspace_risk'[workspace_id],
+        "workspace_name", 'gold_workspace_risk'[workspace_name],
+        "capacity_name", 'gold_workspace_risk'[capacity_name],
+        "owner", 'gold_workspace_risk'[owner],
+        "item_count", 'gold_workspace_risk'[item_count],
+        "issue_count", 'gold_workspace_risk'[issue_count],
+        "risk_score", 'gold_workspace_risk'[risk_score],
+        "status", 'gold_workspace_risk'[status]
+    ),
+    [risk_score], DESC,
+    [workspace_name], ASC
+)
