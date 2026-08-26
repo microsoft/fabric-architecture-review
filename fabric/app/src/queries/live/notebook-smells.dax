@@ -1,0 +1,19 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_notebook_smells', 'gold_notebook_smells'[run_id] = LatestRun),
+        "run_id", 'gold_notebook_smells'[run_id],
+        "rule_id", 'gold_notebook_smells'[rule_id],
+        "rule_description", 'gold_notebook_smells'[rule_description],
+        "severity", 'gold_notebook_smells'[severity],
+        "notebook_name", 'gold_notebook_smells'[notebook_name],
+        "workspace_name", 'gold_notebook_smells'[workspace_name],
+        "cells", 'gold_notebook_smells'[cells],
+        "notebook_url", 'gold_notebook_smells'[notebook_url]
+    ),
+    [notebook_name], ASC,
+    [rule_id], ASC
+)

@@ -1,0 +1,19 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    10000,
+    SELECTCOLUMNS(
+        FILTER('gold_model_columns', 'gold_model_columns'[run_id] = LatestRun),
+        "model_id", 'gold_model_columns'[model_id],
+        "table_name", 'gold_model_columns'[table_name],
+        "column_name", 'gold_model_columns'[column_name],
+        "data_type", 'gold_model_columns'[data_type],
+        "encoding", 'gold_model_columns'[encoding],
+        "cardinality", 'gold_model_columns'[cardinality],
+        "total_size", 'gold_model_columns'[total_size],
+        "dictionary_size", 'gold_model_columns'[dictionary_size],
+        "is_calculated", 'gold_model_columns'[is_calculated]
+    ),
+    [total_size], DESC
+)

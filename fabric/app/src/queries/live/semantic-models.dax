@@ -1,0 +1,21 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_semantic_models', 'gold_semantic_models'[run_id] = LatestRun),
+        "run_id", 'gold_semantic_models'[run_id],
+        "model_id", 'gold_semantic_models'[model_id],
+        "model_name", 'gold_semantic_models'[model_name],
+        "workspace_id", 'gold_semantic_models'[workspace_id],
+        "workspace_name", 'gold_semantic_models'[workspace_name],
+        "storage_mode", 'gold_semantic_models'[storage_mode],
+        "total_size", 'gold_semantic_models'[total_size],
+        "table_count", 'gold_semantic_models'[table_count],
+        "column_count", 'gold_semantic_models'[column_count],
+        "calc_column_count", 'gold_semantic_models'[calc_column_count],
+        "max_refresh_seconds", 'gold_semantic_models'[max_refresh_seconds]
+    ),
+    [total_size], DESC
+)

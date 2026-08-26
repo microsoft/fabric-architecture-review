@@ -1,0 +1,11 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+SELECTCOLUMNS(
+    FILTER('gold_dimension_summary', 'gold_dimension_summary'[run_id] = LatestRun),
+    "dimension", 'gold_dimension_summary'[dimension],
+    "fail_count", 'gold_dimension_summary'[fail_count],
+    "score", 'gold_dimension_summary'[score],
+    "worst_severity", 'gold_dimension_summary'[worst_severity]
+)
+ORDER BY [dimension]

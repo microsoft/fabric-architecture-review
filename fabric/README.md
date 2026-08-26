@@ -29,6 +29,7 @@ that first if you have not yet — everything there applies here too.
 - [The gold layer + Direct Lake governance report](#-the-gold-layer--direct-lake-governance-report)
 - [Ask the data agent (conversational Q&A)](#-ask-the-data-agent-conversational-qa)
 - [Build the estate graph (Fabric IQ ontology)](#-build-the-estate-graph-fabric-iq-ontology)
+- [Explore the results in the interactive FAR app](#-explore-the-results-in-the-interactive-far-app)
 - [Optional: Azure (ARM) auth for capacity Pause/Resume detection](#-optional-azure-arm-auth-for-capacity-pauseresume-detection)
 - [Workspace logo (optional)](#-workspace-logo-optional)
 - [Versioning & updates](#-versioning--updates)
@@ -308,6 +309,36 @@ pipeline has run once, do this one-time build:
 - The data is **run-partitioned**: `gold_graph_edges` holds edges for every run, so multiple runs
   overlay. Filter to a single run (or rebuild the node/edge on a latest-run view) to keep it a single
   clean estate.
+
+---
+
+## 🖥️ Explore the results in the interactive FAR app
+
+Alongside the Direct Lake report, the repo ships an **interactive web app** — the **Fabric
+Architecture Review (FAR) app** — a static React workbench hosted by a Fabric **AppBackend**. It
+turns the same review output into a guided experience: the score, prioritized findings, a 3D
+workspace **estate map**, governance posture, semantic-model optimization, performance/cost signals,
+and an in-browser **Data Agent chat**.
+
+It reads the **same gold tables and governance semantic model** this pipeline produces and calls the
+**same published Data Agent** — so run the pipeline once and deploy the model + agent (the `05_Agent`
+notebook) first, then point the app at those items.
+
+➡️ **Full setup, local preview, and deploy instructions:** [fabric/app/README.md](./app/README.md)
+
+You can preview the UI immediately with anonymous sample data — no tenant connection, capacity, or
+app registration required:
+
+```powershell
+cd fabric/app
+npm ci
+npm run dev -- --host 127.0.0.1
+# then open http://127.0.0.1:5173/?preview=1
+```
+
+Connecting it to your real review (live data + chat) needs a completed pipeline run, the governance
+semantic model, a published Data Agent, a single-page Entra app registration, and a Fabric AppBackend
+— all covered step by step in the app README above.
 
 ---
 

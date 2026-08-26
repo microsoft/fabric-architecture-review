@@ -1,0 +1,22 @@
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_graph_nodes', 'gold_graph_nodes'[run_id] = LatestRun),
+        "run_id", 'gold_graph_nodes'[run_id],
+        "node_id", 'gold_graph_nodes'[node_id],
+        "node_type", 'gold_graph_nodes'[node_type],
+        "node_name", 'gold_graph_nodes'[node_name],
+        "workspace_id", 'gold_graph_nodes'[workspace_id],
+        "workspace_name", 'gold_graph_nodes'[workspace_name],
+        "capacity_name", 'gold_graph_nodes'[capacity_name],
+        "owner", 'gold_graph_nodes'[owner],
+        "status", 'gold_graph_nodes'[status],
+        "issue_count", 'gold_graph_nodes'[issue_count],
+        "risk_score", 'gold_graph_nodes'[risk_score]
+    ),
+    [risk_score], DESC,
+    [node_name], ASC
+)

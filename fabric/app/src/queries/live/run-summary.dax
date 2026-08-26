@@ -1,0 +1,10 @@
+EVALUATE
+SELECTCOLUMNS(
+    FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()),
+    "run_id", 'gold_run_summary'[run_id],
+    "client_name", 'gold_run_summary'[client_name],
+    "total_findings", 'gold_run_summary'[total_findings],
+    "critical_fail", 'gold_run_summary'[critical_fail],
+    "high_fail", 'gold_run_summary'[high_fail],
+    "score", 'gold_run_summary'[score]
+)
