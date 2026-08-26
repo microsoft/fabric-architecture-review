@@ -137,6 +137,17 @@ rules:
       promotion path - prod is running behind the validated content.
     microsoft_learn_url: https://learn.microsoft.com/fabric/cicd/deployment-pipelines/understand-the-deployment-process
 
+  - id: ARCH-015
+    dimension: architecture
+    severity: medium
+    description: >
+      Legacy Dataflow Gen1 (Power BI dataflows) are migrated to Dataflow Gen2. Gen2
+      writes to Lakehouse / Warehouse / OneLake destinations, uses a faster engine, and
+      supports Fabric Git integration and deployment pipelines; Gen1 produces CDM folders
+      only and sits outside the Fabric item ALM model. Workspaces still running Gen1
+      dataflows are flagged for migration.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/data-factory/dataflows-gen2-overview
+
   # ==================== PERFORMANCE ====================
   - id: PERF-001
     dimension: performance

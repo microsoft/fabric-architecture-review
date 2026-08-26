@@ -30,7 +30,7 @@ from tests._analyzers import (
 # Expected per-analyzer finding counts (frozen from the sample fixture).
 EXPECTED_COUNTS: Dict[str, int] = {
     "findings_tenant_settings": 7,
-    "findings_architecture": 14,
+    "findings_architecture": 15,
     "findings_performance": 12,
     "findings_storage_mode": 4,
     "findings_governance": 9,

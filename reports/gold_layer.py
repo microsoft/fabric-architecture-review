@@ -35,6 +35,47 @@ DIMENSIONS = [
     "best_practices",
 ]
 
+# Scanner arrays under each workspace that are containers / non-artifacts, not
+# estate items — excluded from the estate graph and item counts.
+_NON_ITEM_WS_ARRAYS = frozenset({
+    "folders", "users", "workbooks", "dashboardTiles", "widgets",
+    "dataSourceInstances", "datasourceUsages",
+})
+# Item-type arrays already emitted with a curated node_type in the estate graph.
+_CURATED_ITEM_KEYS = frozenset({
+    "datasets", "reports", "Notebook", "DataPipeline", "Lakehouse",
+})
+# Friendly node_type labels for a few scanner keys; other keys are used verbatim.
+_NODE_TYPE_BY_KEY = {
+    "AppBackend": "App",
+    "dashboards": "Dashboard",
+    "dataflows": "Dataflow",
+    "datamarts": "Datamart",
+    "SQLAnalyticsEndpoint": "SQLEndpoint",
+}
+
+
+def _extra_ws_items(scan_ws_entry: Dict[str, Any]):
+    """Yield ``(node_type, id, name)`` for every estate item in a scanner
+    workspace entry that is not one of the curated item types. Covers AppBackend,
+    Warehouse, SQLAnalyticsEndpoint, KQLDatabase, Eventstream, MLModel, dashboards,
+    dataflows, datamarts, and any future Fabric item type — so no workspace renders
+    empty in the estate map."""
+    for key, arr in scan_ws_entry.items():
+        if (not isinstance(arr, list)
+                or key in _CURATED_ITEM_KEYS
+                or key in _NON_ITEM_WS_ARRAYS):
+            continue
+        node_type = _NODE_TYPE_BY_KEY.get(key, key)
+        for item in arr:
+            if not isinstance(item, dict):
+                continue
+            iid = item.get("id")
+            if not iid:
+                continue
+            yield node_type, iid, item.get("name") or item.get("displayName") or iid
+
+
 # Base URL used to build clickable deep-links to a Fabric notebook. Fabric does
 # not support reliable URL anchors to an individual cell, so we link to the
 # notebook and surface the offending cell number(s) in a separate column.
@@ -769,9 +810,7 @@ def build_gold(
         nb_c = len(s.get("Notebook") or [])
         pl_c = len(s.get("DataPipeline") or [])
         lh_c = len(s.get("Lakehouse") or [])
-        item_c = (sm_c + rp_c + nb_c + pl_c + lh_c
-                  + len(s.get("dashboards") or []) + len(s.get("dataflows") or [])
-                  + len(s.get("datamarts") or []))
+        item_c = sm_c + rp_c + nb_c + pl_c + lh_c + sum(1 for _ in _extra_ws_items(s))
         agg = ws_issue.get(widl, {"issue": 0, "critical": 0, "high": 0})
         others = max(0, agg["issue"] - agg["critical"] - agg["high"])
         risk = min(100.0, 25 * agg["critical"] + 12 * agg["high"] + 4 * others)
@@ -1019,6 +1058,14 @@ def build_gold(
                       kpi_label="Workspace", kpi_value=r["workspace_name"])
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       lid, lname, "Lakehouse", "contains")
+        # Every other Fabric item type (AppBackend, Warehouse, SQLAnalyticsEndpoint,
+        # KQLDatabase, Eventstream, dashboards, dataflows, ...) so the estate is complete.
+        for _xtype, _xid, _xname in _extra_ws_items(s):
+            _add_node(_xid, _xtype, _xname, workspace_id=r["workspace_id"],
+                      workspace_name=r["workspace_name"], status="grey", importance=1.4,
+                      kpi_label="Workspace", kpi_value=r["workspace_name"])
+            _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
+                      _xid, _xname, _xtype, "contains")
 
     # ---- ontology dimension/edge tables (derived from the estate graph) --
     # One binding table per ontology entity/relationship type, so the Fabric IQ

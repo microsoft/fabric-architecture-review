@@ -47,7 +47,7 @@ export interface WorkspaceRisk {
     status: "red" | "amber" | "green";
 }
 
-export type EstateItemType = "lakehouse" | "warehouse" | "model" | "report" | "notebook" | "pipeline";
+export type EstateItemType = "lakehouse" | "warehouse" | "model" | "report" | "notebook" | "pipeline" | "app" | "component";
 export type EstateHealth = "healthy" | "warning" | "risk";
 
 export interface EstateItem {

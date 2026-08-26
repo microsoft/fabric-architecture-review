@@ -21,9 +21,11 @@ const itemIcon: Record<EstateItemType, typeof Database> = {
     report: FileChartColumn,
     notebook: NotebookTabs,
     pipeline: GitBranch,
+    app: Building2,
+    component: Box,
 };
 
-const itemTypeOrder: EstateItemType[] = ["lakehouse", "warehouse", "pipeline", "notebook", "model", "report"];
+const itemTypeOrder: EstateItemType[] = ["lakehouse", "warehouse", "pipeline", "notebook", "model", "report", "app", "component"];
 const itemTypeLabel: Record<EstateItemType, string> = {
     lakehouse: "Lakehouses",
     warehouse: "Warehouses",
@@ -31,6 +33,8 @@ const itemTypeLabel: Record<EstateItemType, string> = {
     notebook: "Notebooks",
     model: "Semantic models",
     report: "Reports",
+    app: "Apps",
+    component: "Other items",
 };
 
 function groupEstateItemsByType(items: EstateItem[]) {

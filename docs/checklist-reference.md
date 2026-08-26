@@ -28,6 +28,7 @@ decided and the override precedence.
 | ARCH-012 | high | ExecuteNotebook / TridentNotebook activities inside Data Pipelines pass parameters that match the parameter names declared by the target notebook (Papermill-style `parameters`-tagged cell) | [Learn](https://learn.microsoft.com/fabric/data-factory/notebook-activity) |
 | ARCH-013 | high | The Scanner API inventory is complete for this run | [Learn](https://learn.microsoft.com/rest/api/power-bi/admin/workspace-info-post-workspace-info) |
 | ARCH-014 | medium | Deployment-pipeline stages are kept in sync | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/understand-the-deployment-process) |
+| ARCH-015 | medium | Legacy Dataflow Gen1 (Power BI dataflows) are migrated to Dataflow Gen2 | [Learn](https://learn.microsoft.com/fabric/data-factory/dataflows-gen2-overview) |
 
 ## Performance
 
