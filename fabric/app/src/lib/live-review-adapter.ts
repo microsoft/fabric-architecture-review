@@ -55,9 +55,12 @@ function severity(value: RecordValue): FindingSeverity {
 
 function itemType(value: RecordValue): EstateItemType | null {
     const normalized = text(value).toLowerCase();
+    // Estate-graph container nodes are not workspace items.
+    if (normalized === "capacity" || normalized === "workspace" || normalized === "owner") return null;
     if (normalized === "semanticmodel") return "model";
     if (normalized === "lakehouse" || normalized === "warehouse" || normalized === "report" || normalized === "notebook" || normalized === "pipeline") return normalized;
-    return null;
+    if (normalized === "app" || normalized === "appbackend") return "app";
+    return "component";
 }
 
 function health(issueCount: number, riskScore = 0): EstateHealth {

@@ -17,6 +17,7 @@ Rule coverage:
   ARCH-007 empty workspaces
   ARCH-008 personal / PersonalGroup workspaces
   ARCH-014 deployment-pipeline stage staleness / out-of-sync
+  ARCH-015 legacy Dataflow Gen1 -> Gen2 migration
 
 DATA SAFETY: Metadata only.
 """
@@ -465,6 +466,28 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 title="Personal (My workspace) workspaces in use",
                 evidence={"personalCount": len(personal), "examples": personal[:20]},
                 recommendation="Migrate any production content out of personal workspaces into shared, capacity-backed workspaces."
+            ))
+
+        # --- ARCH-015 Dataflow Gen1 -> Gen2 migration ---
+        # Scanner returns legacy Power BI dataflows under lowercase "dataflows";
+        # Fabric Gen2 dataflows arrive as PascalCase "Dataflow" / "Dataflow2".
+        rule = rules.get("ARCH-015")
+        if rule:
+            gen1 = [{"workspace": w.get("name"), "gen1Count": len(w.get("dataflows") or [])}
+                    for w in workspaces if (w.get("dataflows") or [])]
+            gen1_total = sum(g["gen1Count"] for g in gen1)
+            gen2_total = sum(len(w.get("Dataflow") or []) + len(w.get("Dataflow2") or [])
+                             for w in workspaces)
+            status = "pass" if not gen1 else "fail"
+            findings.append(make_finding(
+                rule, dimension="architecture", status=status,
+                title="Legacy Dataflow Gen1 in use (migrate to Gen2)",
+                evidence={"gen1Total": gen1_total, "gen2Total": gen2_total,
+                          "workspacesWithGen1": len(gen1), "examples": gen1[:20]},
+                recommendation=("Rebuild Gen1 dataflows as Dataflow Gen2 so outputs land in "
+                                "Lakehouse/Warehouse/OneLake and gain Git + deployment-pipeline ALM, "
+                                "a faster engine, and incremental refresh; retire Gen1 once consumers "
+                                "are repointed.")
             ))
 
     # --- ARCH-003 OneLake shortcuts vs duplicated lakehouse tables ---

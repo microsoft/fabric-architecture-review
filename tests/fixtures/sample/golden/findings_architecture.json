@@ -116,6 +116,21 @@
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/get-started/workspaces"
   },
   {
+    "rule_id": "ARCH-015",
+    "dimension": "architecture",
+    "severity": "medium",
+    "status": "pass",
+    "title": "Legacy Dataflow Gen1 in use (migrate to Gen2)",
+    "evidence": {
+      "gen1Total": 0,
+      "gen2Total": 0,
+      "workspacesWithGen1": 0,
+      "examples": []
+    },
+    "recommendation": "Rebuild Gen1 dataflows as Dataflow Gen2 so outputs land in Lakehouse/Warehouse/OneLake and gain Git + deployment-pipeline ALM, a faster engine, and incremental refresh; retire Gen1 once consumers are repointed.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-factory/dataflows-gen2-overview"
+  },
+  {
     "rule_id": "ARCH-003",
     "dimension": "architecture",
     "severity": "medium",

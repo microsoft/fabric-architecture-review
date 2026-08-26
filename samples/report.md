@@ -8,7 +8,8 @@
 <strong>Client:</strong> Contoso<br/>
 <strong>Reviewer:</strong> Fabric Review Team<br/>
 <strong>Review date:</strong> 2026-01-15<br/>
-<strong>Tenant:</strong> <code>***</code>
+<strong>Tenant:</strong> <code>***</code><br/>
+<strong>FAR version:</strong> <code>2026.08.0</code>
 </p>
 
 </div>
@@ -24,10 +25,10 @@
 | Workspaces reviewed | 3 |
 | Fabric capacities reviewed | 2 |
 | Activity log lookback | 7 days |
-| Total checks executed | 40 |
-| Failing checks | **29** |
-| Passing checks | 6 |
-| Informational | 5 |
+| Total checks executed | 43 |
+| Failing checks | **30** |
+| Passing checks | 7 |
+| Informational | 6 |
 
 ## Findings overview
 
@@ -35,7 +36,8 @@
 |---|---:|---:|---:|---:|---:|
 | Architecture | 0 | 0 | 1 | 0 | 0 |
 | Performance | 0 | 1 | 8 | 0 | 0 |
-| Governance | 0 | 0 | 0 | 0 | 0 |
+| Governance | 0 | 0 | 1 | 0 | 0 |
+| Operational Excellence | 0 | 0 | 0 | 0 | 0 |
 | Security | 0 | 2 | 1 | 0 | 0 |
 | Cost | 0 | 0 | 2 | 0 | 0 |
 | Tenant Settings | 1 | 1 | 0 | 0 | 0 |
@@ -70,7 +72,7 @@ This review is aligned to the [Microsoft Azure Well-Architected Framework](https
 
 An at-a-glance map of the Fabric estate captured by the collectors — the workspaces, items, capacities, access and activity this review is based on. Every number is metadata only; no customer data is read.
 
-<div class="env-overview"><div class="env-group"><div class="env-group-title">Estate</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Workspaces</div><div class="env-sub">+1 personal</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Capacities</div><div class="env-sub">F2, F64</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Fabric items</div><div class="env-sub">across workspaces</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Semantic models</div><div class="env-sub">1 Direct Lake</div></div></div></div><div class="env-group"><div class="env-group-title">Items by type</div><div class="env-cards"><div class="env-card"><div class="env-num">2</div><div class="env-label">Lakehouses</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Warehouses</div></div><div class="env-card"><div class="env-num">1</div><div class="env-label">Reports</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Notebooks</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Data pipelines</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Dataflows</div></div></div></div><div class="env-group"><div class="env-group-title">Governance & access</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Principals with access</div><div class="env-sub">users + groups</div></div><div class="env-card env-warn"><div class="env-num">5/7</div><div class="env-label">Tenant settings on</div><div class="env-sub">enabled vs reviewed</div></div><div class="env-card env-good"><div class="env-num">1/2</div><div class="env-label">Git-connected</div><div class="env-sub">source control</div></div><div class="env-card env-good"><div class="env-num">1</div><div class="env-label">Deployment pipelines</div><div class="env-sub">release management</div></div><div class="env-card env-info"><div class="env-num">1</div><div class="env-label">Gateways</div><div class="env-sub">data connectivity</div></div></div></div><div class="env-group"><div class="env-group-title">Activity & refresh</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">12</div><div class="env-label">Activity events</div><div class="env-sub">last 7 days</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Active users</div><div class="env-sub">in the window</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Refreshable models</div><div class="env-sub">scheduled refresh</div></div><div class="env-card env-bad"><div class="env-num">1</div><div class="env-label">Models with refresh failures</div><div class="env-sub">in recent history</div></div></div></div><div class="env-group"><div class="env-group-title">Review result</div><div class="env-cards"><div class="env-card env-bad"><div class="env-num">29</div><div class="env-label">Failing checks</div><div class="env-sub">need attention</div></div><div class="env-card env-good"><div class="env-num">6</div><div class="env-label">Passing checks</div><div class="env-sub">aligned to checklist</div></div><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Informational</div><div class="env-sub">context / not scored</div></div></div></div></div>
+<div class="env-overview"><div class="env-group"><div class="env-group-title">Estate</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Workspaces</div><div class="env-sub">+1 personal</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Capacities</div><div class="env-sub">F2, F64</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Fabric items</div><div class="env-sub">across workspaces</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Semantic models</div><div class="env-sub">1 Direct Lake</div></div></div></div><div class="env-group"><div class="env-group-title">Items by type</div><div class="env-cards"><div class="env-card"><div class="env-num">2</div><div class="env-label">Lakehouses</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Warehouses</div></div><div class="env-card"><div class="env-num">1</div><div class="env-label">Reports</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Notebooks</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Data pipelines</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Dataflows</div></div></div></div><div class="env-group"><div class="env-group-title">Governance & access</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Principals with access</div><div class="env-sub">users + groups</div></div><div class="env-card env-warn"><div class="env-num">5/7</div><div class="env-label">Tenant settings on</div><div class="env-sub">enabled vs reviewed</div></div><div class="env-card env-good"><div class="env-num">1/2</div><div class="env-label">Git-connected</div><div class="env-sub">source control</div></div><div class="env-card env-good"><div class="env-num">1</div><div class="env-label">Deployment pipelines</div><div class="env-sub">release management</div></div><div class="env-card env-info"><div class="env-num">1</div><div class="env-label">Gateways</div><div class="env-sub">data connectivity</div></div></div></div><div class="env-group"><div class="env-group-title">Activity & refresh</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">12</div><div class="env-label">Activity events</div><div class="env-sub">last 7 days</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Active users</div><div class="env-sub">in the window</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Refreshable models</div><div class="env-sub">scheduled refresh</div></div><div class="env-card env-bad"><div class="env-num">1</div><div class="env-label">Models with refresh failures</div><div class="env-sub">in recent history</div></div></div></div><div class="env-group"><div class="env-group-title">Review result</div><div class="env-cards"><div class="env-card env-bad"><div class="env-num">30</div><div class="env-label">Failing checks</div><div class="env-sub">need attention</div></div><div class="env-card env-good"><div class="env-num">7</div><div class="env-label">Passing checks</div><div class="env-sub">aligned to checklist</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Informational</div><div class="env-sub">context / not scored</div></div></div></div></div>
 
 
 <div class="page-break"></div>
@@ -462,8 +464,45 @@ Enable incremental refresh or move to Direct Lake; long refreshes contend for ca
 ## Governance
 
 
-> **0 failing** &middot; 0 informational &middot; 1 passing &middot; 1 total
+> **1 failing** &middot; 1 informational &middot; 1 passing &middot; 3 total
 
+### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; GOV-009 &mdash; Production workspaces without endorsed semantic models
+
+**Evidence**
+
+- **productionWorkspaces:** 1
+- **minRatio:** 0.5
+- **offenderCount:** 1
+
+**Examples (1)**
+
+| name |
+|---|
+| data-gold-prod |
+
+**Recommendation**
+
+Certify the authoritative semantic models in production workspaces so downstream reports build on governed, trusted data.
+
+**Reference:** [https://learn.microsoft.com/fabric/governance/endorsement-promote-certify](https://learn.microsoft.com/fabric/governance/endorsement-promote-certify)
+
+---
+### <span class="sev sev-low">LOW</span> &nbsp; <span class="status status-info">INFO</span> &nbsp; GOV-008 &mdash; Endorsement (Certified / Promoted) coverage of content
+
+**Evidence**
+
+- **endorsableItems:** 6
+- **endorsedItems:** 0
+- **ratio:** 0
+- **minRatio:** 0.3
+
+**Recommendation**
+
+Endorse trusted datasets/reports as Promoted, and the authoritative ones as Certified, so consumers can tell governed content from ad-hoc content.
+
+**Reference:** [https://learn.microsoft.com/fabric/governance/endorsement-overview](https://learn.microsoft.com/fabric/governance/endorsement-overview)
+
+---
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; GOV-001 &mdash; Workspaces with fewer than 2 admins
 
 **Evidence**
@@ -477,6 +516,28 @@ Enable incremental refresh or move to Direct Lake; long refreshes contend for ca
 Assign at least two workspace admins (preferably via a security group) to avoid orphan risk.
 
 **Reference:** [https://learn.microsoft.com/fabric/get-started/roles-workspaces](https://learn.microsoft.com/fabric/get-started/roles-workspaces)
+
+---
+
+## Operational Excellence
+
+
+> **0 failing** &middot; 0 informational &middot; 1 passing &middot; 1 total
+
+### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; OPS-001 &mdash; Production workspaces covered by a deployment pipeline
+
+**Evidence**
+
+- **productionWorkspaces:** 1
+- **coveredRatio:** 1
+- **minRatio:** 0.8
+- **uncoveredCount:** 0
+
+**Recommendation**
+
+Attach every production workspace to a deployment pipeline so content is promoted from validated lower stages instead of edited directly in production.
+
+**Reference:** [https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines)
 
 ---
 
@@ -989,6 +1050,7 @@ Findings are prioritized by severity and the effort typically required to remedi
 | **BPA-007** | BPA-007: 1 capacity(ies) on legacy P-SKU need F-SKU migration | Plan migration from P-SKU Premium capacities to Fabric F-SKUs before EOL. |
 | **COST-002** | Reviewer attested Pause/Resume but no Azure automation matched the capacity | Either grant the signed-in user Reader on the subscription that hosts the automation account / Logic App and re-run, or unset CAPACITY_AUTO_PAUSE_CONFIGURED if the schedule no longer exists. |
 | **COST-005** | Large capacities (F64+) hosting fewer than 5 workspaces | Right-size: either consolidate workspaces onto this capacity or downgrade the SKU. |
+| **GOV-009** | Production workspaces without endorsed semantic models | Certify the authoritative semantic models in production workspaces so downstream reports build on governed, trusted data. |
 | **NBCODE-002** | Notebook cells install packages inline (%pip / !pip / %conda) (1 cell(s) across 1 notebook(s)) | Move dependencies to a Fabric environment so installs are baked in once, not repeated on every run, and so library versions are pinned across promotions. |
 | **NBCODE-003** | Notebook cells call unbounded .collect() / .toPandas() on Spark DataFrames (1 cell(s) across 1 notebook(s)) | Bare .collect()/.toPandas() pulls every row to the driver and is a common OOM cause. Bound the result first (.limit(N), .first(), .head(N), .take(N), or aggregate to a single row), or persist with .write.format("delta") instead of materialising on the driver. Note: Fabric's display() is safe — it auto-truncates and is not flagged by this rule. |
 | **NBCODE-004** | Notebook cells use Databricks-only APIs (1 cell(s) across 1 notebook(s)) | Replace dbutils.* with notebookutils.*, /dbfs paths with abfss:// or attached lakehouse references, and Databricks MLflow URIs with the Fabric MLflow integration. |
