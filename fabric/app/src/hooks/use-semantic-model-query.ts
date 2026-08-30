@@ -16,6 +16,8 @@ interface UseSemanticModelQueryOptions {
     query: string;
     /** If true, skip reading from cache (still writes the fresh result). */
     bypassCache?: boolean;
+    /** Maximum query duration before surfacing an error. */
+    timeoutMs?: number;
 }
 
 interface UseSemanticModelQueryResult {
@@ -67,22 +69,30 @@ interface UseSemanticModelQueryResult {
 export function useSemanticModelQuery(
     options: UseSemanticModelQueryOptions,
 ): UseSemanticModelQueryResult {
-    const { connection, query, bypassCache } = options;
+    const { connection, query, bypassCache, timeoutMs = 60_000 } = options;
     const [data, setData] = useState<CachedQueryResult | undefined>();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<Error | undefined>();
 
     const canExecute = Boolean(connection && query);
 
-    const execute = useCallback(async () => {
+    const execute = useCallback(async (forceFresh = false) => {
         if (!canExecute) return;
         setIsLoading(true);
         setError(undefined);
 
+        let timeoutId: number | undefined;
         try {
-            const result = await getFabricClient()
+            const queryPromise = getFabricClient()
                 .semanticModel(connection)
-                .query(query, { bypassCache });
+                .query(query, { bypassCache: bypassCache || forceFresh });
+            const timeoutPromise = new Promise<never>((_, reject) => {
+                timeoutId = window.setTimeout(
+                    () => reject(new Error(`Semantic model query timed out after ${timeoutMs / 1_000} seconds.`)),
+                    timeoutMs,
+                );
+            });
+            const result = await Promise.race([queryPromise, timeoutPromise]);
 
             setData(result);
 
@@ -92,9 +102,10 @@ export function useSemanticModelQuery(
         } catch (err) {
             setError(err instanceof Error ? err : new Error(String(err)));
         } finally {
+            if (timeoutId !== undefined) window.clearTimeout(timeoutId);
             setIsLoading(false);
         }
-    }, [connection, query, bypassCache, canExecute]);
+    }, [connection, query, bypassCache, timeoutMs, canExecute]);
 
     useEffect(() => {
         // Query execution intentionally starts when its memoized inputs change.
@@ -102,7 +113,7 @@ export function useSemanticModelQuery(
         execute();
     }, [execute]);
 
-    return { data, isLoading, error, refetch: execute };
+    return { data, isLoading, error, refetch: () => execute(true) };
 }
 
 /**

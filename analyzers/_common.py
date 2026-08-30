@@ -23,7 +23,7 @@ def load_rules(checklist_path: str | Path) -> Dict[str, Dict[str, Any]]:
     p = Path(checklist_path)
     with p.open("r", encoding="utf-8-sig") as f:
         raw = yaml.safe_load(f)
-    return {r["id"]: r for r in raw.get("rules", [])}
+    return {r["id"]: r for r in raw.get("rules", []) if r.get("enabled", True)}
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +88,9 @@ def is_dedicated_capacity(sku: str | None) -> bool:
 
 _DEFAULT_THRESHOLDS_PATH = Path(__file__).resolve().parents[1] / "config" / "thresholds.yaml"
 _THRESHOLDS_CACHE: Optional[Dict[str, Any]] = None
+FINDING_STATUSES = frozenset({
+    "pass", "fail", "info", "not_applicable", "unknown", "missing_evidence",
+})
 
 
 def load_thresholds(path: str | Path | None = None) -> Dict[str, Any]:
@@ -160,11 +163,17 @@ def make_finding(
     evidence: Dict[str, Any],
     recommendation: str,
 ) -> Dict[str, Any]:
+    normalized_status = status.lower()
+    if normalized_status not in FINDING_STATUSES:
+        raise ValueError(
+            f"Unsupported finding status '{status}'. Expected one of: "
+            f"{', '.join(sorted(FINDING_STATUSES))}"
+        )
     return {
         "rule_id": rule.get("id"),
         "dimension": dimension,
         "severity": rule.get("severity", "medium"),
-        "status": status,
+        "status": normalized_status,
         "title": title,
         "evidence": evidence,
         "recommendation": recommendation,
@@ -183,7 +192,7 @@ def missing_raw_finding(rule: Dict[str, Any], dimension: str, raw_name: str) -> 
     return make_finding(
         rule,
         dimension=dimension,
-        status="info",
+        status="missing_evidence",
         title=f"{rule.get('id')}: input data not collected",
         evidence={"missing_raw_file": raw_name},
         recommendation=(

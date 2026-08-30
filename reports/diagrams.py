@@ -154,16 +154,22 @@ def _tenant_security_posture(raw_dir: Path, findings: List[Dict[str, Any]]) -> s
         "    classDef pass fill:#DFF6DD,stroke:#107C10,color:#0B6A0B;",
         "    classDef fail fill:#FDE7E9,stroke:#A4262C,color:#A4262C;",
         "    classDef info fill:#FFF4CE,stroke:#8A6914,color:#8A6914;",
+        "    classDef na fill:#F3F2F1,stroke:#A19F9D,color:#605E5C;",
+        "    classDef unknown fill:#FFF4CE,stroke:#8A6914,color:#8A6914;",
+        "    classDef missing fill:#FED9CC,stroke:#D83B01,color:#8A2D0A;",
         "    tenant([\"Fabric tenant\"])",
     ]
-    order = {"fail": 0, "info": 1, "pass": 2}
+    order = {"fail": 0, "missing_evidence": 1, "unknown": 2,
+             "info": 3, "not_applicable": 4, "pass": 5}
     for f in sorted(ts_findings, key=lambda x: (order.get(x.get("status"), 3), x.get("rule_id", ""))):
         rid = f.get("rule_id", "unknown")
         nid = _node_id("s", rid)
         wrapped = _wrap_label(f.get("title", ""), width=28)
         label = f"{rid}\\n{wrapped}"
         lines.append(f"    tenant --> {nid}[\"{label}\"]")
-        cls = {"pass": "pass", "fail": "fail"}.get(f.get("status"), "info")
+        cls = {"pass": "pass", "fail": "fail", "info": "info",
+             "not_applicable": "na", "unknown": "unknown",
+             "missing_evidence": "missing"}.get(f.get("status"), "unknown")
         lines.append(f"    class {nid} {cls};")
     lines.append("```")
     return "\n".join(lines) + "\n"

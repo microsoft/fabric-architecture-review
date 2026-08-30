@@ -4,13 +4,14 @@
 """Cost review.
 
 Rule coverage:
-  COST-001 Capacities with zero assigned workspaces (empty SKU spend)
+    COST-001 Capacity SKU right-sizing from sustained average CU
   COST-002 Non-production capacities should use Pause/Resume        -> info (REST cannot read schedules)
   COST-003 Dev/test/sandbox capacities flagged for pause schedule
   COST-004 Workspaces with prod-like names on PPU / personal capacities
   COST-005 Large capacities (F64+) hosting few workspaces
   COST-006 Trial / Embedded capacities hosting workspaces
   COST-007 Small-capacity sprawl (consolidation opportunity)             -> info
+    COST-008 Capacities with zero assigned workspaces (empty SKU spend)
 
 Inputs: capacity_metrics.json, scanner.json (or workspace_inventory.json).
 """
@@ -23,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
+from analyzers.applicability import classify_workspaces, load_capacity_overrides, load_workspace_overrides
 
 NONPROD_PATTERN = re.compile(r"(dev|test|qa|uat|sbx|sandbox|poc|demo)", re.IGNORECASE)
 PROD_PATTERN = re.compile(r"(prod|production|live)", re.IGNORECASE)
@@ -30,6 +32,35 @@ LARGE_SKU_PATTERN = re.compile(r"^F(64|128|256|512|1024|2048)$", re.IGNORECASE)
 SMALL_SKU_PATTERN = re.compile(r"^F(1|2|4|8|16)$", re.IGNORECASE)
 SMALL_WORKSPACE_THRESHOLD = threshold("cost", "large_sku_min_workspaces", 5, env="COST_SMALL_WORKSPACE_THRESHOLD", cast=int)
 CONSOLIDATION_MIN_SMALL_CAPS = threshold("cost", "consolidation_min_small_capacities", 3, env="COST_CONSOLIDATION_MIN_SMALL_CAPS", cast=int)
+CU_AVG_IDLE_PCT = threshold("cost", "cu_avg_idle_pct", 20, cast=float)
+CU_AVG_SATURATED_PCT = threshold("cost", "cu_avg_saturated_pct", 85, cast=float)
+
+
+def _column(row: Dict[str, Any], name: str) -> Any:
+    target = name.lower()
+    for key, value in row.items():
+        lowered = key.lower()
+        if lowered == target or lowered.endswith(f"[{target}]"):
+            return value
+    return None
+
+
+def _capacity_cu_7d(raw_dir: Path) -> List[Dict[str, Any]]:
+    payload = load_raw(raw_dir / "capacity_metrics_app.json") or {}
+    probe = (payload.get("queries") or {}).get("usage_summary_7d") or {}
+    if not probe.get("ok"):
+        return []
+    rows: List[Dict[str, Any]] = []
+    for row in probe.get("rows") or []:
+        capacity_id = _column(row, "Capacity Id")
+        average = _column(row, "Average CU %")
+        if capacity_id is None or average is None:
+            continue
+        try:
+            rows.append({"capacityId": str(capacity_id), "avgCU7d": float(average)})
+        except (TypeError, ValueError):
+            continue
+    return rows
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
@@ -42,6 +73,21 @@ def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
     return []
 
 
+def _capacity_environment(
+    capacity: Dict[str, Any], derived_environments: set[str], override: Dict[str, Any] | None = None,
+) -> str:
+    explicit = str(((override or {}).get("profile") or {}).get("environment") or "").lower()
+    if explicit:
+        return explicit if explicit in ("production", "nonproduction") else "unknown"
+    if derived_environments == {"nonproduction"}:
+        return "nonproduction"
+    if "unknown" in derived_environments:
+        return "unknown"
+    if not derived_environments and NONPROD_PATTERN.search(capacity.get("displayName") or ""):
+        return "nonproduction"
+    return "production"
+
+
 def analyze(raw_dir: str | os.PathLike = "output/raw",
             checklist_path: str | os.PathLike = "config/review-checklist.yaml") -> List[Dict[str, Any]]:
     raw_dir = Path(raw_dir)
@@ -50,28 +96,64 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
 
     caps_raw = load_raw(raw_dir / "capacity_metrics.json")
     capacities = (caps_raw or {}).get("capacities") or []
+    workspaces = _workspaces(raw_dir)
+    workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
+    workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
+    capacity_overrides = load_capacity_overrides(workspace_config)
+    capacity_environments: Dict[str, set[str]] = {}
+    for workspace in workspaces:
+        capacity_id = str(workspace.get("capacityId") or "").lower()
+        if capacity_id:
+            profile = workspace_profiles.get(str(workspace.get("id") or "").lower(), {})
+            capacity_environments.setdefault(capacity_id, set()).add(str(profile.get("environment") or "unknown"))
 
-    # --- COST-001 empty capacities ---
+    # --- COST-001 sustained CU right-sizing ---
     rule = rules.get("COST-001")
     if rule:
-        if not capacities:
-            findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
-        else:
-            empties = [c for c in capacities if c.get("assignedWorkspaceCount", 0) == 0
-                       and (c.get("state") or "").lower() == "active"
-                       and is_dedicated_capacity(c.get("sku"))]
-            status = "pass" if not empties else "fail"
+        utilization = _capacity_cu_7d(raw_dir)
+        if not utilization:
             findings.append(make_finding(
-                rule, dimension="cost", status=status,
-                title="Active capacities with no assigned workspaces",
-                evidence={"count": len(empties),
-                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku")} for c in empties]},
-                recommendation="Pause or delete empty capacities; they incur SKU charges with zero utilization."
+                rule, dimension="cost", status="missing_evidence",
+                title="Sustained capacity CU% was not collected",
+                evidence={"requiredInput": "capacity_metrics_app.json:usage_summary_7d",
+                          "idleBelowPct": CU_AVG_IDLE_PCT,
+                          "saturatedAbovePct": CU_AVG_SATURATED_PCT},
+                recommendation=("Install or configure the Fabric Capacity Metrics app and grant Build "
+                                "permission so 7-day Average CU % can be evaluated."),
+            ))
+        else:
+            names = {(c.get("id") or "").lower(): c for c in capacities}
+            outside = []
+            for sample in utilization:
+                average = sample["avgCU7d"]
+                if average < CU_AVG_IDLE_PCT or average > CU_AVG_SATURATED_PCT:
+                    capacity = names.get(sample["capacityId"].lower(), {})
+                    outside.append({**sample, "name": capacity.get("displayName"),
+                                    "sku": capacity.get("sku"),
+                                    "classification": "idle" if average < CU_AVG_IDLE_PCT else "saturated"})
+            findings.append(make_finding(
+                rule, dimension="cost", status="fail" if outside else "pass",
+                title=f"Capacity right-sizing from sustained CU% ({len(outside)} outside target band)",
+                evidence={"idleBelowPct": CU_AVG_IDLE_PCT,
+                          "saturatedAbovePct": CU_AVG_SATURATED_PCT,
+                          "capacitiesEvaluated": len(utilization), "outsideBand": outside},
+                recommendation=("Downsize or consolidate chronically idle capacities; optimize workloads, "
+                                "enable autoscale, or upsize chronically saturated capacities."),
             ))
 
     # --- COST-002 info marker about pause/resume detectability ---
     rule = rules.get("COST-002")
     if rule:
+        nonprod_capacities = []
+        unknown_capacities = []
+        for capacity in capacities:
+            capacity_id = str(capacity.get("id") or "").lower()
+            environments = capacity_environments.get(capacity_id, set())
+            environment = _capacity_environment(capacity, environments, capacity_overrides.get(capacity_id))
+            if environment == "nonproduction":
+                nonprod_capacities.append(capacity)
+            elif environment == "unknown":
+                unknown_capacities.append(capacity)
         auto_pause = (os.environ.get("CAPACITY_AUTO_PAUSE_CONFIGURED") or "").strip().lower() in (
             "1", "true", "yes", "y", "on", "auto", "detect"
         )
@@ -85,7 +167,21 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         azure_candidates = azure_auto.get("pauseCandidates") or []
         azure_skipped = bool(azure_auto.get("skipped"))
 
-        if azure_hits:
+        if not nonprod_capacities and unknown_capacities:
+            findings.append(make_finding(
+                rule, dimension="cost", status="unknown",
+                title="Non-production capacity scope could not be established",
+                evidence={"unknownCapacities": [c.get("displayName") for c in unknown_capacities]},
+                recommendation="Set profile.environment for workspaces so pause/resume applicability can be evaluated.",
+            ))
+        elif not nonprod_capacities:
+            findings.append(make_finding(
+                rule, dimension="cost", status="not_applicable",
+                title="No dedicated non-production capacities detected",
+                evidence={"nonProductionCapacityCount": 0},
+                recommendation="No pause/resume action is required for the current capacity scope.",
+            ))
+        elif azure_hits:
             findings.append(make_finding(
                 rule, dimension="cost", status="pass",
                 title=f"Pause/Resume automation verified in Azure ({len(azure_hits)} hit(s))",
@@ -97,6 +193,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                           "automations": azure_hits,
                           "candidates": azure_candidates,
                           "currentlyPaused": len(paused),
+                          "nonProductionCapacities": [c.get("displayName") for c in nonprod_capacities],
                           "capacitiesAtScan": cap_states},
                 recommendation=("Confirm the listed runbooks / workflows target the intended capacities and "
                                 "that their managed identity / service principal still holds Capacity "
@@ -117,6 +214,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                           "subscriptionsScanned": azure_auto.get("subscriptionsScanned"),
                           "candidates": azure_candidates,
                           "currentlyPaused": len(paused),
+                          "nonProductionCapacities": [c.get("displayName") for c in nonprod_capacities],
                           "capacitiesAtScan": cap_states},
                 recommendation=("Open each candidate runbook / Logic App and verify (a) the capacity "
                                 "resource id passed as a parameter or stored in an Automation variable, "
@@ -173,23 +271,6 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                                 "CAPACITY_AUTO_PAUSE_CONFIGURED=true and re-run; the collector will "
                                 "verify it from Azure ARM and downgrade this finding to PASS with the "
                                 "matching runbook(s).")
-            ))
-
-    # --- COST-003 non-prod capacities ---
-    rule = rules.get("COST-003")
-    if rule:
-        if not capacities:
-            findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
-        else:
-            nonprod = [c for c in capacities if NONPROD_PATTERN.search(c.get("displayName") or "")]
-            status = "pass" if not nonprod else "info"
-            findings.append(make_finding(
-                rule, dimension="cost", status=status,
-                title="Non-production capacities (candidates for Pause/Resume)",
-                evidence={"count": len(nonprod),
-                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku")} for c in nonprod]},
-                recommendation="Configure an Azure Automation runbook or schedule to pause non-production "
-                               "capacities outside business hours."
             ))
 
     # --- COST-004 prod workspaces on PPU/personal ---
@@ -279,6 +360,24 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 recommendation=("Consider consolidating several small F-SKUs into one right-sized capacity: "
                                 "CU smoothing and bursting are shared across workloads, often improving both cost "
                                 "efficiency and headroom versus many isolated small capacities.")
+            ))
+
+    # --- COST-008 empty active capacities ---
+    rule = rules.get("COST-008")
+    if rule:
+        if not capacities:
+            findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
+        else:
+            empties = [c for c in capacities if c.get("assignedWorkspaceCount", 0) == 0
+                       and (c.get("state") or "").lower() == "active"
+                       and is_dedicated_capacity(c.get("sku"))]
+            findings.append(make_finding(
+                rule, dimension="cost", status="fail" if empties else "pass",
+                title="Active capacities with no assigned workspaces",
+                evidence={"count": len(empties),
+                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku")}
+                                         for c in empties]},
+                recommendation="Pause or delete empty capacities; they incur SKU charges with zero utilization.",
             ))
 
     return findings

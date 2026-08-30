@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 # Collect metadata, configuration, and (REST-accessible) metrics from the Fabric tenant.
 # DATA SAFETY: Every collector below reads metadata only. Customer data is never queried.
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = "Stop"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 try {
@@ -18,13 +18,15 @@ try {
     $rawDir = Join-Path $outDir "raw"
     New-Item -ItemType Directory -Force -Path $rawDir | Out-Null
     Write-Host "Raw output directory: $rawDir" -ForegroundColor Gray
+    $collectorFailures = [System.Collections.Generic.List[string]]::new()
 
     function Invoke-Collector([string]$module, [string]$label) {
         Write-Host ""
         Write-Host "==> $label" -ForegroundColor Cyan
         & python -m $module --output-dir $rawDir
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "    $module exited with code $LASTEXITCODE — continuing." -ForegroundColor Yellow
+            $collectorFailures.Add("$module (exit $LASTEXITCODE)")
+            Write-Host "    $module exited with code $LASTEXITCODE." -ForegroundColor Red
         }
     }
 
@@ -46,6 +48,10 @@ try {
     Invoke-Collector "collectors.gateways"             "Data gateways (on-prem / VNet / personal)"
     Invoke-Collector "collectors.realtime_intelligence" "Real-Time Intelligence + Mirrored Databases"
     Invoke-Collector "collectors.activity_logs"        "Admin activity log (last 7 days)"
+
+    if ($collectorFailures.Count -gt 0) {
+        throw "Collection incomplete. Failed collectors: $($collectorFailures -join ', ')"
+    }
 
     Write-Host ""
     Write-Host "Collection complete. Raw outputs in $rawDir." -ForegroundColor Green

@@ -1,7 +1,7 @@
 [
   {
     "rule_id": "SEC-001",
-    "dimension": "tenant_settings",
+    "dimension": "security",
     "severity": "critical",
     "status": "fail",
     "title": "Publish to web is disabled or restricted to a security group",
@@ -18,7 +18,7 @@
   },
   {
     "rule_id": "SEC-002",
-    "dimension": "tenant_settings",
+    "dimension": "security",
     "severity": "high",
     "status": "pass",
     "title": "Export data is restricted to a security group",

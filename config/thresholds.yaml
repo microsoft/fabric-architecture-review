@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # =============================================================================
 # Thresholds — the single tuning surface for every pass / fail boundary.
 # =============================================================================
@@ -34,17 +37,10 @@ architecture:
   # adopted widely enough.
   layer_naming_min_ratio: 0.5
 
-  # ARCH-004 — PASS when at least this fraction of workspaces are Git-connected.
-  git_coverage_min_ratio: 0.5
-
   # ARCH-006 — PASS when at least this fraction of *shared, non-empty*
   # workspaces have a description. Personal and empty workspaces are excluded so
   # the check reflects real documentation hygiene, not "My workspace" clutter.
   description_coverage_min_ratio: 0.5
-
-  # ARCH-011 — FAIL when MORE than this fraction of semantic models are Import
-  # while lakehouses exist (Direct Lake would fit). 0.7 = Import clearly dominates.
-  import_dominance_ratio: 0.7
 
 performance:
   # PERF-003 — semantic-model size bands (MB). At/over warn = FAIL; over critical
@@ -58,7 +54,7 @@ performance:
   # env: PERF_FAIL_RATIO_THRESHOLD
   refresh_failure_ratio: 0.2
 
-  # PERF-005 — a refreshable model with no successful refresh in this many days
+  # PERF-015 — a refreshable model with no successful refresh in this many days
   # is "stale".   env: PERF_STALE_DAYS
   stale_model_days: 30
 
@@ -92,20 +88,16 @@ performance:
   job_long_hours: 1.0
 
 governance:
-  # GOV-001 — every *shared, non-empty* workspace should have at least this many
-  # admins (no single-owner orphan risk). Personal/empty workspaces are excluded.
+  # GOV-001 — every production, shared, non-empty workspace should have at least
+  # this many admins (no single-owner orphan risk).
   min_admins: 2
 
-  # GOV-002 — PASS when at least this fraction of items carry a sensitivity label.
+  # GOV-003 — PASS when at least this fraction of governed items carry a sensitivity label.
   label_coverage_min_ratio: 0.5
 
-  # GOV-003 — PASS when at least this fraction of workspaces match the naming
+  # GOV-004 — PASS when at least this fraction of workspaces match the naming
   # convention (env/layer markers).
   naming_coverage_min_ratio: 0.5
-
-  # GOV-004 — PASS when at least this fraction of workspaces are Git-connected
-  # (governance lens).
-  git_coverage_min_ratio: 0.5
 
   # GOV-005 — FAIL when share events in the activity-log window reach this count.
   # Tune up for large tenants where routine sharing volume is naturally higher.
@@ -141,6 +133,12 @@ security:
   gateway_min_version: ""
 
 cost:
+  # COST-001 — sustained 7-day average CU outside this band is a right-sizing
+  # concern. Low utilization suggests downsize/consolidation; high utilization
+  # suggests optimization, autoscale, or upsize.
+  cu_avg_idle_pct: 20
+  cu_avg_saturated_pct: 85
+
   # COST-005 — a large capacity (F64+) hosting FEWER than this many workspaces is
   # a downsize / consolidation candidate.   env: COST_SMALL_WORKSPACE_THRESHOLD
   large_sku_min_workspaces: 5

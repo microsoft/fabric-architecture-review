@@ -72,11 +72,11 @@ describe("App", () => {
 
     it("opens the selected overview finding in its workspace queue", () => {
         render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: /ARCH-009.*Critical lineage path/ }));
+        fireEvent.click(screen.getByRole("button", { name: /OPS-001.*Production workspace/ }));
 
         expect(screen.getByRole("heading", { name: "Risk decision queue" })).toBeInTheDocument();
         expect(screen.getByLabelText("Workspace")).toHaveValue("finance");
-        expect(screen.getByText("ARCH-009")).toBeInTheDocument();
+        expect(screen.getByText("OPS-001")).toBeInTheDocument();
         expect(screen.queryByText("GOV-001")).not.toBeInTheDocument();
     });
 

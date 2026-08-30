@@ -90,8 +90,16 @@ SEV_COLORS = {"Critical": CRIT, "High": BAD, "Medium": ORANGE, "Low": LOWBLUE, "
 # severity is .lower()'d before it lands in the gold tables). This is the map
 # bound into every severity visual's dataPoint via _value_data_colors.
 SEV_HEX = {"critical": CRIT, "high": BAD, "medium": ORANGE, "low": LOWBLUE, "info": MUTED}
-# Status palette — pass green, fail red, info / not-evaluated grey.
-STATUS_COLORS = {"pass": GOOD, "fail": BAD, "info": MUTED, "grey": MUTED}
+# Status palette keeps scored outcomes, exclusions, and evidence gaps distinct.
+STATUS_COLORS = {
+    "pass": GOOD,
+    "fail": BAD,
+    "info": MUTED,
+    "not_applicable": "#A19F9D",
+    "unknown": "#8A6914",
+    "missing_evidence": ORANGE,
+    "grey": MUTED,
+}
 
 # Per-page category accent (matches the Home hero orb colours). Painted as a
 # thin accent line under each page banner to tie the inside pages to the hero.

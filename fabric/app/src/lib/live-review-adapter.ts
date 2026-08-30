@@ -208,12 +208,15 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         change: 0,
     }));
     const highRisk = number(summary.critical_fail) + number(summary.high_fail);
+    const score = summary.score == null ? "N/E" : String(Math.round(number(summary.score)));
+    const coverage = Math.round(number(summary.assessment_coverage));
+    const evidenceGaps = number(summary.unknown_count) + number(summary.missing_evidence_count);
     return {
         metrics: [
-            { label: "Best-practice score", value: String(Math.round(number(summary.score))), delta: "Latest review run", trend: "steady", intent: "score" },
+            { label: "Best-practice score", value: score, delta: "Latest review run", trend: "steady", intent: "score" },
             { label: "Critical + high", value: String(highRisk), delta: "Live findings", trend: "steady", intent: "risk" },
             { label: "Workspaces at risk", value: String(workspaceRisks.filter((workspace) => workspace.status !== "green").length), delta: `of ${workspaceRisks.length} workspaces`, trend: "steady", intent: "neutral" },
-            { label: "Review findings", value: String(number(summary.total_findings)), delta: "Evaluated controls", trend: "steady", intent: "neutral" },
+            { label: "Assessment coverage", value: `${coverage}%`, delta: `${evidenceGaps} evidence gap${evidenceGaps === 1 ? "" : "s"}`, trend: "steady", intent: coverage >= 90 ? "success" : "neutral" },
         ],
         dimensionScores,
         findings,

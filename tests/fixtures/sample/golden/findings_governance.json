@@ -6,7 +6,7 @@
     "status": "pass",
     "title": "Workspaces with fewer than 2 admins",
     "evidence": {
-      "evaluatedWorkspaces": 2,
+      "evaluatedWorkspaces": 1,
       "minAdmins": 2,
       "underAdminCount": 0,
       "examples": []
@@ -19,27 +19,30 @@
     "dimension": "governance",
     "severity": "medium",
     "status": "pass",
-    "title": "Sensitivity label coverage",
+    "title": "Items with no activity in the last 7 day(s)",
     "evidence": {
-      "totalItems": 4,
-      "labelledItems": 2,
-      "ratio": 0.5
+      "windowDays": 7,
+      "inventoriedItems": 0,
+      "eventsWithArtifactId": 0,
+      "inactiveCount": 0,
+      "examples": [],
+      "missingEvidence": null
     },
-    "recommendation": "Apply sensitivity labels to datasets, reports, lakehouses, warehouses; enforce via tenant setting and Purview integration.",
+    "recommendation": "Archive or delete confirmed inactive items after validating their business retention requirements.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/governance-overview"
   },
   {
     "rule_id": "GOV-003",
     "dimension": "governance",
     "severity": "medium",
-    "status": "pass",
-    "title": "Workspaces following documented naming convention",
+    "status": "fail",
+    "title": "Sensitivity label coverage",
     "evidence": {
-      "workspaceCount": 3,
-      "matchingCount": 2,
-      "ratio": 0.67
+      "evaluatedItems": 6,
+      "labelledItems": 0,
+      "ratio": 0.0
     },
-    "recommendation": "Document and enforce a naming convention combining environment + layer markers (e.g. `<domain>-<env>-<layer>`).",
+    "recommendation": "Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; enforce via tenant setting and Purview integration.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/information-protection"
   },
   {
@@ -47,13 +50,13 @@
     "dimension": "governance",
     "severity": "low",
     "status": "pass",
-    "title": "Workspaces under source control (governance view)",
+    "title": "Workspaces following documented naming convention",
     "evidence": {
-      "totalWorkspaces": 2,
-      "gitConnectedCount": 1,
-      "ratio": 0.5
+      "workspaceCount": 2,
+      "matchingCount": 2,
+      "ratio": 1.0
     },
-    "recommendation": "Require Git integration on all production workspaces — provides audit trail and rollback for governance evidence.",
+    "recommendation": "Document and enforce a naming convention combining domain, environment, and purpose (for example, `<domain>-<env>-<purpose>`).",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/governance-overview"
   },
   {
@@ -88,7 +91,9 @@
     "evidence": {
       "windowDays": 7,
       "orphanedCount": 0,
-      "examples": []
+      "examples": [],
+      "expectedLowFrequencyCount": 0,
+      "expectedLowFrequency": []
     },
     "recommendation": "Confirm the owner; if the workspace is no longer used, archive it to reduce attack surface and capacity load.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/admin/track-user-activities"

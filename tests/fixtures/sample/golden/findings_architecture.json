@@ -22,12 +22,59 @@
     "title": "Medallion / layer naming convention",
     "evidence": {
       "workspaceCount": 3,
+      "evaluatedWorkspaceCount": 2,
+      "applicability": {
+        "applicableCount": 2,
+        "notApplicableCount": 1,
+        "unknownCount": 0,
+        "workspaces": [
+          {
+            "workspaceId": "0000000b-0000-4000-8000-00000000000b",
+            "workspaceName": "data-bronze-dev",
+            "archetype": "batch_engineering",
+            "classification": "strong",
+            "itemTypeCounts": {
+              "SemanticModel": 1,
+              "Report": 1,
+              "Lakehouse": 1
+            },
+            "applicability": {
+              "status": "applicable",
+              "reason": "Rule applies to batch_engineering workspaces."
+            }
+          },
+          {
+            "workspaceId": "0000000c-0000-4000-8000-00000000000c",
+            "workspaceName": "data-gold-prod",
+            "archetype": "batch_engineering",
+            "classification": "strong",
+            "itemTypeCounts": {
+              "SemanticModel": 2,
+              "Lakehouse": 1
+            },
+            "applicability": {
+              "status": "applicable",
+              "reason": "Rule applies to batch_engineering workspaces."
+            }
+          },
+          {
+            "workspaceId": "0000000d-0000-4000-8000-00000000000d",
+            "workspaceName": "My workspace",
+            "archetype": "personal",
+            "classification": "strong",
+            "itemTypeCounts": {},
+            "applicability": {
+              "status": "not_applicable",
+              "reason": "Rule does not apply to personal workspaces."
+            }
+          }
+        ]
+      },
       "layeredWorkspaceCount": 2,
-      "layeredWorkspaceRatio": 0.67,
+      "layeredWorkspaceRatio": 1.0,
       "workspaceExamples": [
         "data-bronze-dev",
-        "data-gold-prod",
-        "My workspace"
+        "data-gold-prod"
       ],
       "lakehouseLayersByWorkspace": {
         "data-bronze-dev": [
@@ -63,10 +110,11 @@
     "title": "Workspaces exceeding monolithic threshold (>50 items)",
     "evidence": {
       "threshold": 50,
-      "monolithCount": 0,
-      "monoliths": []
+      "oversizedCount": 0,
+      "mixedWorkloadCount": 0,
+      "workspaces": []
     },
-    "recommendation": "Split large workspaces by domain/layer. Large workspaces complicate RBAC, deployment pipelines, and lineage analysis.",
+    "recommendation": "Split workspaces that combine unrelated workload families or security boundaries. A large but cohesive workspace is advisory, not automatically defective.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines"
   },
   {
@@ -153,31 +201,6 @@
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/onelake/onelake-shortcuts"
   },
   {
-    "rule_id": "ARCH-009",
-    "dimension": "architecture",
-    "severity": "high",
-    "status": "pass",
-    "title": "1 deployment pipeline(s) configured; production workspaces covered",
-    "evidence": {
-      "pipelineCount": 1,
-      "stages": 2,
-      "productionWorkspaces": 1,
-      "uncoveredProductionWorkspaces": [],
-      "pipelines": [
-        {
-          "name": "Sales Pipeline",
-          "stageCount": 2,
-          "workspaces": [
-            "0000000b-0000-4000-8000-00000000000b",
-            "0000000c-0000-4000-8000-00000000000c"
-          ]
-        }
-      ]
-    },
-    "recommendation": "Maintain stage assignments as new workspaces are introduced.",
-    "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines"
-  },
-  {
     "rule_id": "ARCH-014",
     "dimension": "architecture",
     "severity": "medium",
@@ -207,14 +230,21 @@
     "rule_id": "ARCH-011",
     "dimension": "architecture",
     "severity": "high",
-    "status": "info",
-    "title": "Semantic-model storage-mode distribution",
+    "status": "fail",
+    "title": "1 lakehouse-backed Import model(s) may fit Direct Lake",
     "evidence": {
       "datasetCount": 3,
       "modeCounts": {
         "Import": 2,
         "Direct Lake": 1
       },
+      "directLakeCandidates": [
+        "FinanceModel"
+      ],
+      "externalImportModels": [
+        "SalesModel"
+      ],
+      "unresolvedImportModels": [],
       "examples": [
         {
           "name": "SalesModel",
@@ -233,7 +263,7 @@
         }
       ]
     },
-    "recommendation": "If many Import models read lakehouse Delta tables, evaluate Direct Lake. DirectQuery should be limited to scenarios that genuinely require it.",
+    "recommendation": "Evaluate moving Import models over lakehouse data to Direct Lake. Direct Lake reads Delta directly via VertiPaq with no refresh, cutting capacity CU spent on scheduled refresh and reducing data freshness lag.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/get-started/direct-lake-overview"
   },
   {
@@ -250,22 +280,5 @@
     },
     "recommendation": "Either no pipelines orchestrate notebooks yet, or the getDefinition calls failed (check pipeline_definitions.json 'errors'). Re-run the pipeline_definitions collector to confirm.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-factory/notebook-activity"
-  },
-  {
-    "rule_id": "ARCH-004",
-    "dimension": "architecture",
-    "severity": "medium",
-    "status": "pass",
-    "title": "Workspaces connected to Git source control",
-    "evidence": {
-      "totalWorkspaces": 2,
-      "gitConnectedCount": 1,
-      "ratio": 0.5,
-      "connectedExamples": [
-        "data-gold-prod"
-      ]
-    },
-    "recommendation": "Connect production workspaces to Git for change tracking, peer review and deployment pipeline support.",
-    "microsoft_learn_url": "https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration"
   }
 ]

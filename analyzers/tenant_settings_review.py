@@ -17,68 +17,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-import yaml
-
-# --- Baseline: tenant settings that must be scoped (not enabled tenant-wide) ---
-# Key = setting name as it appears in the Fabric admin tenantsettings response.
-# Each entry includes the rule_id from config/review-checklist.yaml and the
-# expectation that should hold.
-BASELINE: Dict[str, Dict[str, Any]] = {
-    # SEC-001: Publish to web must be disabled or scoped to a security group
-    "PublishToWeb": {
-        "rule_id": "SEC-001",
-        "title": "Publish to web is disabled or restricted to a security group",
-        "expect": "disabled_or_scoped",
-    },
-    # SEC-002: Export data must be restricted to a security group
-    "ExportData": {
-        "rule_id": "SEC-002",
-        "title": "Export data is restricted to a security group",
-        "expect": "scoped",
-    },
-    # TENANT-001: Create Fabric items must be scoped to a security group
-    "CreateFabricItem": {
-        "rule_id": "TENANT-001",
-        "title": "Users can create Fabric items is scoped to a security group",
-        "expect": "scoped",
-    },
-    # TENANT-002: SP Fabric API access must be enabled and scoped to a SG
-    "ServicePrincipalAccess": {
-        "rule_id": "TENANT-002",
-        "title": "Service principals can use Fabric APIs is enabled and scoped",
-        "expect": "enabled_and_scoped",
-    },
-    # TENANT-003: External data sharing must be disabled or scoped
-    "AllowExternalDataSharing": {
-        "rule_id": "TENANT-003",
-        "title": "External data sharing is disabled or scoped to a security group",
-        "expect": "disabled_or_scoped",
-        "aliases": ("ExternalDataSharing", "ExternalDataSharingReceiveSettings",
-                    "ExternalDataSharingSendSettings", "ShareReportWithEntireOrg"),
-    },
-    # TENANT-004: Custom (uncertified) visuals must be restricted
-    "CustomVisualsTenantSettings": {
-        "rule_id": "TENANT-004",
-        "title": "Uncertified / custom visuals are restricted to a security group",
-        "expect": "scoped",
-        "aliases": ("AddCertifiedVisualsOnly", "AddAndUseCertifiedVisualsOnly",
-                    "OrgVisualsTenantSetting", "CustomVisualsTenantSetting"),
-    },
-    # TENANT-005: R / Python visual & script runtime restricted
-    "RScriptVisualsTenantSettings": {
-        "rule_id": "TENANT-005",
-        "title": "R / Python visuals and scripts are restricted to a security group",
-        "expect": "scoped",
-        "aliases": ("RPythonVisualsTenantSettings", "PythonVisualsTenantSettings",
-                    "PythonScriptsTenantSettings", "RScriptVisualsTenantSetting"),
-    },
-}
-
-
-def _load_rules(checklist_path: Path) -> Dict[str, Dict[str, Any]]:
-    with checklist_path.open("r", encoding="utf-8-sig") as f:
-        raw = yaml.safe_load(f)
-    return {r["id"]: r for r in raw.get("rules", [])}
+from analyzers._common import load_rules, make_finding
 
 
 def _iter_settings(payload: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
@@ -87,7 +26,7 @@ def _iter_settings(payload: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
 
 
 def _evaluate(setting: Dict[str, Any], expect: str) -> tuple[str, str]:
-    """Return (status, reason) where status is 'pass' | 'fail' | 'info'."""
+    """Return the canonical status and supporting reason."""
     enabled = bool(setting.get("enabled"))
     can_specify_security_groups = bool(setting.get("canSpecifySecurityGroups"))
     enabled_security_groups = setting.get("enabledSecurityGroups") or []
@@ -117,7 +56,7 @@ def _evaluate(setting: Dict[str, Any], expect: str) -> tuple[str, str]:
             return "pass", f"Enabled and scoped to {len(enabled_security_groups)} security group(s)."
         return "fail", "Enabled tenant-wide; should be scoped to an automation security group."
 
-    return "info", f"Unknown expectation '{expect}'."
+    return "unknown", f"Unknown expectation '{expect}'."
 
 
 def analyze(
@@ -134,12 +73,15 @@ def analyze(
     with raw_path.open("r", encoding="utf-8-sig") as f:
         payload = json.load(f)
 
-    rules = _load_rules(checklist_path)
+    rules = load_rules(checklist_path)
     settings_by_name = {s.get("settingName"): s for s in _iter_settings(payload)}
 
     findings: List[Dict[str, Any]] = []
-    for setting_name, spec in BASELINE.items():
-        rule = rules.get(spec["rule_id"], {})
+    for rule in rules.values():
+        spec = rule.get("tenant_setting")
+        if not isinstance(spec, dict):
+            continue
+        setting_name = str(spec["name"])
         setting = settings_by_name.get(setting_name)
         if setting is None:
             for alias in spec.get("aliases", ()):
@@ -148,48 +90,40 @@ def analyze(
                     setting_name = alias
                     break
         if setting is None:
-            findings.append(
-                {
-                    "rule_id": spec["rule_id"],
-                    "dimension": "tenant_settings",
-                    "severity": rule.get("severity", "medium"),
-                    "status": "info",
-                    "title": spec["title"],
-                    "evidence": {
-                        "setting_name": setting_name,
-                        "present": False,
-                        "reason": "Setting not returned by the tenant settings API.",
-                    },
-                    "recommendation": (
-                        f"Setting '{setting_name}' was not returned by the tenant settings "
-                        "API. Verify the signed-in user holds Fabric Administrator (or Power BI "
-                        "Administrator) and that the setting name has not been renamed."
-                    ),
-                    "microsoft_learn_url": rule.get("microsoft_learn_url"),
-                }
-            )
+            findings.append(make_finding(
+                rule,
+                dimension=rule["dimension"],
+                status="missing_evidence",
+                title=spec["title"],
+                evidence={
+                    "setting_name": setting_name,
+                    "present": False,
+                    "reason": "Setting not returned by the tenant settings API.",
+                },
+                recommendation=(
+                    f"Setting '{setting_name}' was not returned by the tenant settings "
+                    "API. Verify the signed-in user holds Fabric Administrator (or Power BI "
+                    "Administrator) and that the setting name has not been renamed."
+                ),
+            ))
             continue
 
         status, reason = _evaluate(setting, spec["expect"])
-        findings.append(
-            {
-                "rule_id": spec["rule_id"],
-                "dimension": "tenant_settings",
-                "severity": rule.get("severity", "medium"),
-                "status": status,
-                "title": spec["title"],
-                "evidence": {
-                    "setting_name": setting_name,
-                    "enabled": setting.get("enabled"),
-                    "enabledSecurityGroups": setting.get("enabledSecurityGroups"),
-                    "excludedSecurityGroups": setting.get("excludedSecurityGroups"),
-                    "canSpecifySecurityGroups": setting.get("canSpecifySecurityGroups"),
-                    "reason": reason,
-                },
-                "recommendation": rule.get("description", "").strip(),
-                "microsoft_learn_url": rule.get("microsoft_learn_url"),
-            }
-        )
+        findings.append(make_finding(
+            rule,
+            dimension=rule["dimension"],
+            status=status,
+            title=spec["title"],
+            evidence={
+                "setting_name": setting_name,
+                "enabled": setting.get("enabled"),
+                "enabledSecurityGroups": setting.get("enabledSecurityGroups"),
+                "excludedSecurityGroups": setting.get("excludedSecurityGroups"),
+                "canSpecifySecurityGroups": setting.get("canSpecifySecurityGroups"),
+                "reason": reason,
+            },
+            recommendation=rule.get("description", "").strip(),
+        ))
 
     return findings
 

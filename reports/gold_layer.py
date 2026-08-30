@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from reports.powerbi.schema import GOLD_TABLES_BY_NAME, SEVERITY_RANK
+from analyzers.applicability import classify_workspaces, load_workspace_overrides
 from reports.version import build_release_record
 
 DIMENSIONS = [
@@ -240,11 +241,21 @@ def _vp_is_calc(rec: Dict[str, Any]) -> bool:
     return "calc" in kind
 
 
-def _score(pass_count: int, fail_count: int) -> float:
+def _score(pass_count: int, fail_count: int) -> Optional[float]:
     evaluated = pass_count + fail_count
     if evaluated == 0:
-        return 100.0
+        return None
     return round(pass_count / evaluated * 100.0, 1)
+
+
+def _coverage(bucket: Dict[str, int]) -> float:
+    total = sum(bucket[key] for key in (
+        "pass", "fail", "info", "not_applicable", "unknown", "missing_evidence"
+    ))
+    if not total:
+        return 0.0
+    conclusive = total - bucket["unknown"] - bucket["missing_evidence"]
+    return round(conclusive / total * 100.0, 1)
 
 
 # Status colour buckets - kept consistent across every page of the report so a
@@ -395,6 +406,7 @@ def build_gold(
             "severity_rank": SEVERITY_RANK.get(severity, 2),
             "status": status,
             "is_fail": 1 if status == "fail" else 0,
+            "is_scored": 1 if status in ("pass", "fail") else 0,
             "title": f.get("title"),
             "recommendation": f.get("recommendation"),
             "rule_description": rule_desc.get(rid, ""),
@@ -405,23 +417,36 @@ def build_gold(
 
     # ---- gold_run_summary + gold_dimension_summary ---------------------
     def _bucket(items: List[Dict[str, Any]]) -> Dict[str, int]:
-        b = {"pass": 0, "fail": 0, "info": 0,
-             "critical_fail": 0, "high_fail": 0, "medium_fail": 0, "low_fail": 0}
-        for it in items:
-            st = (it.get("status") or "info").lower()
-            b[st if st in ("pass", "fail", "info") else "info"] += 1
-            if st == "fail":
-                sev = (it.get("severity") or "medium").lower()
-                key = f"{sev}_fail"
-                if key in b:
-                    b[key] += 1
-        return b
+        bucket = {
+            "pass": 0,
+            "fail": 0,
+            "info": 0,
+            "not_applicable": 0,
+            "unknown": 0,
+            "missing_evidence": 0,
+            "critical_fail": 0,
+            "high_fail": 0,
+            "medium_fail": 0,
+            "low_fail": 0,
+        }
+        for item in items:
+            status = (item.get("status") or "unknown").lower()
+            bucket[status if status in bucket else "unknown"] += 1
+            if status == "fail":
+                severity = (item.get("severity") or "medium").lower()
+                severity_key = f"{severity}_fail"
+                if severity_key in bucket:
+                    bucket[severity_key] += 1
+        return bucket
 
     rb = _bucket(findings)
     tables["gold_run_summary"].append(_coerce_row("gold_run_summary", {
         **meta,
         "total_findings": len(findings),
         "pass_count": rb["pass"], "fail_count": rb["fail"], "info_count": rb["info"],
+        "not_applicable_count": rb["not_applicable"], "unknown_count": rb["unknown"],
+        "missing_evidence_count": rb["missing_evidence"],
+        "assessment_coverage": _coverage(rb),
         "critical_fail": rb["critical_fail"], "high_fail": rb["high_fail"],
         "medium_fail": rb["medium_fail"], "low_fail": rb["low_fail"],
         "score": _score(rb["pass"], rb["fail"]),
@@ -454,6 +479,9 @@ def build_gold(
             "dimension": dim,
             "total": len(items),
             "pass_count": db["pass"], "fail_count": db["fail"], "info_count": db["info"],
+            "not_applicable_count": db["not_applicable"], "unknown_count": db["unknown"],
+            "missing_evidence_count": db["missing_evidence"],
+            "assessment_coverage": _coverage(db),
             "score": _score(db["pass"], db["fail"]),
             "worst_severity": worst,
         }))
@@ -504,6 +532,11 @@ def build_gold(
         if _wl and _ct and _ct > last_activity_by_wid.get(_wl, ""):
             last_activity_by_wid[_wl] = _ct
     ws_name_by_id: Dict[str, str] = {}
+    profile_source = (wsi.get("workspaces") or scanner.get("workspaces") or [])
+    workspace_profiles = classify_workspaces(
+        profile_source,
+        load_workspace_overrides(Path(__file__).resolve().parents[1] / "config" / "workspaces.yaml"),
+    )
     for ws in wsi.get("workspaces") or []:
         wid = ws.get("id")
         _widl = str(wid).lower() if wid else ""
@@ -511,6 +544,7 @@ def build_gold(
             1 for u in (ws.get("users") or [])
             if (u.get("groupUserAccessRight") or "") == "Admin"
         )
+        profile = workspace_profiles.get(_widl) or {}
         tables["gold_workspaces"].append(_coerce_row("gold_workspaces", {
             **meta,
             "workspace_id": wid,
@@ -522,6 +556,11 @@ def build_gold(
             "last_activity": last_activity_by_wid.get(_widl),
             "is_inactive": bool(_widl) and _widl not in last_activity_by_wid,
             "description": ws.get("description"),
+            "archetype": profile.get("archetype"),
+            "environment": profile.get("environment"),
+            "classification": profile.get("classification"),
+            "profile_reason": profile.get("reason"),
+            "item_type_counts_json": json.dumps(profile.get("itemTypeCounts") or {}, ensure_ascii=False),
         }))
         if wid:
             ws_name_by_id[str(wid).lower()] = ws.get("name")

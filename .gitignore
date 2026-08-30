@@ -44,3 +44,6 @@ node_modules/
 
 # Local-only cover logo / brand assets (keep brand images out of the repo)
 reports/images/*.png
+
+# Disposable private-branch Fabric setup (may contain a short-lived token in local copies)
+fabric/setup_private_test_DISPOSABLE.ipynb

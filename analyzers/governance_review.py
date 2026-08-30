@@ -4,17 +4,17 @@
 """Governance review.
 
 Rule coverage:
-  GOV-001 Workspaces with at least 2 admins
-  GOV-002 Sensitivity-label coverage on items
-  GOV-003 Workspace naming convention (env/layer markers)
-  GOV-004 Git integration coverage (governance lens)
+    GOV-001 Production workspaces with at least 2 admins
+    GOV-002 Inactive items in the activity-log review window
+    GOV-003 Sensitivity-label coverage on governed items
+    GOV-004 Workspace naming convention (env/layer markers)
   GOV-005 Sharing activity volume
   GOV-006 Orphaned workspaces (content but no recent activity)
   GOV-007 Fabric Capacity Metrics app installed
   GOV-008 Endorsement (Certified / Promoted) coverage of content (advisory)
   GOV-009 Uncertified semantic models in production workspaces
 
-Inputs: scanner.json (or workspace_inventory.json), git_integration.json, activity_logs.json.
+Inputs: scanner.json (or workspace_inventory.json), activity_logs.json.
 
 DATA SAFETY: Metadata + audit metadata only.
 """
@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers.applicability import classify_workspaces, load_workspace_overrides, production_scope
 
 NAMING_PATTERN = re.compile(
     r"(bronze|silver|gold|raw|stg|staging|curated|landing|dev|test|qa|uat|prod|production|sbx|sandbox)",
@@ -38,7 +39,6 @@ SHARE_VOLUME_THRESHOLD = threshold("governance", "share_volume_warn", 100, env="
 MIN_ADMINS = threshold("governance", "min_admins", 2, cast=int)
 LABEL_COVERAGE_MIN_RATIO = threshold("governance", "label_coverage_min_ratio", 0.5, cast=float)
 NAMING_COVERAGE_MIN_RATIO = threshold("governance", "naming_coverage_min_ratio", 0.5, cast=float)
-GIT_COVERAGE_MIN_RATIO = threshold("governance", "git_coverage_min_ratio", 0.5, cast=float)
 ENDORSEMENT_MIN_RATIO = threshold("governance", "endorsement_min_ratio", 0.3, env="GOV_ENDORSEMENT_MIN_RATIO", cast=float)
 PROD_ENDORSEMENT_MIN_RATIO = threshold("governance", "prod_endorsement_min_ratio", 0.5, env="GOV_PROD_ENDORSEMENT_MIN_RATIO", cast=float)
 
@@ -46,6 +46,12 @@ PROD_ENDORSEMENT_MIN_RATIO = threshold("governance", "prod_endorsement_min_ratio
 PROD_PATTERN = re.compile(r"(prod|production)", re.IGNORECASE)
 # Item kinds that can be endorsed (Certified / Promoted) in Fabric / Power BI.
 _ENDORSABLE_KINDS = ("datasets", "reports", "dataflows", "lakehouses", "warehouses")
+_LABELLED_KINDS = ("datasets", "reports", "lakehouses", "warehouses")
+_ACTIVITY_ITEM_ID_KEYS = (
+    "ArtifactId", "ArtifactID", "artifactId", "ItemId", "ItemID", "itemId",
+    "DatasetId", "DatasetID", "datasetId", "ReportId", "ReportID", "reportId",
+    "DataflowId", "DataflowID", "dataflowId", "ObjectId", "ObjectID", "objectId",
+)
 
 
 def _endorsement(item: Dict[str, Any]) -> str:
@@ -59,6 +65,29 @@ def _endorsable_items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
     for kind in _ENDORSABLE_KINDS:
         out.extend(ws.get(kind) or [])
     return out
+
+
+def _labelled_items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Return only item types covered by the sensitivity-label contract."""
+    out: List[Dict[str, Any]] = []
+    for kind in _LABELLED_KINDS:
+        out.extend(ws.get(kind) or [])
+    if out or not isinstance(ws.get("items"), list):
+        return out
+    supported = {"semanticmodel", "dataset", "report", "lakehouse", "warehouse"}
+    return [item for item in ws["items"]
+            if (item.get("type") or item.get("itemType") or "").lower().replace(" ", "") in supported]
+
+
+def _activity_item_ids(events: List[Dict[str, Any]]) -> set[str]:
+    ids: set[str] = set()
+    for event in events:
+        for key in _ACTIVITY_ITEM_ID_KEYS:
+            value = event.get(key)
+            if value:
+                ids.add(str(value).lower())
+                break
+    return ids
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
@@ -110,21 +139,25 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     findings: List[Dict[str, Any]] = []
 
     workspaces = _workspaces(raw_dir)
+    workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
+    workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
 
-    # --- GOV-001 ≥2 admins ---
+    # --- GOV-001 production workspaces have ≥2 admins ---
     rule = rules.get("GOV-001")
     if rule:
         if not workspaces:
             findings.append(missing_raw_finding(rule, "governance", "scanner.json or workspace_inventory.json"))
         else:
-            # Only shared, non-empty workspaces carry the two-admin expectation.
-            relevant = [w for w in workspaces if _is_shared_content_workspace(w)]
+            scope = production_scope(workspaces, workspace_profiles)
+            relevant = [w for w in scope["applicable"] if _is_shared_content_workspace(w)]
             if not relevant:
                 findings.append(make_finding(
-                    rule, dimension="governance", status="pass",
+                    rule, dimension="governance",
+                    status="unknown" if scope["unknown"] else "not_applicable",
                     title="Workspaces with fewer than 2 admins",
                     evidence={"evaluatedWorkspaces": 0, "minAdmins": MIN_ADMINS,
-                              "note": "No shared, non-empty workspaces to evaluate."},
+                              "unknownEnvironmentWorkspaces": [w.get("name") for w in scope["unknown"]],
+                              "note": "No classified production, shared, non-empty workspaces to evaluate."},
                     recommendation="Assign at least two workspace admins (preferably via a security group) to avoid orphan risk."
                 ))
             else:
@@ -139,66 +172,83 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     recommendation="Assign at least two workspace admins (preferably via a security group) to avoid orphan risk."
                 ))
 
-    # --- GOV-002 sensitivity labels ---
+    # --- GOV-002 inactive items ---
     rule = rules.get("GOV-002")
     if rule:
-        if not workspaces:
-            findings.append(missing_raw_finding(rule, "governance", "scanner.json or workspace_inventory.json"))
+        logs = load_raw(raw_dir / "activity_logs.json")
+        if not workspaces or not logs:
+            findings.append(missing_raw_finding(
+                rule, "governance", "scanner.json + activity_logs.json"
+            ))
         else:
-            total_items = 0
-            labelled = 0
-            for w in workspaces:
-                for item in _items(w):
-                    total_items += 1
-                    if item.get("sensitivityLabel") or item.get("informationProtectionLabel"):
-                        labelled += 1
-            ratio = (labelled / total_items) if total_items else 0
-            status = "pass" if total_items and ratio >= LABEL_COVERAGE_MIN_RATIO else "fail"
+            inventoried = [
+                {"id": str(item.get("id") or "").lower(), "name": item.get("name"),
+                 "workspace": workspace.get("name")}
+                for workspace in workspaces if workspace.get("type") != "PersonalGroup"
+                for item in _items(workspace) if item.get("id")
+            ]
+            active_ids = _activity_item_ids(logs.get("events") or [])
+            inactive = [item for item in inventoried if item["id"] not in active_ids]
+            evidence_available = bool(active_ids) or not inventoried
+            status = ("pass" if not inactive else "fail") if evidence_available else "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
-                title="Sensitivity label coverage",
-                evidence={"totalItems": total_items, "labelledItems": labelled, "ratio": round(ratio, 2)},
-                recommendation="Apply sensitivity labels to datasets, reports, lakehouses, warehouses; "
-                               "enforce via tenant setting and Purview integration."
+                title=(f"Items with no activity in the last {logs.get('windowDays', '?')} day(s)"
+                       if evidence_available else "Item inactivity could not be evaluated"),
+                evidence={"windowDays": logs.get("windowDays"),
+                          "inventoriedItems": len(inventoried),
+                          "eventsWithArtifactId": len(active_ids),
+                          "inactiveCount": len(inactive) if evidence_available else None,
+                          "examples": inactive[:20] if evidence_available else [],
+                          "missingEvidence": None if evidence_available else
+                          "Activity-log events contain no artifact/item identifiers."},
+                recommendation=("Archive or delete confirmed inactive items after validating their business "
+                                "retention requirements." if evidence_available else
+                                "Collect activity events with ArtifactId, ItemId, DatasetId, or ReportId fields "
+                                "before drawing an item-level inactivity conclusion.")
             ))
 
-    # --- GOV-003 naming convention ---
+    # --- GOV-003 sensitivity labels ---
     rule = rules.get("GOV-003")
     if rule:
         if not workspaces:
             findings.append(missing_raw_finding(rule, "governance", "scanner.json or workspace_inventory.json"))
         else:
-            matching = [w for w in workspaces if NAMING_PATTERN.search(w.get("name") or "")]
-            ratio = len(matching) / len(workspaces)
-            status = "pass" if ratio >= NAMING_COVERAGE_MIN_RATIO else "fail"
+            governed = [item for workspace in workspaces for item in _labelled_items(workspace)]
+            labelled = [item for item in governed
+                        if item.get("sensitivityLabel") or item.get("informationProtectionLabel")]
+            ratio = (len(labelled) / len(governed)) if governed else 0
+            status = "pass" if governed and ratio >= LABEL_COVERAGE_MIN_RATIO else (
+                "not_applicable" if not governed else "fail"
+            )
+            findings.append(make_finding(
+                rule, dimension="governance", status=status,
+                title="Sensitivity label coverage",
+                evidence={"evaluatedItems": len(governed), "labelledItems": len(labelled),
+                          "ratio": round(ratio, 2)},
+                recommendation="Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; "
+                               "enforce via tenant setting and Purview integration."
+            ))
+
+    # --- GOV-004 naming convention ---
+    rule = rules.get("GOV-004")
+    if rule:
+        if not workspaces:
+            findings.append(missing_raw_finding(rule, "governance", "scanner.json or workspace_inventory.json"))
+        else:
+            shared = [w for w in workspaces if w.get("type") != "PersonalGroup"]
+            matching = [w for w in shared if NAMING_PATTERN.search(w.get("name") or "")]
+            ratio = (len(matching) / len(shared)) if shared else 0
+            status = "pass" if shared and ratio >= NAMING_COVERAGE_MIN_RATIO else (
+                "not_applicable" if not shared else "fail"
+            )
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title="Workspaces following documented naming convention",
-                evidence={"workspaceCount": len(workspaces), "matchingCount": len(matching),
+                evidence={"workspaceCount": len(shared), "matchingCount": len(matching),
                           "ratio": round(ratio, 2)},
-                recommendation="Document and enforce a naming convention combining environment + layer markers "
-                               "(e.g. `<domain>-<env>-<layer>`)."
-            ))
-
-    # --- GOV-004 Git coverage ---
-    rule = rules.get("GOV-004")
-    if rule:
-        git = load_raw(raw_dir / "git_integration.json")
-        if not git:
-            findings.append(missing_raw_finding(rule, "governance", "git_integration.json"))
-        else:
-            ws_list = git.get("workspaces") or []
-            connected = [w for w in ws_list if w.get("connected")]
-            total = len(ws_list)
-            ratio = (len(connected) / total) if total else 0
-            status = "pass" if total and ratio >= GIT_COVERAGE_MIN_RATIO else ("info" if not total else "fail")
-            findings.append(make_finding(
-                rule, dimension="governance", status=status,
-                title="Workspaces under source control (governance view)",
-                evidence={"totalWorkspaces": total, "gitConnectedCount": len(connected),
-                          "ratio": round(ratio, 2)},
-                recommendation="Require Git integration on all production workspaces — provides audit trail "
-                               "and rollback for governance evidence."
+                recommendation="Document and enforce a naming convention combining domain, environment, and "
+                               "purpose (for example, `<domain>-<env>-<purpose>`)."
             ))
 
     # --- GOV-005 sharing volume ---
@@ -240,6 +290,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 if wsid:
                     seen_ws.add(wsid.lower())
             orphans = []
+            expected_inactive = []
             for w in workspaces:
                 if w.get("type") == "PersonalGroup":
                     continue
@@ -248,15 +299,22 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 # Skip empty workspaces — ARCH-007 covers those.
                 if not _items(w):
                     continue
-                orphans.append({"name": w.get("name"),
-                                "items": len(_items(w))})
-            status = "pass" if not orphans else "fail"
+                profile = workspace_profiles.get((w.get("id") or "").lower(), {})
+                row = {"name": w.get("name"), "items": len(_items(w)),
+                       "usagePattern": profile.get("usagePattern", "unknown")}
+                if profile.get("usagePattern") in ("monthly", "quarterly", "on_demand"):
+                    expected_inactive.append(row)
+                else:
+                    orphans.append(row)
+            status = "fail" if orphans else "info" if expected_inactive else "pass"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title=f"Workspaces with content but no activity in last {logs.get('windowDays', '?')} day(s)",
                 evidence={"windowDays": logs.get("windowDays"),
                           "orphanedCount": len(orphans),
-                          "examples": orphans[:20]},
+                          "examples": orphans[:20],
+                          "expectedLowFrequencyCount": len(expected_inactive),
+                          "expectedLowFrequency": expected_inactive[:20]},
                 recommendation=("Confirm the owner; if the workspace is no longer used, archive it to reduce "
                                 "attack surface and capacity load.")
             ))

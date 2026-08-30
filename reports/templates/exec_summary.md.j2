@@ -27,6 +27,10 @@
 | Failing checks | **{{ total_fails }}** |
 | Passing checks | {{ total_pass }} |
 | Informational | {{ total_info }} |
+| Not applicable | {{ total_not_applicable }} |
+| Unknown applicability | {{ total_unknown }} |
+| Missing evidence | {{ total_missing_evidence }} |
+| Assessment coverage | {{ assessment_coverage }}% |
 
 ## Findings overview
 
@@ -36,7 +40,7 @@
 | {{ row.dimension | dim_title }} | {{ row.critical }} | {{ row.high }} | {{ row.medium }} | {{ row.low }} | {{ row.info }} |
 {% endfor %}
 
-> Counts above include **failing checks only**. Passing and informational findings are listed in the Detailed Findings section for full traceability.
+> Counts above include **failing checks only**. Every outcome, including exclusions and evidence gaps, is listed in Detailed Findings for full traceability.
 
 ## Top risks
 

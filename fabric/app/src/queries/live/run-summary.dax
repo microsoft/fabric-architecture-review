@@ -6,5 +6,8 @@ SELECTCOLUMNS(
     "total_findings", 'gold_run_summary'[total_findings],
     "critical_fail", 'gold_run_summary'[critical_fail],
     "high_fail", 'gold_run_summary'[high_fail],
+    "assessment_coverage", 'gold_run_summary'[assessment_coverage],
+    "unknown_count", 'gold_run_summary'[unknown_count],
+    "missing_evidence_count", 'gold_run_summary'[missing_evidence_count],
     "score", 'gold_run_summary'[score]
 )

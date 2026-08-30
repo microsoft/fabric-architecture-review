@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Workspaces in scope for this engagement.
 # Either list explicit workspace IDs, or set `all_workspaces: true` to let
 # the Scanner API enumerate every workspace the SP can see.
@@ -11,8 +14,24 @@ workspaces:
   - id: 00000000-0000-0000-0000-000000000000
     name: example-workspace-bronze
     notes: "Bronze landing zone"
+    # Optional review context. Explicit values override inferred classification.
+    # profile:
+    #   archetype: batch_engineering
+    #   environment: nonproduction
+    #   usage_pattern: monthly  # continuous | business_hours | monthly | quarterly | on_demand
+    # rule_overrides:
+    #   ARCH-001:
+    #     applicability: applicable  # applicable | not_applicable | unknown
+    #     reason: "Engineering landing-zone workspace."
   # - id: 11111111-1111-1111-1111-111111111111
   #   name: example-workspace-silver
 
-# Optional: capacities in scope. If empty, derived from workspaces above.
+# Optional capacity environment overrides, keyed by immutable capacity ID.
+# Explicit values override environments derived from assigned workspace profiles
+# and capacity-name inference for capacity-level applicability (for example COST-002).
+# capacities:
+#   - id: 00000000-0000-0000-0000-000000000000
+#     name: example-nonproduction-capacity
+#     profile:
+#       environment: nonproduction
 capacities: []

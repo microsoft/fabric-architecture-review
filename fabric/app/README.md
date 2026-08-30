@@ -140,7 +140,10 @@ npm run build:fabric
 npm audit --omit=dev --audit-level=high
 ```
 
-The production build includes `index.html`, `auth-callback.html`, `popup-relay.html`, and generated third-party notices.
+The production build performs a full TypeScript project check before Vite bundles
+`index.html`, `auth-callback.html`, `popup-relay.html`, and generated third-party notices.
+The root CI workflow also audits Python runtime dependencies and parses the Bash and
+PowerShell orchestration scripts.
 
 ## Deploy to Fabric
 
