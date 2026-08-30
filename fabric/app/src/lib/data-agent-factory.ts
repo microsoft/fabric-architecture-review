@@ -24,6 +24,11 @@ interface DataAgentTool {
     };
 }
 
+interface DataAgentToolSelection {
+    tool: DataAgentTool;
+    questionArgument: "question" | "userQuestion";
+}
+
 const fabricScopes = ["https://api.fabric.microsoft.com/.default"];
 const requestTimeoutMs = 300_000;
 const reviewEvidenceDomains = [
@@ -39,7 +44,8 @@ const reviewEvidenceDomains = [
 ] as const;
 
 function getPublicSetting(name: string): string {
-    return import.meta.env[name]?.trim() ?? "";
+    const value = import.meta.env[name];
+    return typeof value === "string" ? value.trim() : "";
 }
 
 function extractTextContent(content: unknown): string {
@@ -84,7 +90,20 @@ export function groundDataAgentQuestion(question: string): string {
 
 function isTransientDataAgentError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return /\b(?:internal error|network|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|503|504)\b/i.test(message);
+    return /\b(?:internal error|network|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|429|5\d\d)\b/i.test(message);
+}
+
+function selectDataAgentTool(tools: DataAgentTool[]): DataAgentToolSelection {
+    const matches = tools.flatMap((tool) => {
+        const properties = tool.inputSchema.properties ?? {};
+        const questionArgument = (["question", "userQuestion"] as const)
+            .find((name) => Object.hasOwn(properties, name));
+        return questionArgument ? [{ tool, questionArgument }] : [];
+    });
+    if (matches.length !== 1) {
+        throw new Error(`Expected one Data Agent tool with a question or userQuestion argument; found ${matches.length}.`);
+    }
+    return matches[0];
 }
 
 export function buildDataAgentEndpoint(workspaceId: string, dataAgentId: string): URL {
@@ -161,15 +180,11 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 buildDataAgentEndpoint(this.workspaceId, this.dataAgentId),
                 { requestInit: { headers: { Authorization: `Bearer ${token}` } } },
             );
-            const client = new Client({ name: "fabric-architecture-review", version: "0.1.0" });
+            const client = new Client({ name: "fabric-architecture-review", version: "2026.8.2" });
             try {
                 await client.connect(transport);
                 const tools = await client.listTools(undefined, { timeout: requestTimeoutMs });
-                const tool = tools.tools[0] as DataAgentTool | undefined;
-                if (!tool) throw new Error("The published Data Agent did not expose an MCP tool.");
-
-                const questionArgument = Object.keys(tool.inputSchema.properties ?? {})[0];
-                if (!questionArgument) throw new Error("The Data Agent tool did not advertise a question argument.");
+                const { tool, questionArgument } = selectDataAgentTool(tools.tools as DataAgentTool[]);
 
                 const result = await client.callTool({
                     name: tool.name,
@@ -181,6 +196,7 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 return answer;
             } catch (error) {
                 if (attempt === 1 || !isTransientDataAgentError(error)) throw error;
+                await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
             } finally {
                 await client.close();
             }

@@ -16,7 +16,7 @@ function table(columns: string[], rows: unknown[][]): QueryTable {
 describe("buildLiveReviewData", () => {
     it("joins live review rows without inventing artifact finding edges", () => {
         const tables: LiveReviewTables = {
-            runSummary: table(["run_id", "client_name", "total_findings", "critical_fail", "high_fail", "score"], [["run-1", "Contoso", 89, 0, 7, 50]]),
+            runSummary: table(["run_id", "client_name", "total_findings", "critical_fail", "high_fail", "assessment_coverage", "unknown_count", "missing_evidence_count", "score"], [["run-1", "Contoso", 89, 0, 7, 96, 2, 1, 50]]),
             dimensionSummary: table(["dimension", "fail_count", "score", "worst_severity"], [["architecture", 4, 56, "high"], ["notebook_code", 2, 70, "medium"]]),
             findings: table(["rule_id", "dimension", "severity", "severity_rank", "title", "affected", "recommendation"], [["ARCH-001", "architecture", "high", 3, "Layer naming", "1 affected", "Use layers"], ["NBCODE-003", "notebook_code", "medium", 2, "Notebook smell", "1 affected", "Refactor"]]),
             findingTargets: table(["rule_id", "workspace_id", "workspace_name"], [["ARCH-001", "ws-1", "Workspace One"]]),
@@ -35,6 +35,7 @@ describe("buildLiveReviewData", () => {
 
         expect(result.source).toBe("live");
         expect(result.estate.name).toBe("Contoso estate");
+        expect(result.metrics[3]).toMatchObject({ label: "Assessment coverage", value: "96%", delta: "3 evidence gaps" });
         expect(room.findingIds).toEqual(["ARCH-001"]);
         expect(room.owner).toBe("Owner");
         expect(room.capacityName).toBe("F64");

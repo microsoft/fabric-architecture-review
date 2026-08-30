@@ -32,6 +32,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
 
+from reports.agent.data_agent import compose_instructions
+
 Gold = Dict[str, List[Dict[str, Any]]]
 ExpectedFn = Callable[[Gold], str]
 
@@ -240,7 +242,7 @@ def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 def make_fabric_ask(
     agent_name: str,
     *,
-    instructions: str = "Answer strictly from the grounded gold tables.",
+    instructions: Optional[str] = None,
 ) -> Callable[[str], str]:
     """Return an ``ask(question) -> answer`` bound to a published Fabric Data Agent.
 
@@ -253,7 +255,10 @@ def make_fabric_ask(
     from fabric.dataagent.client import FabricOpenAI  # type: ignore  # noqa: PLC0415
 
     client = FabricOpenAI(artifact_name=agent_name)
-    assistant = client.beta.assistants.create(model="gpt-4o", instructions=instructions)
+    assistant = client.beta.assistants.create(
+        model="gpt-4o",
+        instructions=instructions or compose_instructions(),
+    )
 
     def ask(question: str) -> str:
         thread = client.beta.threads.create()

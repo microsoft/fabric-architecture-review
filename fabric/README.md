@@ -121,6 +121,24 @@ them via `@pipeline().parameters.*`, exactly the way the shared `RUN_ID` is reso
 > client's SLOs without redeploying. See
 > [Tuning pass/fail thresholds](../README.md#tuning-passfail-thresholds) in the main README.
 
+### Workspace classification in Fabric runs
+
+`WORKSPACE_IDS` restricts collection scope but does **not** mark those workspaces as production.
+The analyzers infer environment from separator-delimited workspace-name markers: `prod`,
+`production`, or `live` means production; `dev`, `test`, `qa`, `uat`, `sbx`, `sandbox`,
+`poc`, or `demo` means non-production; names without a marker remain `unknown`. Item composition
+independently determines the workload archetype used by workload-specific rules.
+
+When naming is not authoritative, define the workspace by immutable ID under `profile` in
+[../config/workspaces.yaml](../config/workspaces.yaml), including `environment`, `archetype`, and
+optional per-rule overrides. Fabric stages read that file from the deployed Git ref, so commit the
+profile to the branch or release before running setup. Production-only rules exclude personal,
+empty, and non-production workspaces; an unresolved environment produces `unknown`, not an assumed
+pass or failure. Capacity-level environment overrides use `capacities[].profile.environment` in the
+same file and take precedence over environments derived from assigned workspaces and capacity names.
+See [Workspace classification and production scope](../README.md#workspace-classification-and-production-scope)
+for the complete precedence and configuration example.
+
 ---
 
 ## 🥇 The gold layer + Direct Lake governance report

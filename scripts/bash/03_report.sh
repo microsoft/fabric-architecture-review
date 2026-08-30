@@ -28,12 +28,14 @@ if [[ ! -f "$FINDINGS_PATH" ]]; then
     echo "$FINDINGS_PATH not found. Run scripts/bash/02_analyze.sh first." >&2
     exit 1
 fi
+rm -f "$REPORT_MD" "$REPORT_PDF"
 
 echo "==> Rendering markdown report..."
 python -m reports.render_report \
     --findings "$FINDINGS_PATH" \
     --out "$REPORT_MD" \
     --raw-dir "$RAW_DIR"
+[[ -s "$REPORT_MD" ]] || { echo "Markdown report generation did not produce a nonempty report." >&2; exit 1; }
 
 echo "==> Generating PDF..."
 # Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.
@@ -41,6 +43,7 @@ echo "==> Generating PDF..."
 python reports/_generate_pdf.py \
     --input "$REPORT_MD" \
     --output "$REPORT_PDF"
+[[ -s "$REPORT_PDF" ]] || { echo "PDF generation did not produce a nonempty report." >&2; exit 1; }
 
 echo ""
 echo "Report: $REPORT_PDF"

@@ -50,6 +50,9 @@ STATUS_BADGE = {
     "pass": "PASS",
     "fail": "FAIL",
     "info": "INFO",
+    "not_applicable": "N/A",
+    "unknown": "UNKNOWN",
+    "missing_evidence": "MISSING EVIDENCE",
 }
 
 SEVERITY_BADGE = {
@@ -512,10 +515,15 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
     fails = sum(1 for f in findings if f.get("status") == "fail")
     passes = sum(1 for f in findings if f.get("status") == "pass")
     infos = sum(1 for f in findings if f.get("status") == "info")
+    not_applicable = sum(1 for f in findings if f.get("status") == "not_applicable")
+    unknown = sum(1 for f in findings if f.get("status") == "unknown")
+    missing = sum(1 for f in findings if f.get("status") == "missing_evidence")
     result_cards = [
         _env_card(fails, "Failing checks", "need attention", "bad" if fails else "good"),
         _env_card(passes, "Passing checks", "aligned to checklist", "good"),
         _env_card(infos, "Informational", "context / not scored", "info"),
+        _env_card(not_applicable, "Not applicable", "excluded from score", "info"),
+        _env_card(unknown + missing, "Needs evidence", "unknown or incomplete", "warn" if unknown + missing else "good"),
     ]
     groups.append(_env_group("Review result", result_cards))
 
@@ -777,6 +785,10 @@ def render(findings_path: Path, out_path: Path, templates_dir: Path, raw_dir: Pa
     find_tpl = env.get_template("findings.md.j2")
     rec_tpl = env.get_template("recommendations.md.j2")
 
+    total_unknown = sum(1 for f in findings if f.get("status") == "unknown")
+    total_missing = sum(1 for f in findings if f.get("status") == "missing_evidence")
+    conclusive = len(findings) - total_unknown - total_missing
+    assessment_coverage = round(conclusive / len(findings) * 100, 1) if findings else 0.0
     exec_md = exec_tpl.render(
         engagement_name=os.environ.get("ENGAGEMENT_NAME", "Fabric Architecture Review"),
         brand=os.environ.get("REPORT_BRAND", ""),
@@ -794,10 +806,15 @@ def render(findings_path: Path, out_path: Path, templates_dir: Path, raw_dir: Pa
         total_fails=len(fails),
         total_pass=sum(1 for f in findings if f.get("status") == "pass"),
         total_info=sum(1 for f in findings if f.get("status") == "info"),
+        total_not_applicable=sum(1 for f in findings if f.get("status") == "not_applicable"),
+        total_unknown=total_unknown,
+        total_missing_evidence=total_missing,
+        assessment_coverage=assessment_coverage,
     )
 
     # Sort each dimension's findings: fail first, then info, then pass; within group by severity.
-    status_order = {"fail": 0, "info": 1, "pass": 2}
+    status_order = {"fail": 0, "missing_evidence": 1, "unknown": 2,
+                    "info": 3, "not_applicable": 4, "pass": 5}
     sorted_by_dim: Dict[str, List[Dict[str, Any]]] = {}
     for dim in DIMENSIONS + sorted(set(by_dim) - set(DIMENSIONS)):
         if dim in by_dim:

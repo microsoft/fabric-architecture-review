@@ -98,7 +98,10 @@ Even in the opt-in mode only **aggregate counts** leave the engine — never row
 | Power BI REST `GET /datasets/{id}/executeQueries` | Executes DAX returning rows |
 | Pipeline activity input/output payloads | May contain query text or row samples |
 
-A PR that introduces any of the above must be rejected. CI rules (future) should grep for `EVALUATE`, `executeQueries`, `getArtifactUsers=true`, `datasetSchema=true`, `datasetExpressions=true`, `datasourceDetails=true`.
+A PR that introduces any of the above must be rejected. CI runs the automated contract,
+syntax, test, build, and dependency-audit gates; reviewers must also inspect changes to
+data-access code in context because permitted metadata collectors can legitimately contain
+terms such as `EVALUATE` and `executeQueries`.
 
 ---
 

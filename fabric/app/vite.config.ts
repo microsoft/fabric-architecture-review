@@ -54,14 +54,26 @@ export default defineConfig({
         }
     },
     build: {
+        chunkSizeWarningLimit: 750,
         commonjsOptions: {
             include: [/node_modules/],
         },
-        rollupOptions: {
+        rolldownOptions: {
             input: {
                 main: resolve(projectRoot, 'index.html'),
                 authCallback: resolve(projectRoot, 'auth-callback.html'),
                 popupRelay: resolve(projectRoot, 'popup-relay.html'),
+            },
+            output: {
+                codeSplitting: {
+                    groups: [
+                        { name: 'react', test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/ },
+                        { name: 'fabric', test: /node_modules[\\/]@microsoft[\\/](?:fabric-app-data|fabric-visuals-core)/ },
+                        { name: 'identity', test: /node_modules[\\/](?:@azure[\\/]msal|@microsoft[\\/]rayfin)/ },
+                        { name: 'mcp', test: /node_modules[\\/]@modelcontextprotocol[\\/]sdk[\\/]/ },
+                        { name: 'three', test: /node_modules[\\/]three[\\/]/ },
+                    ],
+                },
             },
             plugins: [
                 license({

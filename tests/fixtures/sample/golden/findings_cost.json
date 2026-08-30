@@ -4,12 +4,14 @@
     "dimension": "cost",
     "severity": "high",
     "status": "pass",
-    "title": "Active capacities with no assigned workspaces",
+    "title": "Capacity right-sizing from sustained CU% (0 outside target band)",
     "evidence": {
-      "count": 0,
-      "capacities": []
+      "idleBelowPct": 20.0,
+      "saturatedAbovePct": 85.0,
+      "capacitiesEvaluated": 1,
+      "outsideBand": []
     },
-    "recommendation": "Pause or delete empty capacities; they incur SKU charges with zero utilization.",
+    "recommendation": "Downsize or consolidate chronically idle capacities; optimize workloads, enable autoscale, or upsize chronically saturated capacities.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/optimize-capacity"
   },
   {
@@ -38,24 +40,6 @@
       ]
     },
     "recommendation": "Either grant the signed-in user Reader on the subscription that hosts the automation account / Logic App and re-run, or unset CAPACITY_AUTO_PAUSE_CONFIGURED if the schedule no longer exists.",
-    "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/pause-resume"
-  },
-  {
-    "rule_id": "COST-003",
-    "dimension": "cost",
-    "severity": "medium",
-    "status": "info",
-    "title": "Non-production capacities (candidates for Pause/Resume)",
-    "evidence": {
-      "count": 1,
-      "capacities": [
-        {
-          "name": "Capacity Dev",
-          "sku": "F2"
-        }
-      ]
-    },
-    "recommendation": "Configure an Azure Automation runbook or schedule to pause non-production capacities outside business hours.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/pause-resume"
   },
   {
@@ -122,5 +106,18 @@
     },
     "recommendation": "Consider consolidating several small F-SKUs into one right-sized capacity: CU smoothing and bursting are shared across workloads, often improving both cost efficiency and headroom versus many isolated small capacities.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/optimize-capacity"
+  },
+  {
+    "rule_id": "COST-008",
+    "dimension": "cost",
+    "severity": "high",
+    "status": "pass",
+    "title": "Active capacities with no assigned workspaces",
+    "evidence": {
+      "count": 0,
+      "capacities": []
+    },
+    "recommendation": "Pause or delete empty capacities; they incur SKU charges with zero utilization.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/enterprise/pause-resume"
   }
 ]

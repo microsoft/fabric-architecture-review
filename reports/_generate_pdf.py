@@ -208,6 +208,9 @@ def _build_html(md_text: str, title: str, logo_b64: str | None, brand: str = "")
   .status-fail  {{ background: #FDE7E9; color: #A4262C; border: 1px solid #A4262C; }}
   .status-pass  {{ background: #DFF6DD; color: #0B6A0B; border: 1px solid #107C10; }}
   .status-info  {{ background: #FFF4CE; color: #8A6914; border: 1px solid #8A6914; }}
+  .status-not_applicable {{ background: #F3F2F1; color: #605E5C; border: 1px solid #A19F9D; }}
+  .status-unknown {{ background: #FFF4CE; color: #8A6914; border: 1px solid #8A6914; }}
+  .status-missing_evidence {{ background: #FED9CC; color: #8A2D0A; border: 1px solid #D83B01; }}
 
   /* Environment Overview - FUAM-style metric cards */
   .env-overview {{ margin: 10px 0 14px 0; }}

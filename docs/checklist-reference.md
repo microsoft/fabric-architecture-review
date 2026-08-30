@@ -4,11 +4,11 @@ Each rule below is evaluated by an analyzer module. The canonical source of
 truth is [`config/review-checklist.yaml`](../config/review-checklist.yaml);
 this page is the reader-friendly index with Microsoft Learn references.
 
-The numeric boundary that turns each rule into **pass** / **fail** / **info**
-lives in [`config/thresholds.yaml`](../config/thresholds.yaml) — the single,
+Numeric pass/fail boundaries live in [`config/thresholds.yaml`](../config/thresholds.yaml) — the single,
 documented place to tune the review to a client's SLOs. See
-[methodology.md](methodology.md#pass--fail-and-thresholds) for how pass/fail is
-decided and the override precedence.
+[methodology.md](methodology.md#applicability-outcomes-and-thresholds) for applicability,
+the six-state outcome contract, scoring, and override precedence. Rows marked superseded
+retain historical IDs but are disabled and do not emit findings.
 
 ## Architecture
 
@@ -17,12 +17,12 @@ decided and the override precedence.
 | ARCH-001 | high | Workspaces follow a medallion layering convention (e.g. *-bronze / *-silver / *-gold or equivalent) | [Learn](https://learn.microsoft.com/fabric/onelake/onelake-medallion-lakehouse-architecture) |
 | ARCH-002 | medium | Each workspace is assigned to a Fabric capacity (no items in "My workspace" or on Pro-only capacities for production data assets) | [Learn](https://learn.microsoft.com/fabric/enterprise/licenses) |
 | ARCH-003 | medium | Cross-workspace data access uses OneLake shortcuts rather than data duplication | [Learn](https://learn.microsoft.com/fabric/onelake/onelake-shortcuts) |
-| ARCH-004 | medium | Workspaces are connected to source control (Git integration) for production items | [Learn](https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration) |
+| ARCH-004 | medium | **Superseded by OPS-002 (disabled).** Workspaces are connected to source control for production items | [Learn](https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration) |
 | ARCH-005 | medium | No single workspace exceeds the monolithic threshold (default 50 items) | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines) |
 | ARCH-006 | low | Every workspace has a description that documents purpose and ownership | [Learn](https://learn.microsoft.com/fabric/get-started/create-workspaces) |
 | ARCH-007 | info | Workspaces containing no items should be archived or repurposed | [Learn](https://learn.microsoft.com/fabric/governance/governance-overview) |
 | ARCH-008 | medium | Personal (My workspace / PersonalGroup) workspaces are deprecated for production assets; migrate content to a shared workspace on a Fabric capacity | [Learn](https://learn.microsoft.com/fabric/get-started/workspaces) |
-| ARCH-009 | high | Production workspaces are governed by a Fabric / Power BI Deployment Pipeline (dev -> test -> prod) | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines) |
+| ARCH-009 | high | **Superseded by OPS-001 (disabled).** Production workspaces are governed by a Fabric / Power BI Deployment Pipeline | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/intro-to-deployment-pipelines) |
 | ARCH-010 | medium | Real-Time Intelligence assets (Eventhouse, KQL Database, Eventstream, Reflex / Activator) and Mirrored Databases are inventoried | [Learn](https://learn.microsoft.com/fabric/real-time-intelligence/overview) |
 | ARCH-011 | high | Semantic-model storage-mode mix is healthy | [Learn](https://learn.microsoft.com/fabric/get-started/direct-lake-overview) |
 | ARCH-012 | high | ExecuteNotebook / TridentNotebook activities inside Data Pipelines pass parameters that match the parameter names declared by the target notebook (Papermill-style `parameters`-tagged cell) | [Learn](https://learn.microsoft.com/fabric/data-factory/notebook-activity) |
@@ -95,7 +95,7 @@ Scoped to *production* workspaces only — dev / test / sandbox / personal works
 |---|---|---|---|
 | COST-001 | high | Capacity SKU is right-sized relative to sustained CU% — neither chronically idle (< 20% average) nor chronically saturated (> 85% average) | [Learn](https://learn.microsoft.com/fabric/enterprise/optimize-capacity) |
 | COST-002 | medium | Non-production capacities use Pause / Resume or autoscale to avoid 24x7 charges | [Learn](https://learn.microsoft.com/fabric/enterprise/pause-resume) |
-| COST-003 | medium | Non-production capacities (dev/test/sandbox indicators in name) use Pause/Resume to avoid 24x7 charges | [Learn](https://learn.microsoft.com/fabric/enterprise/pause-resume) |
+| COST-003 | medium | **Superseded by COST-002 (disabled).** Non-production capacities use Pause/Resume to avoid 24x7 charges | [Learn](https://learn.microsoft.com/fabric/enterprise/pause-resume) |
 | COST-004 | medium | Production-like workspaces (prod / production in name) are not hosted on PPU (per-user) capacities, which do not scale and are tied to a single user license | [Learn](https://learn.microsoft.com/power-bi/enterprise/service-premium-per-user-faq) |
 | COST-005 | medium | Large capacities (F64 and above) with very few assigned workspaces (< 5) are candidates for SKU downgrade or workspace consolidation | [Learn](https://learn.microsoft.com/fabric/enterprise/optimize-capacity) |
 | COST-006 | medium | Trial and Embedded capacities are not hosting real workspaces (trials expire; Embedded is sized for app embedding, not interactive use) | [Learn](https://learn.microsoft.com/fabric/enterprise/licenses) |

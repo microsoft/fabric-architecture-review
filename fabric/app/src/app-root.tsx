@@ -18,7 +18,7 @@ import { bootstrapAuth } from "@/services/rayfin-auth.service";
 const isDesignPreview = import.meta.env.DEV
     && new URLSearchParams(window.location.search).get("preview") === "1";
 const rayfinAuthService = isDesignPreview ? null : bootstrapAuth();
-const PreviewApp = isDesignPreview ? lazy(() => import("@/App")) : null;
+const PreviewApp = lazy(() => import("@/App"));
 
 export function AppRoot() {
     const { isDark, toggleTheme } = useAppTheme();

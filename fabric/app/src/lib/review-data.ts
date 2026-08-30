@@ -152,12 +152,12 @@ export const dimensionScores: DimensionScore[] = [
 
 export const reviewFindings: ReviewFinding[] = [
     {
-        id: "ARCH-009",
-        dimension: "Architecture",
+        id: "OPS-001",
+        dimension: "Governance",
         severity: "high",
-        title: "Critical lineage path crosses unmanaged boundaries",
-        affected: "Sample Lakehouse 01 to Sample Model 01",
-        recommendation: "Assign ownership to each lineage boundary and document the serving contract.",
+        title: "Production workspace is not covered by a deployment pipeline",
+        affected: "Sample Workspace 01",
+        recommendation: "Attach the workspace to a deployment pipeline and promote changes through validated stages.",
         workspaceIds: ["finance"],
     },
     {
@@ -228,9 +228,9 @@ export const tenantEstate: TenantEstate = {
             floor: "upper",
             status: "risk",
             riskScore: 91,
-            findingIds: ["ARCH-009", "SEC-004"],
+            findingIds: ["OPS-001", "SEC-004"],
             items: [
-                { id: "finance-lh", name: "Sample Lakehouse 01", type: "lakehouse", status: "warning", findingIds: ["ARCH-009"] },
+                { id: "finance-lh", name: "Sample Lakehouse 01", type: "lakehouse", status: "warning", findingIds: [] },
                 { id: "finance-sm", name: "Sample Model 01", type: "model", status: "risk", findingIds: ["SEC-004"], governance: { endorsement: "none", sensitivityLabel: "Not set", owner: "Sample owner A" }, modelProfile: { storageMode: "Direct Lake", totalSize: "4.8 GB", tables: 34, columns: 286, calculatedColumns: 12, tableStats: [
                     { name: "FactTransactions", rows: 48320512, totalSize: "2.1 GB", totalSizeBytes: 2254857830, dictionarySize: "438 MB", columns: 46 },
                     { name: "FactLedger", rows: 18640755, totalSize: "1.2 GB", totalSizeBytes: 1288490189, dictionarySize: "276 MB", columns: 38 },

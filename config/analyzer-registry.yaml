@@ -1,0 +1,94 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+schema_version: 1
+analyzers:
+  - module: analyzers.tenant_settings_review
+    output: findings_tenant_settings.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [tenant_settings.json]
+    optional_inputs: []
+    rule_ids: [SEC-001, SEC-002, TENANT-001, TENANT-002, TENANT-003, TENANT-004, TENANT-005]
+
+  - module: analyzers.architecture_review
+    output: findings_architecture.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json, workspace_inventory.json]
+    optional_inputs: [lakehouse_warehouse.json, deployment_pipelines.json, realtime_intelligence.json, semantic_models.json, semantic_model_definitions.json, pipeline_definitions.json]
+    rule_ids: [ARCH-001, ARCH-002, ARCH-003, ARCH-005, ARCH-006, ARCH-007, ARCH-008, ARCH-010, ARCH-011, ARCH-012, ARCH-013, ARCH-014, ARCH-015]
+
+  - module: analyzers.performance_review
+    output: findings_performance.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json]
+    optional_inputs: [capacity_metrics_app.json, semantic_models.json, best_practices.json, capacity_metrics.json, pipelines_notebooks.json]
+    rule_ids: [PERF-001, PERF-002, PERF-003, PERF-004, PERF-005, PERF-006, PERF-007, PERF-008, PERF-009, PERF-010, PERF-011, PERF-014, PERF-015]
+
+  - module: analyzers.semantic_model_storage_review
+    output: findings_storage_mode.json
+    predicate_version: 1
+    cardinality: one_per_semantic_model
+    missing_data_policy: missing_evidence
+    required_inputs: [semantic_models.json]
+    optional_inputs: [semantic_model_definitions.json]
+    rule_ids: [PERF-012, PERF-013]
+
+  - module: analyzers.governance_review
+    output: findings_governance.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json, workspace_inventory.json]
+    optional_inputs: [activity_logs.json]
+    rule_ids: [GOV-001, GOV-002, GOV-003, GOV-004, GOV-005, GOV-006, GOV-007, GOV-008, GOV-009]
+
+  - module: analyzers.operational_excellence_review
+    output: findings_operational_excellence.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json, workspace_inventory.json]
+    optional_inputs: [deployment_pipelines.json, git_integration.json]
+    rule_ids: [OPS-001, OPS-002, OPS-003]
+
+  - module: analyzers.security_review
+    output: findings_security.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json, workspace_inventory.json]
+    optional_inputs: [tenant_settings.json, gateways.json]
+    rule_ids: [SEC-003, SEC-004, SEC-005, SEC-006, SEC-007, SEC-008, SEC-009, SEC-010, SEC-011]
+
+  - module: analyzers.cost_review
+    output: findings_cost.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [scanner.json, workspace_inventory.json]
+    optional_inputs: [capacity_metrics.json, capacity_metrics_app.json, azure_capacity_automation.json]
+    rule_ids: [COST-001, COST-002, COST-004, COST-005, COST-006, COST-007, COST-008]
+
+  - module: analyzers.notebook_code_review
+    output: findings_notebook_code.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [pipeline_definitions.json]
+    optional_inputs: []
+    rule_ids: [NBCODE-001, NBCODE-002, NBCODE-003, NBCODE-004, NBCODE-005, NBCODE-006]
+
+  - module: analyzers.best_practices_review
+    output: findings_best_practices.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [best_practices.json]
+    optional_inputs: []
+    rule_ids: [BPA-001, BPA-002, BPA-003, BPA-004, BPA-005, BPA-006, BPA-007]

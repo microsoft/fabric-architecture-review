@@ -12,9 +12,10 @@ Rule coverage:
   PERF-002  Average CU%                  -> info (deep metric)
     PERF-003  Semantic model size threshold
   PERF-004  Refresh failure rate
-  PERF-005  Stale models (no recent refresh)
+    PERF-005  Delta small-file / V-Order health
   PERF-006  Refreshable models without schedule / recent run
   PERF-007  Long average refresh duration (> 2h)
+    PERF-015  Stale models (no recent successful refresh)
 
 DATA SAFETY: Metadata + refresh history only. No model query is issued.
 """
@@ -587,6 +588,31 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         ))
 
     rule = rules.get("PERF-005")
+    if rule:
+        best_practices = load_raw(raw_dir / "best_practices.json") or {}
+        if not best_practices.get("available"):
+            findings.append(make_finding(
+                rule, dimension="performance", status="missing_evidence",
+                title="Lakehouse small-file health was not collected",
+                evidence={"requiredInput": "best_practices.json", "available": False,
+                          "notes": best_practices.get("notes")},
+                recommendation=("Run the best-practices collector inside Fabric with semantic-link-labs "
+                                "to inspect Delta file counts and V-Order state."),
+            ))
+        else:
+            models_with_delta = [
+                {"model": model.get("model_name"), "concerns": model.get("delta")}
+                for model in best_practices.get("models") or [] if model.get("delta")
+            ]
+            concern_count = sum(len(model["concerns"] or []) for model in models_with_delta)
+            findings.append(make_finding(
+                rule, dimension="performance", status="fail" if concern_count else "pass",
+                title=f"Lakehouse Delta small-file health ({concern_count} concern(s))",
+                evidence={"concernCount": concern_count, "models": models_with_delta[:20]},
+                recommendation="Run OPTIMIZE and enable V-Order for the flagged Delta tables.",
+            ))
+
+    rule = rules.get("PERF-015")
     if rule:
         findings.append(make_finding(
             rule, dimension="performance",
