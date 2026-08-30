@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Review checklist — rules across the six review dimensions.
 # Each rule is evaluated by an analyzer module against collected metadata/metrics.
 #
@@ -7,6 +10,8 @@
 #   severity: info | low | medium | high | critical
 #   description: what is being checked and why it matters
 #   microsoft_learn_url: authoritative reference
+#   enabled: false disables a superseded rule without reusing its historical ID
+#   superseded_by: active replacement rule ID
 #
 # Rules are grouped by dimension and ordered by id within each group. The
 # notebook code-smell rules are kept together at the end because they share a
@@ -44,6 +49,8 @@ rules:
   - id: ARCH-004
     dimension: architecture
     severity: medium
+    enabled: false
+    superseded_by: OPS-002
     description: >
       Workspaces are connected to source control (Git integration) for production items.
     microsoft_learn_url: https://learn.microsoft.com/fabric/cicd/git-integration/intro-to-git-integration
@@ -81,6 +88,8 @@ rules:
   - id: ARCH-009
     dimension: architecture
     severity: high
+    enabled: false
+    superseded_by: OPS-001
     description: >
       Production workspaces are governed by a Fabric / Power BI Deployment Pipeline
       (dev -> test -> prod). Without a deployment pipeline there is no controlled
@@ -276,6 +285,15 @@ rules:
       incremental / Direct Lake.
     microsoft_learn_url: https://learn.microsoft.com/power-bi/connect-data/refresh-scheduled-refresh
 
+  - id: PERF-015
+    dimension: performance
+    severity: medium
+    description: >
+      Refreshable semantic models have completed a successful refresh within the
+      configured staleness window. Models outside the window should be repaired,
+      documented as manual-only, or retired.
+    microsoft_learn_url: https://learn.microsoft.com/power-bi/connect-data/refresh-data
+
   # ==================== GOVERNANCE ====================
   - id: GOV-001
     dimension: governance
@@ -378,6 +396,10 @@ rules:
   - id: SEC-001
     dimension: security
     severity: critical
+    tenant_setting:
+      name: PublishToWeb
+      title: Publish to web is disabled or restricted to a security group
+      expect: disabled_or_scoped
     description: >
       Tenant setting "Publish to web" is disabled or restricted to a specific security group.
     microsoft_learn_url: https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web
@@ -385,6 +407,10 @@ rules:
   - id: SEC-002
     dimension: security
     severity: high
+    tenant_setting:
+      name: ExportData
+      title: Export data is restricted to a security group
+      expect: scoped
     description: >
       Tenant setting "Export data" is restricted to a security group, not enabled tenant-wide.
     microsoft_learn_url: https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing
@@ -484,6 +510,8 @@ rules:
   - id: COST-003
     dimension: cost
     severity: medium
+    enabled: false
+    superseded_by: COST-002
     description: >
       Non-production capacities (dev/test/sandbox indicators in name) use Pause/Resume
       to avoid 24x7 charges.
@@ -523,10 +551,22 @@ rules:
       efficient and easier to govern than many isolated small capacities. Advisory (info).
     microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/optimize-capacity
 
+  - id: COST-008
+    dimension: cost
+    severity: high
+    description: >
+      Active dedicated capacities have at least one assigned workspace. Empty active
+      capacities incur SKU charges while delivering no tenant workload.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/enterprise/pause-resume
+
   # ==================== TENANT SETTINGS ====================
   - id: TENANT-001
     dimension: tenant_settings
     severity: high
+    tenant_setting:
+      name: CreateFabricItem
+      title: Users can create Fabric items is scoped to a security group
+      expect: scoped
     description: >
       "Users can create Fabric items" is scoped to a specific security group, not
       enabled for the entire organization.
@@ -535,6 +575,10 @@ rules:
   - id: TENANT-002
     dimension: tenant_settings
     severity: medium
+    tenant_setting:
+      name: ServicePrincipalAccess
+      title: Service principals can use Fabric APIs is enabled and scoped
+      expect: enabled_and_scoped
     description: >
       "Service principals can use Fabric APIs" is enabled and scoped to an automation
       security group (required for this assessment and for CI/CD).
@@ -543,6 +587,15 @@ rules:
   - id: TENANT-003
     dimension: tenant_settings
     severity: high
+    tenant_setting:
+      name: AllowExternalDataSharing
+      aliases:
+        - ExternalDataSharing
+        - ExternalDataSharingReceiveSettings
+        - ExternalDataSharingSendSettings
+        - ShareReportWithEntireOrg
+      title: External data sharing is disabled or scoped to a security group
+      expect: disabled_or_scoped
     description: >
       External sharing tenant settings ("Allow sharing to external users",
       "Invite external users to your organization") are disabled or scoped to a
@@ -552,6 +605,15 @@ rules:
   - id: TENANT-004
     dimension: tenant_settings
     severity: medium
+    tenant_setting:
+      name: CustomVisualsTenantSettings
+      aliases:
+        - AddCertifiedVisualsOnly
+        - AddAndUseCertifiedVisualsOnly
+        - OrgVisualsTenantSetting
+        - CustomVisualsTenantSetting
+      title: Uncertified / custom visuals are restricted to a security group
+      expect: scoped
     description: >
       Uncertified / custom visuals tenant settings are scoped. Allowing arbitrary
       visuals tenant-wide opens an unreviewed code-execution surface inside reports.
@@ -560,6 +622,15 @@ rules:
   - id: TENANT-005
     dimension: tenant_settings
     severity: medium
+    tenant_setting:
+      name: RScriptVisualsTenantSettings
+      aliases:
+        - RPythonVisualsTenantSettings
+        - PythonVisualsTenantSettings
+        - PythonScriptsTenantSettings
+        - RScriptVisualsTenantSetting
+      title: R / Python visuals and scripts are restricted to a security group
+      expect: scoped
     description: >
       R and Python visual / script settings are scoped or disabled. R/Python
       visuals run arbitrary code; tenant-wide enablement bypasses code review.

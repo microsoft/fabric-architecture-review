@@ -26,8 +26,24 @@ export function useLiveReviewData() {
     const loading = Object.values(results).some((result) => result.isLoading || !result.data);
     const data = useMemo(() => {
         if (loading || failed) return null;
-        const tables = Object.fromEntries(Object.entries(results).map(([name, result]) => [name, result.data?.status === "success" ? result.data.table : undefined]));
-        return buildLiveReviewData(tables as LiveReviewTables);
+        const table = (name: keyof LiveReviewTables) => {
+            const result = results[name];
+            if (result.data?.status !== "success") throw new Error(`${name}: query returned no table`);
+            return result.data.table;
+        };
+        const tables: LiveReviewTables = {
+            dimensionSummary: table("dimensionSummary"),
+            estateNodes: table("estateNodes"),
+            findingTargets: table("findingTargets"),
+            findings: table("findings"),
+            modelColumns: table("modelColumns"),
+            modelTables: table("modelTables"),
+            notebookSmells: table("notebookSmells"),
+            runSummary: table("runSummary"),
+            semanticModels: table("semanticModels"),
+            workspaceRisk: table("workspaceRisk"),
+        };
+        return buildLiveReviewData(tables);
     }, [failed, loading, results]);
     return {
         data,

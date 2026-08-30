@@ -24,13 +24,18 @@ OUT_DIR="${OUTPUT_DIR:-output}"
 RAW_DIR="$OUT_DIR/raw"
 mkdir -p "$RAW_DIR"
 echo "Raw output directory: $RAW_DIR"
+collector_failures=()
 
 invoke_collector() {
     local module="$1" label="$2"
     echo ""
     echo "==> $label"
-    if ! python -m "$module" --output-dir "$RAW_DIR"; then
-        echo "    $module exited with code $? — continuing."
+    if python -m "$module" --output-dir "$RAW_DIR"; then
+        return 0
+    else
+        local rc=$?
+        collector_failures+=("$module (exit $rc)")
+        echo "    $module exited with code $rc." >&2
     fi
 }
 
@@ -52,6 +57,11 @@ invoke_collector "collectors.deployment_pipelines"      "Fabric / Power BI deplo
 invoke_collector "collectors.gateways"                  "Data gateways (on-prem / VNet / personal)"
 invoke_collector "collectors.realtime_intelligence"     "Real-Time Intelligence + Mirrored Databases"
 invoke_collector "collectors.activity_logs"             "Admin activity log (last 7 days)"
+
+if (( ${#collector_failures[@]} > 0 )); then
+    printf 'Collection incomplete. Failed collectors: %s\n' "$(IFS=', '; echo "${collector_failures[*]}")" >&2
+    exit 1
+fi
 
 echo ""
 echo "Collection complete. Raw outputs in $RAW_DIR."

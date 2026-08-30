@@ -76,6 +76,17 @@ describe("useSemanticModelQuery", () => {
         expect(result.current.error?.message).toBe("401 Unauthorized");
     });
 
+    it("stops loading when a query exceeds its deadline", async () => {
+        mockQuery.mockReturnValue(new Promise(() => {}));
+
+        const { result } = renderHook(() =>
+            useSemanticModelQuery({ connection: "model", query: "EVALUATE ROW()", timeoutMs: 10 }),
+        );
+
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        expect(result.current.error?.message).toBe("Semantic model query timed out after 0.01 seconds.");
+    });
+
     it("re-executes the query when refetch is called", async () => {
         const successResult = {
             status: "success" as const,
@@ -97,6 +108,7 @@ describe("useSemanticModelQuery", () => {
         });
 
         expect(mockQuery).toHaveBeenCalledTimes(2);
+        expect(mockQuery).toHaveBeenLastCalledWith("EVALUATE ROW()", { bypassCache: true });
     });
 });
 

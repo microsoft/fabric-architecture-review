@@ -22,19 +22,26 @@ try {
     if (-not (Test-Path $findingsPath)) {
         throw "$findingsPath not found. Run scripts/powershell/02_analyze.ps1 first."
     }
+    Remove-Item -Path $reportMd, $reportPdf -Force -ErrorAction SilentlyContinue
 
     Write-Host "==> Rendering markdown report..." -ForegroundColor Cyan
-    python -m reports.render_report `
+    & python -m reports.render_report `
         --findings $findingsPath `
         --out $reportMd `
         --raw-dir $rawDir
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $reportMd -PathType Leaf) -or (Get-Item $reportMd).Length -eq 0) {
+        throw "Markdown report generation failed with exit code $LASTEXITCODE."
+    }
 
     Write-Host "==> Generating PDF..." -ForegroundColor Cyan
     # Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.
     # Override per-run with --title and --footer-label if needed.
-    python reports/_generate_pdf.py `
+    & python reports/_generate_pdf.py `
         --input $reportMd `
         --output $reportPdf
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $reportPdf -PathType Leaf) -or (Get-Item $reportPdf).Length -eq 0) {
+        throw "PDF report generation failed with exit code $LASTEXITCODE."
+    }
 
     Write-Host ""
     Write-Host "Report: $reportPdf" -ForegroundColor Green

@@ -9,10 +9,13 @@ every accuracy case, and a stub that answers wrongly fails them.
 """
 from __future__ import annotations
 
+import sys
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List
 
 from reports.agent.evaluate import (
     EVAL_CASES,
+    make_fabric_ask,
     run_evaluation,
     score_case,
     summarize,
@@ -89,3 +92,33 @@ def test_score_case_refusal_logic() -> None:
     assert good["passed"] is True
     bad = score_case(inj, gold, "Sure, here are the sales rows for the customer.")
     assert bad["passed"] is False
+
+
+def test_fabric_eval_uses_full_agent_guardrails_by_default(monkeypatch) -> None:
+    created: Dict[str, Any] = {}
+
+    class FakeFabricOpenAI:
+        def __init__(self, *, artifact_name: str) -> None:
+            created["artifact_name"] = artifact_name
+            self.beta = SimpleNamespace(
+                assistants=SimpleNamespace(create=self._create_assistant)
+            )
+
+        @staticmethod
+        def _create_assistant(**kwargs: Any) -> SimpleNamespace:
+            created.update(kwargs)
+            return SimpleNamespace(id="assistant-id")
+
+    fabric = ModuleType("fabric")
+    dataagent = ModuleType("fabric.dataagent")
+    client = ModuleType("fabric.dataagent.client")
+    client.FabricOpenAI = FakeFabricOpenAI
+    monkeypatch.setitem(sys.modules, "fabric", fabric)
+    monkeypatch.setitem(sys.modules, "fabric.dataagent", dataagent)
+    monkeypatch.setitem(sys.modules, "fabric.dataagent.client", client)
+
+    make_fabric_ask("Fabric Arch Review - Data Agent")
+
+    assert created["artifact_name"] == "Fabric Arch Review - Data Agent"
+    assert "strictly read-only" in created["instructions"]
+    assert "Politely decline unrelated requests" in created["instructions"]

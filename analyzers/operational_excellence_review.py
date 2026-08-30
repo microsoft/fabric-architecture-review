@@ -21,16 +21,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, List
 
 from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers.applicability import classify_workspaces, load_workspace_overrides, production_scope
 
 DIMENSION = "operational_excellence"
-
-# A production workspace (stronger ALM expectations). Dev/test/sandbox are excluded.
-PROD_PATTERN = re.compile(r"(prod|production)", re.IGNORECASE)
 
 PROD_PIPELINE_MIN_RATIO = threshold("operational_excellence", "prod_pipeline_min_ratio", 0.8, env="OPS_PROD_PIPELINE_MIN_RATIO", cast=float)
 PROD_GIT_MIN_RATIO = threshold("operational_excellence", "prod_git_min_ratio", 0.8, env="OPS_PROD_GIT_MIN_RATIO", cast=float)
@@ -54,19 +51,6 @@ def _items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "warehouses", "notebooks", "pipelines", "kqlDatabases", "mlModels"):
         bucket.extend(ws.get(key) or [])
     return bucket
-
-
-def _production_workspaces(workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Shared, non-empty workspaces whose name marks them as production."""
-    out = []
-    for w in workspaces:
-        if (w.get("type") or "") == "PersonalGroup":
-            continue
-        if not _items(w):
-            continue
-        if PROD_PATTERN.search(w.get("name") or ""):
-            out.append(w)
-    return out
 
 
 def _pipeline_workspace_ids(raw_dir: Path) -> set:
@@ -102,7 +86,10 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     findings: List[Dict[str, Any]] = []
 
     workspaces = _workspaces(raw_dir)
-    prod = _production_workspaces(workspaces)
+    workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
+    profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
+    prod_scope = production_scope(workspaces, profiles)
+    prod = prod_scope["applicable"]
 
     # --- OPS-001 production workspaces covered by a deployment pipeline ---
     rule = rules.get("OPS-001")
@@ -112,10 +99,12 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             findings.append(missing_raw_finding(rule, DIMENSION, "deployment_pipelines.json"))
         elif not prod:
             findings.append(make_finding(
-                rule, dimension=DIMENSION, status="pass",
+                rule, dimension=DIMENSION,
+                status="unknown" if prod_scope["unknown"] else "not_applicable",
                 title="Production workspaces covered by a deployment pipeline",
                 evidence={"productionWorkspaces": 0,
-                          "note": "No production-named, non-empty workspaces to evaluate."},
+                          "unknownEnvironmentWorkspaces": [w.get("name") for w in prod_scope["unknown"]],
+                          "note": "No classified production, non-empty workspaces to evaluate."},
                 recommendation="Adopt deployment pipelines to promote content dev -> test -> prod."
             ))
         else:
@@ -141,10 +130,12 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             findings.append(missing_raw_finding(rule, DIMENSION, "git_integration.json"))
         elif not prod:
             findings.append(make_finding(
-                rule, dimension=DIMENSION, status="pass",
+                rule, dimension=DIMENSION,
+                status="unknown" if prod_scope["unknown"] else "not_applicable",
                 title="Production workspaces under Git source control",
                 evidence={"productionWorkspaces": 0,
-                          "note": "No production-named, non-empty workspaces to evaluate."},
+                          "unknownEnvironmentWorkspaces": [w.get("name") for w in prod_scope["unknown"]],
+                          "note": "No classified production, non-empty workspaces to evaluate."},
                 recommendation="Connect production workspaces to Git for versioning and rollback."
             ))
         else:

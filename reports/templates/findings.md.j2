@@ -7,8 +7,11 @@
 {% set fails = items | selectattr('status', 'equalto', 'fail') | list %}
 {% set infos = items | selectattr('status', 'equalto', 'info') | list %}
 {% set passes = items | selectattr('status', 'equalto', 'pass') | list %}
+{% set not_applicable = items | selectattr('status', 'equalto', 'not_applicable') | list %}
+{% set unknown = items | selectattr('status', 'equalto', 'unknown') | list %}
+{% set missing = items | selectattr('status', 'equalto', 'missing_evidence') | list %}
 
-> **{{ fails | length }} failing** &middot; {{ infos | length }} informational &middot; {{ passes | length }} passing &middot; {{ items | length }} total
+> **{{ fails | length }} failing** &middot; {{ passes | length }} passing &middot; {{ infos | length }} informational &middot; {{ not_applicable | length }} not applicable &middot; {{ unknown | length }} unknown &middot; {{ missing | length }} missing evidence &middot; {{ items | length }} total
 
 {% for f in items %}
 ### <span class="sev sev-{{ f.severity }}">{{ f.severity | sev_badge }}</span> &nbsp; <span class="status status-{{ f.status }}">{{ f.status | status_badge }}</span> &nbsp; {{ f.rule_id }} &mdash; {{ f.title }}

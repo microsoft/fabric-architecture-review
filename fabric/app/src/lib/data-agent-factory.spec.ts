@@ -122,6 +122,38 @@ describe("Rayfin Data Agent client", () => {
         expect(mcp.close).toHaveBeenCalledOnce();
     });
 
+    it("selects the Data Agent tool by schema rather than response order", async () => {
+        mcp.listTools.mockResolvedValue({
+            tools: [
+                { name: "health", inputSchema: { properties: { probe: {} } } },
+                { name: "ask_agent", inputSchema: { properties: { metadata: {}, question: {} } } },
+            ],
+        });
+        const client = new RayfinDataAgentClient("agent-workspace", "data-agent", "spa-client", "tenant");
+
+        await expect(client.ask(" question ")).resolves.toBe("grounded answer");
+        expect(mcp.callTool).toHaveBeenCalledWith({
+            name: "ask_agent",
+            arguments: { question: "question" },
+        }, undefined, { timeout: 300_000 });
+    });
+
+    it("supports the published Data Agent userQuestion argument", async () => {
+        mcp.listTools.mockResolvedValue({
+            tools: [{
+                name: "DataAgent_Fabric_Arch_Review_Data_Agent",
+                inputSchema: { properties: { userQuestion: {} }, required: ["userQuestion"] },
+            }],
+        });
+        const client = new RayfinDataAgentClient("agent-workspace", "data-agent", "spa-client", "tenant");
+
+        await expect(client.ask(" question ")).resolves.toBe("grounded answer");
+        expect(mcp.callTool).toHaveBeenCalledWith({
+            name: "DataAgent_Fabric_Arch_Review_Data_Agent",
+            arguments: { userQuestion: "question" },
+        }, undefined, { timeout: 300_000 });
+    });
+
     it("sends grounded evidence requirements for notebook code-smell questions", async () => {
         const client = new RayfinDataAgentClient("agent-workspace", "data-agent", "spa-client", "tenant");
         await client.ask("Which notebook has the highest criticality from code smells?");
@@ -144,6 +176,16 @@ describe("Rayfin Data Agent client", () => {
         expect(mcp.connect).toHaveBeenCalledTimes(2);
         expect(mcp.callTool).toHaveBeenCalledTimes(2);
         expect(mcp.close).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries once after throttling", async () => {
+        mcp.callTool
+            .mockRejectedValueOnce(new Error("HTTP 429 Too Many Requests"))
+            .mockResolvedValueOnce({ content: [{ type: "text", text: "recovered answer" }] });
+        const client = new RayfinDataAgentClient("agent-workspace", "data-agent", "spa-client", "tenant");
+
+        await expect(client.ask("Review the architecture findings")).resolves.toBe("recovered answer");
+        expect(mcp.callTool).toHaveBeenCalledTimes(2);
     });
 
     it("creates the browser client when all public settings are configured", () => {

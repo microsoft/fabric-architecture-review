@@ -23,7 +23,9 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 1. **Open an issue first** for anything beyond a trivial fix, so we can align on the approach.
 2. **Fork** the repository and create a topic branch from `main`.
 3. Make your change with clear, focused commits.
-4. **Run the pipeline locally** against the sample data in `output/` (or your own tenant) to confirm nothing regresses.
+4. **Run the automated tests** against the tracked synthetic fixture in
+   `tests/fixtures/sample/raw/`. If collector behavior changes, also run the local pipeline
+   against a tenant where you are authorized to perform the review.
 5. Open a **pull request** describing the change and the motivation.
 
 ## The data-safety contract (mandatory)
@@ -54,10 +56,32 @@ points:
 - Rule metadata (id, dimension, severity, description, Learn URL) belongs in
   [config/review-checklist.yaml](config/review-checklist.yaml).
 - Findings are dicts with `rule_id`, `dimension`, `severity`, `status`
-  (`pass`/`fail`/`info`), `title`, `evidence`, `recommendation`.
+  (`pass`, `fail`, `info`, `not_applicable`, `unknown`, or `missing_evidence`),
+  `title`, `evidence`, and `recommendation`.
+- Add or update focused tests. Every enabled checklist ID must be emitted by the
+  synthetic analyzer registry; disabled IDs must declare an active `superseded_by`.
 
 ## Code style
 
 - Python 3.11+, standard library + the dependencies in `requirements.txt`.
-- Keep collectors metadata-only and resilient: degrade gracefully (emit an `info`
-  finding) when a permission or input is missing rather than crashing the run.
+- Keep collectors metadata-only. Represent supported-but-unavailable evidence explicitly
+  so analyzers can emit `missing_evidence`; unexpected collector/analyzer failures must
+  terminate the stage rather than publish stale or partial findings.
+
+## Required validation
+
+Before opening a pull request, run:
+
+```powershell
+python -m pytest -q
+python -m pip_audit -r requirements.txt
+cd fabric/app
+npm ci
+npm test -- --run
+npm run lint
+npm run build
+npm audit --omit=dev --audit-level=high
+```
+
+The repository CI repeats these gates on pull requests and pushes to `main` using
+GitHub-hosted runners; contributors do not need to provision a self-hosted runner.

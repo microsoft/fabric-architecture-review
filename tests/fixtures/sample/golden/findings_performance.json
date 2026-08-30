@@ -109,6 +109,29 @@
     "dimension": "performance",
     "severity": "medium",
     "status": "fail",
+    "title": "Lakehouse Delta small-file health (1 concern(s))",
+    "evidence": {
+      "concernCount": 1,
+      "models": [
+        {
+          "model": "Sales DL",
+          "concerns": [
+            {
+              "table": "fact_sales",
+              "smallFiles": 9
+            }
+          ]
+        }
+      ]
+    },
+    "recommendation": "Run OPTIMIZE and enable V-Order for the flagged Delta tables.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-engineering/lakehouse-table-maintenance"
+  },
+  {
+    "rule_id": "PERF-015",
+    "dimension": "performance",
+    "severity": "medium",
+    "status": "fail",
     "title": "Datasets with no successful refresh in 30 days",
     "evidence": {
       "thresholdDays": 30,
@@ -132,7 +155,7 @@
       ]
     },
     "recommendation": "Confirm whether these models are still in use; archive or fix the refresh schedule.",
-    "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-engineering/lakehouse-table-maintenance"
+    "microsoft_learn_url": "https://learn.microsoft.com/power-bi/connect-data/refresh-data"
   },
   {
     "rule_id": "PERF-006",

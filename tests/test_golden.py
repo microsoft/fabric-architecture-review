@@ -18,6 +18,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
+import yaml
+
+from analyzers._common import FINDING_STATUSES
 
 from tests._analyzers import (
     ANALYZERS,
@@ -30,8 +33,8 @@ from tests._analyzers import (
 # Expected per-analyzer finding counts (frozen from the sample fixture).
 EXPECTED_COUNTS: Dict[str, int] = {
     "findings_tenant_settings": 7,
-    "findings_architecture": 15,
-    "findings_performance": 12,
+    "findings_architecture": 13,
+    "findings_performance": 13,
     "findings_storage_mode": 4,
     "findings_governance": 9,
     "findings_operational_excellence": 3,
@@ -40,7 +43,7 @@ EXPECTED_COUNTS: Dict[str, int] = {
     "findings_notebook_code": 6,
     "findings_best_practices": 7,
 }
-EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 71
+EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 78
 
 
 def _load_golden(basename: str) -> List[Dict[str, Any]]:
@@ -102,11 +105,76 @@ def test_analyzer_matches_golden(module_name: str, basename: str) -> None:
 def test_finding_shape(module_name: str, basename: str) -> None:
     """Every finding must carry the fields the report renderer relies on."""
     required = {"rule_id", "dimension", "status", "title"}
-    valid_status = {"pass", "fail", "info"}
     for f in run_analyzer(module_name):
         missing = required - f.keys()
         assert not missing, f"{basename}: finding missing fields {missing}: {f}"
-        assert f["status"] in valid_status, f"{basename}: bad status {f['status']!r}"
+        assert f["status"] in FINDING_STATUSES, f"{basename}: bad status {f['status']!r}"
+
+
+def test_rule_registry_contract() -> None:
+    checklist_path = Path(__file__).resolve().parents[1] / "config" / "review-checklist.yaml"
+    payload = yaml.safe_load(checklist_path.read_text(encoding="utf-8"))
+    rules = payload.get("rules") or []
+    ids = [rule.get("id") for rule in rules]
+    assert all(ids), "every checklist rule must have an ID"
+    assert len(ids) == len(set(ids)), "checklist rule IDs must be unique"
+
+    active_ids = {rule["id"] for rule in rules if rule.get("enabled", True)}
+    for rule in rules:
+        if not rule.get("enabled", True):
+            replacement = rule.get("superseded_by")
+            assert replacement in active_ids, (
+                f"disabled rule {rule['id']} must name an active superseded_by rule"
+            )
+
+    emitted_ids = {
+        finding["rule_id"]
+        for module_name in ANALYZERS
+        for finding in run_analyzer(module_name)
+    }
+    assert emitted_ids == active_ids, (
+        f"checklist/analyzer registry mismatch: missing={sorted(active_ids - emitted_ids)}, "
+        f"unexpected={sorted(emitted_ids - active_ids)}"
+    )
+
+
+def test_analyzer_registry_contract() -> None:
+    registry_path = Path(__file__).resolve().parents[1] / "config" / "analyzer-registry.yaml"
+    registry = yaml.safe_load(registry_path.read_text(encoding="utf-8"))
+    entries = registry.get("analyzers") or []
+    by_module = {entry["module"]: entry for entry in entries}
+
+    assert registry.get("schema_version") == 1
+    assert set(by_module) == set(ANALYZERS)
+    for module_name, output_basename in ANALYZERS.items():
+        entry = by_module[module_name]
+        findings = run_analyzer(module_name)
+        emitted_ids = [finding["rule_id"] for finding in findings]
+        assert entry["output"] == f"{output_basename}.json"
+        assert entry["predicate_version"] >= 1
+        assert entry["cardinality"] in {"exactly_one_per_rule", "one_per_semantic_model"}
+        assert entry["missing_data_policy"] == "missing_evidence"
+        assert entry["required_inputs"]
+        assert set(emitted_ids) == set(entry["rule_ids"])
+        if entry["cardinality"] == "exactly_one_per_rule":
+            assert len(emitted_ids) == len(entry["rule_ids"])
+
+
+def test_tenant_setting_registry_and_missing_evidence(tmp_path: Path) -> None:
+    from analyzers.tenant_settings_review import analyze
+
+    checklist_path = Path(__file__).resolve().parents[1] / "config" / "review-checklist.yaml"
+    payload = yaml.safe_load(checklist_path.read_text(encoding="utf-8"))
+    tenant_rules = [rule for rule in payload["rules"] if rule.get("tenant_setting")]
+    assert len(tenant_rules) == 7
+
+    raw_path = tmp_path / "tenant_settings.json"
+    raw_path.write_text(json.dumps({"tenantSettings": []}), encoding="utf-8")
+    findings = analyze(raw_path, checklist_path)
+
+    assert {finding["rule_id"] for finding in findings} == {rule["id"] for rule in tenant_rules}
+    assert {finding["status"] for finding in findings} == {"missing_evidence"}
+    assert {finding["dimension"] for finding in findings if finding["rule_id"].startswith("SEC-")} == {"security"}
 
 
 def test_total_finding_count() -> None:

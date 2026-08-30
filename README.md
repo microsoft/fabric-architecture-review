@@ -95,9 +95,10 @@ See **[docs/data-safety.md](docs/data-safety.md)** for the full allow / deny lis
 
 ## 🧩 How it works
 
-The accelerator is a three-stage pipeline — **collect → analyze → report** — where each
-stage only depends on files written by the previous one, so any stage can be re-run in
-isolation.
+The local accelerator is a three-stage pipeline — **collect → analyze → report**. The
+in-Fabric pipeline adds a fourth **Gold** stage. Each stage depends only on validated
+artifacts from the previous stage, so a failed subprocess or missing/invalid output stops
+the run instead of allowing stale or partial results to appear successful.
 
 ```mermaid
 flowchart LR
@@ -109,15 +110,15 @@ flowchart LR
     R["reports/<br/><span style='font-size:11px'>Jinja2 + Puppeteer</span>"]:::stage
 
     raw[/"output/raw/*.json<br/>(metadata only)"/]:::art
-    fnd[/"output/findings_*.json<br/>+ output/findings.json"/]:::art
+    fnd[/"output/findings_*.json<br/>+ findings.json + run_manifest.json"/]:::art
     pdf[/"output/report.md<br/>+ output/fabric-arch-review.pdf"/]:::art
 
     C --> raw --> A --> fnd --> R --> pdf
 ```
 
 1. **Collectors** call Fabric / Power BI admin APIs and write raw metadata JSON to `output/raw/`. They only read configuration and metrics — never customer data.
-2. **Analyzers** load those JSON files, evaluate them against the rules in [config/review-checklist.yaml](config/review-checklist.yaml), and emit one `output/findings_<dimension>.json` per dimension. Each finding has `rule_id`, `dimension`, `severity`, `status` (`pass`/`fail`/`info`), `evidence`, `recommendation`. **Every numeric pass/fail boundary lives in [config/thresholds.yaml](config/thresholds.yaml)** — the single, documented place to tune the review to a client's SLOs (precedence: environment variable › `thresholds.yaml` › built-in default).
-3. **Reports** merge every `findings_*.json` into `output/findings.json`, render Jinja2 templates plus auto-generated **Mermaid architecture diagrams** of the tenant, and convert the result to a branded PDF via headless Chromium (Puppeteer). On Fabric runs, a **VertiPaq Footprint** section adds per-model size summaries and the largest tables/columns per model.
+2. **Analyzers** load those JSON files, classify workspace purpose from item composition plus optional overrides in [config/workspaces.yaml](config/workspaces.yaml), and evaluate enabled rules from [config/review-checklist.yaml](config/review-checklist.yaml). Each finding has `rule_id`, `dimension`, `severity`, one of six statuses (`pass`, `fail`, `info`, `not_applicable`, `unknown`, `missing_evidence`), `evidence`, and `recommendation`. **Every numeric pass/fail boundary lives in [config/thresholds.yaml](config/thresholds.yaml)** (precedence: environment variable › `thresholds.yaml` › built-in default).
+3. **Reports** publish a validated merged `output/findings.json`, render Jinja2 templates plus auto-generated **Mermaid architecture diagrams**, and convert the result to a branded PDF via headless Chromium (Puppeteer). Analysis also writes `output/run_manifest.json` with run identity, status totals, and SHA-256 hashes for rules, the analyzer registry, thresholds, findings, and analyzer artifacts. Existing findings/report artifacts are removed before a run, and success requires fresh, nonempty output.
 
 The PowerShell scripts under `scripts/` orchestrate each stage end-to-end on Windows; you
 can also run any module directly (see [Running a single stage](#running-a-single-stage)).
@@ -227,7 +228,7 @@ opt-in deep probes and pass/fail threshold overrides.
 az login --tenant <client-tenant-id>
 
 # Run the three stages
-.\scripts\powershell\01_collect.ps1   # writes output/raw/*.json (skips collectors you lack permission for)
+.\scripts\powershell\01_collect.ps1   # writes output/raw/*.json; unexpected collector failures stop the stage
 .\scripts\powershell\02_analyze.ps1   # writes per-dimension output/findings_*.json, then merges to findings.json
 .\scripts\powershell\03_report.ps1    # writes output/report.md and output/fabric-arch-review.pdf
 ```
@@ -244,7 +245,7 @@ az login --tenant <client-tenant-id>
 chmod +x scripts/bash/*.sh
 
 # Run the three stages
-./scripts/bash/01_collect.sh   # writes output/raw/*.json (skips collectors you lack permission for)
+./scripts/bash/01_collect.sh   # writes output/raw/*.json; unexpected collector failures stop the stage
 ./scripts/bash/02_analyze.sh   # writes per-dimension output/findings_*.json, then merges to findings.json
 ./scripts/bash/03_report.sh    # writes output/report.md and output/fabric-arch-review.pdf
 ```
@@ -388,7 +389,7 @@ workspace-scoped collectors for workspaces you belong to.
 | **Capacity Admin only** | No tenant settings, no scanner data. `capacity_metrics` returns the capacities you administer, feeding `COST-001/003/005`. Tenant-settings section is skipped with an info note. |
 | **Workspace Admin / Member / Contributor** | Tenant-settings and scanner sections skipped. Per-workspace collectors run against the workspaces you belong to and produce ARCH/PERF/GOV/SEC findings scoped to those workspaces. |
 | **Workspace Viewer** | Read-only metadata for visible workspaces. No Git-integration findings (requires Admin). |
-| **No role** | The pipeline runs but `output/raw/` stays empty and the report contains only the executive-summary placeholder. |
+| **No role** | Required collection cannot complete. The stage exits unsuccessfully instead of producing an apparently complete review. |
 </details>
 
 ---
@@ -413,7 +414,7 @@ All settings live in `.env` (copy from [.env.example](.env.example)). Highlights
 
 ### Tuning pass/fail thresholds
 
-Every numeric boundary that turns a rule into **pass** / **fail** / **info** is defined and
+Every numeric boundary used by an evaluated rule is defined and
 documented in **[config/thresholds.yaml](config/thresholds.yaml)** — the single place to
 tune the review to a client's maturity and SLOs. Values resolve with the precedence
 **environment variable › `thresholds.yaml` › built-in default**, so CI pipelines and the
@@ -454,6 +455,7 @@ python reports/_generate_pdf.py `
 | `output/raw/*.json` | Raw collected metadata (one file per collector). Gitignored. |
 | `output/findings_<dimension>.json` | Per-dimension findings from each analyzer. |
 | `output/findings.json` | Merged findings consumed by the report. |
+| `output/run_manifest.json` | Completed-run identity, counts, and configuration/artifact hashes. |
 | `output/report.md` | Rendered Markdown report (exec summary, findings by dimension, roadmap). |
 | `output/fabric-arch-review.pdf` | Branded, client-ready PDF with auto-generated architecture diagrams. |
 
@@ -483,16 +485,61 @@ JSON is present (each builder skips itself with a friendly note when its input i
 
 ## 📋 Rule catalog & status
 
-All eight dimensions are implemented end-to-end. Every collector runs against documented
+All review dimensions are implemented end-to-end. Every collector runs against documented
 Fabric / Power BI REST endpoints; every analyzer emits findings against the rule catalog in
 [config/review-checklist.yaml](config/review-checklist.yaml). The reader-friendly index
 with Microsoft Learn references is in [docs/checklist-reference.md](docs/checklist-reference.md).
 
+Rules are contextual: workspace-purpose classification determines whether a control is
+applicable, and explicit workspace-ID overrides can resolve ambiguous environments. Disabled
+historical rule IDs remain in the checklist with `superseded_by`; they do not emit findings.
+[`config/analyzer-registry.yaml`](config/analyzer-registry.yaml) declares each analyzer's owner
+module, required/optional artifacts, output, rule IDs, cardinality, missing-data policy, and
+predicate version; tests require exact agreement with executable analyzer output.
+
+### Workspace classification and production scope
+
+Workspace classification has two independent parts. **Archetype** is inferred from discovered item
+composition (`batch_engineering`, `warehouse_analytics`, `bi_serving`, `realtime`,
+`data_science`, `mirrored_zero_etl`, `platform_monitoring`, `mixed`, `personal`, or `empty`).
+**Environment** is inferred conservatively from separator-delimited workspace-name markers:
+`prod`, `production`, or `live` means production; `dev`, `test`, `qa`, `uat`, `sbx`,
+`sandbox`, `poc`, or `demo` means non-production; otherwise it remains `unknown`.
+
+For authoritative classification, add a profile keyed by the immutable workspace ID in
+[config/workspaces.yaml](config/workspaces.yaml). An explicit profile takes precedence over name
+inference and can also override individual rule applicability:
+
+```yaml
+workspaces:
+  - id: 12345678-1234-1234-1234-123456789abc
+    name: Finance
+    profile:
+      archetype: warehouse_analytics
+      environment: production
+      usage_pattern: business_hours
+    rule_overrides:
+      OPS-002:
+        applicability: applicable
+        reason: "Production finance workspace."
+```
+
+Capacity-level rules derive environment from the profiles of assigned workspaces and then from
+capacity-name markers when no workspace evidence exists. For a shared or ambiguously named capacity,
+set `capacities[].profile.environment` in the same file, keyed by immutable capacity ID. An explicit
+capacity profile takes precedence over both derived workspace environments and name inference.
+
+`WORKSPACE_IDS` limits which workspaces are collected; it does **not** label them as production.
+Production-only controls include shared, non-empty workspaces classified as production, exclude
+personal/empty/non-production workspaces, and return `unknown` when the environment cannot be
+established. Workload-specific controls use the archetype in the same conservative way: ambiguous
+`mixed` or unsupported compositions return `unknown` rather than an assumed pass or failure.
+
 | Dimension | Collectors | Analyzer (rules) | Status |
 |---|---|---|---|
 | Tenant Settings | `tenant_settings` | `tenant_settings_review` (`SEC-001/002`, `TENANT-001..005`) | ✅ |
-| Architecture | `scanner_api`, `workspace_inventory`, `git_integration`, `lakehouse_warehouse`, `deployment_pipelines`, `realtime_intelligence`, `semantic_models`, `pipeline_definitions` | `architecture_review` (`ARCH-001..014`) | ✅ |
-| Performance | `semantic_models`, `capacity_metrics`, `capacity_metrics_app` (opt-in), `pipelines_notebooks`, `semantic_model_definitions`, `vertipaq_stats` (Fabric) | `performance_review`, `semantic_model_storage_review` (`PERF-001..014`) | ✅ |
+| Architecture | `scanner_api`, `workspace_inventory`, `git_integration`, `lakehouse_warehouse`, `deployment_pipelines`, `realtime_intelligence`, `semantic_models`, `pipeline_definitions` | `architecture_review` (`ARCH-001..015`; superseded IDs disabled) | ✅ |
+| Performance | `semantic_models`, `capacity_metrics`, `capacity_metrics_app` (opt-in), `pipelines_notebooks`, `semantic_model_definitions`, `vertipaq_stats` (Fabric) | `performance_review`, `semantic_model_storage_review` (`PERF-001..015`) | ✅ |
 | Governance | `scanner_api`, `git_integration`, `activity_logs` | `governance_review` (`GOV-001..009`) | ✅ |
 | Operational Excellence | `scanner_api`, `deployment_pipelines`, `git_integration` | `operational_excellence_review` (`OPS-001..003`) | ✅ |
 | Security | `scanner_api`, `tenant_settings`, `gateways` | `security_review` (`SEC-003..011`) | ✅ |
@@ -553,8 +600,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow and the dat
 
 ## 🧪 Testing
 
-The repo ships a **golden-file test suite** that runs every analyzer against a committed,
-fully synthetic sample fixture and asserts the finding counts and statuses don't drift.
+The repo ships a **golden-file and production-contract test suite** that runs every analyzer
+against a committed synthetic fixture, proves every enabled checklist ID emits, validates
+canonical statuses and supersession metadata, and pins fail-closed orchestration behavior.
 
 ```powershell
 pip install -r requirements-dev.txt
@@ -566,6 +614,8 @@ python -m pytest tests/ -v
 | `tests/fixtures/sample/raw/` | Fully synthetic raw inputs (18 files) — invented GUIDs/emails and notebook/TMDL source; no customer data. |
 | `tests/fixtures/sample/golden/` | Frozen expected findings per analyzer (78 total). |
 | `tests/test_golden.py` | Asserts each analyzer's `(rule_id, dimension, status)` projection matches golden. |
+| `tests/test_applicability.py` | Validates deterministic workspace classification and explicit overrides. |
+| `tests/test_production_contracts.py` | Pins stale-output cleanup, failure gating, Gold retry behavior, typechecking, and license headers. |
 | `tests/build_fixture.py` | Regenerates the synthetic fixture from scratch (`python -m tests.build_fixture`) — no engagement source needed. |
 | `tests/gen_golden.py` | Regenerates the golden files after an intended analyzer change (`python -m tests.gen_golden`). |
 | `tests/gen_sample_report.py` | Rebuilds the committed sample report (`python -m tests.gen_sample_report`). |

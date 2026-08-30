@@ -32,15 +32,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
 from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers.applicability import (
+    applicability_summary,
+    classify_workspaces,
+    load_workspace_overrides,
+    rule_applicability,
+)
 
 LAYER_PATTERN = re.compile(r"(bronze|silver|gold|raw|stg|staging|curated|landing)", re.IGNORECASE)
 ENV_PATTERN = re.compile(r"\b(dev|test|qa|uat|prod|production|sbx|sandbox)\b", re.IGNORECASE)
 MONOLITH_THRESHOLD = threshold("architecture", "monolith_max_items", 50, env="ARCH_MONOLITH_THRESHOLD", cast=int)
 PIPELINE_STALE_DAYS = threshold("architecture", "pipeline_stale_days", 30, env="ARCH_PIPELINE_STALE_DAYS", cast=int)
 LAYER_NAMING_MIN_RATIO = threshold("architecture", "layer_naming_min_ratio", 0.5, cast=float)
-GIT_COVERAGE_MIN_RATIO = threshold("architecture", "git_coverage_min_ratio", 0.5, cast=float)
 DESCRIPTION_COVERAGE_MIN_RATIO = threshold("architecture", "description_coverage_min_ratio", 0.5, cast=float)
-IMPORT_DOMINANCE_RATIO = threshold("architecture", "import_dominance_ratio", 0.7, cast=float)
 
 
 def _parse_dt(value: str | None) -> datetime | None:
@@ -301,6 +305,8 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             ))
 
     workspaces = _workspaces_from_scanner_or_inventory(raw_dir)
+    workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
+    workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
     if not workspaces:
         for rid in ("ARCH-001", "ARCH-002", "ARCH-003", "ARCH-005", "ARCH-006", "ARCH-007", "ARCH-008"):
             if rid in rules:
@@ -310,8 +316,25 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         # --- ARCH-001 layer naming (workspace OR lakehouse level) ---
         rule = rules.get("ARCH-001")
         if rule:
-            layered_ws = [w for w in workspaces if w.get("name") and LAYER_PATTERN.search(w["name"])]
-            ws_ratio = len(layered_ws) / len(workspaces)
+            applicability_rows = []
+            applicable_workspaces = []
+            for workspace in workspaces:
+                profile = workspace_profiles[str(workspace.get("id") or "").lower()]
+                decision = rule_applicability(profile, "ARCH-001", ["batch_engineering"])
+                applicability_rows.append({
+                    "workspaceId": workspace.get("id"),
+                    "workspaceName": workspace.get("name"),
+                    "archetype": profile["archetype"],
+                    "classification": profile["classification"],
+                    "itemTypeCounts": profile["itemTypeCounts"],
+                    "applicability": decision,
+                })
+                if decision["status"] == "applicable":
+                    applicable_workspaces.append(workspace)
+            applicability = applicability_summary(applicability_rows)
+            layered_ws = [w for w in applicable_workspaces
+                          if w.get("name") and LAYER_PATTERN.search(w["name"])]
+            ws_ratio = (len(layered_ws) / len(applicable_workspaces)) if applicable_workspaces else 0
 
             # Look inside each workspace's lakehouses too: even when workspace
             # names don't carry a layer token, the medallion convention may
@@ -319,7 +342,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             # inside one engineering workspace).
             CORE_LAYERS = ("bronze", "silver", "gold")
             inside_layers_by_ws: Dict[str, set] = {}
-            for w in workspaces:
+            for w in applicable_workspaces:
                 lhs = (w.get("lakehouses") or w.get("Lakehouse") or [])
                 names = [(lh.get("name") or lh.get("displayName") or "").lower() for lh in lhs]
                 found = {layer for layer in CORE_LAYERS if any(layer in n for n in names)}
@@ -329,7 +352,16 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             ws_with_all_three_inside = [n for n, layers in inside_layers_by_ws.items()
                                          if set(CORE_LAYERS).issubset(layers)]
 
-            if ws_ratio >= LAYER_NAMING_MIN_RATIO:
+            if not applicable_workspaces and applicability["unknownCount"]:
+                status = "unknown"
+                title = "Medallion applicability requires workspace classification"
+                reco = ("Classify the mixed or unsupported workspaces explicitly in config/workspaces.yaml; "
+                        "unknown workspaces are never treated as compliant or exempt.")
+            elif not applicable_workspaces:
+                status = "not_applicable"
+                title = "No batch-engineering workspaces require medallion evaluation"
+                reco = "No action needed; the excluded workspace purposes do not require medallion layering."
+            elif ws_ratio >= LAYER_NAMING_MIN_RATIO:
                 # Layer is visible at the workspace name level -> convention adopted.
                 status = "pass"
                 title = "Medallion / layer naming convention"
@@ -371,9 +403,11 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 title=title,
                 evidence={
                     "workspaceCount": len(workspaces),
+                    "evaluatedWorkspaceCount": len(applicable_workspaces),
+                    "applicability": applicability,
                     "layeredWorkspaceCount": len(layered_ws),
                     "layeredWorkspaceRatio": round(ws_ratio, 2),
-                    "workspaceExamples": [w.get("name") for w in workspaces[:10]],
+                    "workspaceExamples": [w.get("name") for w in applicable_workspaces[:10]],
                     "lakehouseLayersByWorkspace": {
                         k: sorted(v) for k, v in inside_layers_by_ws.items()
                     },
@@ -401,15 +435,29 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         # --- ARCH-005 monolithic workspaces ---
         rule = rules.get("ARCH-005")
         if rule:
-            monoliths = [(w.get("name"), _item_count(w)) for w in workspaces if _item_count(w) > MONOLITH_THRESHOLD]
-            status = "pass" if not monoliths else "fail"
+            oversized = []
+            for workspace in workspaces:
+                count = _item_count(workspace)
+                if count <= MONOLITH_THRESHOLD:
+                    continue
+                profile = workspace_profiles[str(workspace.get("id") or "").lower()]
+                oversized.append({
+                    "name": workspace.get("name"),
+                    "items": count,
+                    "archetype": profile["archetype"],
+                    "classification": profile["classification"],
+                })
+            mixed = [row for row in oversized if row["archetype"] == "mixed"]
+            unresolved = [row for row in oversized if row["classification"] == "unknown"]
+            status = ("fail" if mixed else "unknown" if unresolved else
+                      "info" if oversized else "pass")
             findings.append(make_finding(
                 rule, dimension="architecture", status=status,
                 title=f"Workspaces exceeding monolithic threshold (>{MONOLITH_THRESHOLD} items)",
-                evidence={"threshold": MONOLITH_THRESHOLD, "monolithCount": len(monoliths),
-                          "monoliths": [{"name": n, "items": c} for n, c in monoliths]},
-                recommendation=("Split large workspaces by domain/layer. Large workspaces complicate "
-                                "RBAC, deployment pipelines, and lineage analysis.")
+                evidence={"threshold": MONOLITH_THRESHOLD, "oversizedCount": len(oversized),
+                          "mixedWorkloadCount": len(mixed), "workspaces": oversized},
+                recommendation=("Split workspaces that combine unrelated workload families or security "
+                                "boundaries. A large but cohesive workspace is advisory, not automatically defective.")
             ))
 
         # --- ARCH-006 description present ---
@@ -753,21 +801,49 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             import_n = mode_counts.get("Import", 0)
             dq_n = mode_counts.get("DirectQuery", 0)
             dl_n = mode_counts.get("Direct Lake", 0)
-            # Heuristic: fail if Import dominates ( >70% ) and lakehouses are present (Direct Lake fits).
-            ws_has_lakehouse = any(
-                (w.get("lakehouses") or w.get("Lakehouse") or []) for w in workspaces
-            ) if workspaces else False
+            definitions = load_raw(raw_dir / "semantic_model_definitions.json") or {}
+            definition_rows = definitions.get("models") or []
+            definitions_by_id = {str(row.get("id") or "").lower(): row for row in definition_rows if row.get("id")}
+            definitions_by_name = {
+                str(row.get("name") or row.get("displayName") or "").lower(): row
+                for row in definition_rows if row.get("name") or row.get("displayName")
+            }
+            direct_lake_candidates = []
+            unresolved_imports = []
+            external_imports = []
+            for dataset in datasets:
+                raw_mode = str(dataset.get("targetStorageMode") or dataset.get("defaultMode") or "")
+                if FRIENDLY.get(raw_mode.lower(), raw_mode) != "Import":
+                    continue
+                definition = (
+                    definitions_by_id.get(str(dataset.get("id") or "").lower())
+                    or definitions_by_name.get(str(dataset.get("name") or "").lower())
+                )
+                if not definition or definition.get("error"):
+                    unresolved_imports.append(dataset.get("name"))
+                    continue
+                definition_text = "\n".join(
+                    str(part.get("text") or "") for part in (definition.get("parts") or [])
+                )
+                if re.search(r"\b(?:Lakehouse\.Contents|Fabric\.Warehouse)\b|\bentityName\s*:",
+                             definition_text, flags=re.IGNORECASE):
+                    direct_lake_candidates.append(dataset.get("name"))
+                else:
+                    external_imports.append(dataset.get("name"))
             if total_ds == 0:
-                status = "info"
+                status = "not_applicable"
                 title = "No semantic models discovered"
                 reco = "If reporting workloads exist, ensure datasets are inventoried."
-            elif ws_has_lakehouse and total_ds and (import_n / total_ds) > IMPORT_DOMINANCE_RATIO:
+            elif direct_lake_candidates:
                 status = "fail"
-                title = (f"Import-heavy semantic-model mix ({import_n}/{total_ds} datasets are Import) "
-                         "while lakehouses are present")
+                title = f"{len(direct_lake_candidates)} lakehouse-backed Import model(s) may fit Direct Lake"
                 reco = ("Evaluate moving Import models over lakehouse data to Direct Lake. Direct Lake "
                         "reads Delta directly via VertiPaq with no refresh, cutting capacity CU spent on "
                         "scheduled refresh and reducing data freshness lag.")
+            elif unresolved_imports:
+                status = "unknown"
+                title = f"Direct Lake suitability is unknown for {len(unresolved_imports)} Import model(s)"
+                reco = "Collect semantic model definitions before deciding whether Import models should move to Direct Lake."
             else:
                 status = "info"
                 title = "Semantic-model storage-mode distribution"
@@ -778,6 +854,9 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 title=title,
                 evidence={"datasetCount": total_ds,
                           "modeCounts": mode_counts,
+                          "directLakeCandidates": direct_lake_candidates,
+                          "externalImportModels": external_imports,
+                          "unresolvedImportModels": unresolved_imports,
                           "examples": details[:15]},
                 recommendation=reco,
             ))
@@ -820,28 +899,6 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     "notebookReferencesNotResolved": unmatched_refs[:20],
                 },
                 recommendation=reco,
-            ))
-
-    # --- ARCH-004 Git integration coverage ---
-    rule = rules.get("ARCH-004")
-    if rule:
-        git = load_raw(raw_dir / "git_integration.json")
-        if not git:
-            findings.append(missing_raw_finding(rule, "architecture", "git_integration.json"))
-        else:
-            ws_list = git.get("workspaces") or []
-            connected = [w for w in ws_list if w.get("connected")]
-            total = len(ws_list)
-            ratio = (len(connected) / total) if total else 0
-            status = "pass" if total and ratio >= GIT_COVERAGE_MIN_RATIO else ("info" if not total else "fail")
-            findings.append(make_finding(
-                rule, dimension="architecture", status=status,
-                title="Workspaces connected to Git source control",
-                evidence={"totalWorkspaces": total, "gitConnectedCount": len(connected),
-                          "ratio": round(ratio, 2),
-                          "connectedExamples": [w.get("workspaceName") for w in connected[:10]]},
-                recommendation=("Connect production workspaces to Git for change tracking, peer review and "
-                                "deployment pipeline support.")
             ))
 
     return findings

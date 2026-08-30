@@ -1,4 +1,5 @@
 # Development / test dependencies (not needed to run a review).
 # Install with:  pip install -r requirements-dev.txt
 -r requirements.txt
-pytest>=8.0,<9.0
+pytest>=9.0.3,<10.0
+pip-audit>=2.9,<3.0

@@ -9,8 +9,10 @@ the test suite and ``gen_golden.py`` iterate the same set in the same order.
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, List
+from unittest.mock import patch
 
 # repo paths -----------------------------------------------------------------
 TESTS_DIR = Path(__file__).resolve().parent
@@ -18,6 +20,13 @@ REPO_ROOT = TESTS_DIR.parent
 FIXTURE_RAW = TESTS_DIR / "fixtures" / "sample" / "raw"
 GOLDEN_DIR = TESTS_DIR / "fixtures" / "sample" / "golden"
 CHECKLIST = REPO_ROOT / "config" / "review-checklist.yaml"
+
+# The frozen sample findings include these two explicit reviewer opt-ins.
+# Keep fixture execution independent from a developer's local .env and CI.
+SAMPLE_ANALYZER_ENV = {
+    "CAPACITY_METRICS_APP_INSTALLED": "true",
+    "CAPACITY_AUTO_PAUSE_CONFIGURED": "true",
+}
 
 # module name -> findings basename (matches scripts/02_analyze.ps1 outputs) ---
 ANALYZERS: Dict[str, str] = {
@@ -43,7 +52,8 @@ def get_analyze(module_name: str) -> Callable[..., List[Dict[str, Any]]]:
 def run_analyzer(module_name: str, raw_dir: Path = FIXTURE_RAW) -> List[Dict[str, Any]]:
     """Run one analyzer against ``raw_dir`` using the project checklist."""
     analyze = get_analyze(module_name)
-    return analyze(str(raw_dir), str(CHECKLIST))
+    with patch.dict(os.environ, SAMPLE_ANALYZER_ENV):
+        return analyze(str(raw_dir), str(CHECKLIST))
 
 
 def projection(findings: List[Dict[str, Any]]) -> List[Dict[str, str]]:

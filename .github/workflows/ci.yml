@@ -1,0 +1,93 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python and notebooks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m compileall -q analyzers collectors reports tests
+      - run: python -m pip_audit -r requirements.txt
+      - run: python -m pytest -q
+      - name: Validate notebook Python cells
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          for path in Path("fabric/notebooks").glob("*.ipynb"):
+              notebook = json.loads(path.read_text(encoding="utf-8"))
+              for cell in notebook["cells"]:
+                  if cell.get("cell_type") != "code":
+                      continue
+                  lines = cell.get("source", [])
+                  if any(line.lstrip().startswith(("%", "!")) for line in lines):
+                      continue
+                  compile("\n".join(lines), str(path), "exec")
+      - name: Validate Bash scripts
+        run: bash -n scripts/bash/*.sh
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem scripts/powershell/*.ps1 | ForEach-Object {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            $errors += $parseErrors
+          }
+          if ($errors.Count) {
+            $errors | Format-List
+            exit 1
+          }
+
+  app:
+    name: Fabric app
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fabric/app
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: fabric/app/package-lock.json
+      - run: npm ci
+      - name: Prepare public placeholder configuration
+        run: |
+          cp fabric.example.yaml fabric.yaml
+          cp rayfin/.env.example rayfin/.env
+      - run: npm test -- --run
+      - run: npm run lint
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
