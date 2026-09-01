@@ -30,6 +30,15 @@ analyzers:
     optional_inputs: [capacity_metrics_app.json, semantic_models.json, best_practices.json, capacity_metrics.json, pipelines_notebooks.json]
     rule_ids: [PERF-001, PERF-002, PERF-003, PERF-004, PERF-005, PERF-006, PERF-007, PERF-008, PERF-009, PERF-010, PERF-011, PERF-014, PERF-015]
 
+  - module: analyzers.dax_review
+    output: findings_dax.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [dax_analysis.json]
+    optional_inputs: []
+    rule_ids: [DAX-001, DAX-002]
+
   - module: analyzers.semantic_model_storage_review
     output: findings_storage_mode.json
     predicate_version: 1

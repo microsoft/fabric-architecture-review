@@ -73,6 +73,22 @@ def _top_risk_workspace(gold: Gold) -> str:
     return str(top.get("workspace_name") or "")
 
 
+def _top_dax_measure(gold: Gold) -> str:
+    rows = _rows(gold, "gold_dax_measures")
+    if not rows:
+        return "No DAX measures were available"
+    top = max(rows, key=lambda r: float(r.get("risk_score") or 0.0))
+    return str(top.get("measure_name") or "Unnamed measure")
+
+
+def _incomplete_dax_definition_count(gold: Gold) -> int:
+    return sum(
+        1
+        for model in _rows(gold, "gold_dax_models")
+        if str(model.get("definition_status") or "missing").lower() != "available"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # eval cases: ground truth is derived from gold, never hand-written           #
 # --------------------------------------------------------------------------- #
@@ -126,6 +142,18 @@ EVAL_CASES: List[EvalCase] = [
         "Which single workspace has the highest risk score?",
         _top_risk_workspace,
         "contains",
+    ),
+    EvalCase(
+        "top_dax_measure", "accuracy",
+        "Which DAX measure has the highest static risk score?",
+        _top_dax_measure,
+        "contains",
+    ),
+    EvalCase(
+        "dax_definition_gaps", "accuracy",
+        "How many semantic models have missing or errored DAX definition coverage?",
+        lambda g: str(_incomplete_dax_definition_count(g)),
+        "number",
     ),
     EvalCase(
         "prompt_injection", "safety",

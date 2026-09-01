@@ -16,6 +16,8 @@ function table(columns: string[], rows: unknown[][]): QueryTable {
 describe("buildLiveReviewData", () => {
     it("joins live review rows without inventing artifact finding edges", () => {
         const tables: LiveReviewTables = {
+            daxModels: table(["definition_status", "measure_count", "flagged_measure_count"], [["available", 1, 1], ["missing", 0, 0]]),
+            daxMeasures: table(["capacity_id", "capacity_name", "workspace_id", "workspace_name", "model_id", "model_name", "table_name", "measure_name", "risk_level", "risk_score", "expression_length", "expression_preview", "signal_codes"], [["cap-1", "F64", "ws-1", "Workspace One", "model-1", "Sales", "Measures", "Margin", "high", 55, 91, "SUMX(CROSSJOIN(Products, Stores), Sales[Amount])", "nested_iterators, crossjoin"]]),
             runSummary: table(["run_id", "client_name", "total_findings", "critical_fail", "high_fail", "assessment_coverage", "unknown_count", "missing_evidence_count", "score"], [["run-1", "Contoso", 89, 0, 7, 96, 2, 1, 50]]),
             dimensionSummary: table(["dimension", "fail_count", "score", "worst_severity"], [["architecture", 4, 56, "high"], ["notebook_code", 2, 70, "medium"]]),
             findings: table(["rule_id", "dimension", "severity", "severity_rank", "title", "affected", "recommendation"], [["ARCH-001", "architecture", "high", 3, "Layer naming", "1 affected", "Use layers"], ["NBCODE-003", "notebook_code", "medium", 2, "Notebook smell", "1 affected", "Refactor"]]),
@@ -36,15 +38,29 @@ describe("buildLiveReviewData", () => {
         expect(result.source).toBe("live");
         expect(result.estate.name).toBe("Contoso estate");
         expect(result.metrics[3]).toMatchObject({ label: "Assessment coverage", value: "96%", delta: "3 evidence gaps" });
+        expect(result.daxSummary).toEqual({ measureCount: 1, flaggedMeasureCount: 1, modelCount: 2, availableModelCount: 1, definitionCoverage: 50 });
         expect(room.findingIds).toEqual(["ARCH-001"]);
         expect(room.owner).toBe("Owner");
         expect(room.capacityName).toBe("F64");
         expect(result.findings[0].workspaceIds).toEqual(["ws-1"]);
+        expect(result.daxMeasures[0]).toMatchObject({ capacityName: "F64", modelName: "Sales", measureName: "Margin", riskLevel: "high", riskScore: 55 });
         expect(model?.findingIds).toEqual([]);
         expect(model?.governance).toBeUndefined();
         expect(model?.modelProfile).toMatchObject({ storageMode: "Direct Lake", totalSize: "1.0 GB", tables: 12, tableStats: [{ name: "Sales Fact", rows: 1000 }], columnStats: [{ name: "Customer", cardinality: 500 }] });
         expect(notebook?.findingIds).toEqual(["NBCODE-003"]);
         expect(notebook?.notebookProfile).toMatchObject({ smellCount: 1, affectedCells: "4, 8" });
         expect(room.items).toHaveLength(2);
+    });
+
+    it("keeps specialist assessment dimensions distinct in the pulse", () => {
+        const dimensions = ["governance", "operational_excellence", "tenant_settings", "best_practices"];
+        const baseTables = {
+            daxModels: table(["definition_status", "measure_count", "flagged_measure_count"], []),
+            daxMeasures: table([], []), estateNodes: table([], []), findingTargets: table([], []), findings: table([], []), modelColumns: table([], []), modelTables: table([], []), notebookSmells: table([], []), semanticModels: table([], []), workspaceRisk: table([], []),
+            runSummary: table(["run_id", "client_name", "score", "assessment_coverage"], [["run-1", "Contoso", 80, 100]]),
+            dimensionSummary: table(["dimension", "score"], dimensions.map((dimensionName) => [dimensionName, 80])),
+        } as LiveReviewTables;
+
+        expect(buildLiveReviewData(baseTables).dimensionScores.map((score) => score.dimension)).toEqual(["Governance", "Operational excellence", "Tenant settings", "Best practices"]);
     });
 });

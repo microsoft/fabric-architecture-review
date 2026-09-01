@@ -6,9 +6,11 @@
 //-----------------------------------------------------------------------
 
 import type { QueryTable } from "@microsoft/fabric-app-data";
-import type { EstateHealth, EstateItem, EstateItemType, FindingSeverity, ReviewData, ReviewDimension } from "@/lib/review-data";
+import type { AssessmentDimension, DaxMeasureRisk, EstateHealth, EstateItem, EstateItemType, FindingSeverity, ReviewData, ReviewDimension } from "@/lib/review-data";
 
 export interface LiveReviewTables {
+    daxModels: QueryTable;
+    daxMeasures: QueryTable;
     dimensionSummary: QueryTable;
     estateNodes: QueryTable;
     findingTargets: QueryTable;
@@ -46,6 +48,14 @@ function dimension(value: RecordValue): ReviewDimension {
     if (normalized === "security") return "Security";
     if (normalized === "notebook_code") return "Notebook";
     return "Governance";
+}
+
+function assessmentDimension(value: RecordValue): AssessmentDimension {
+    const normalized = text(value).toLowerCase();
+    if (normalized === "operational_excellence") return "Operational excellence";
+    if (normalized === "tenant_settings") return "Tenant settings";
+    if (normalized === "best_practices") return "Best practices";
+    return dimension(value);
 }
 
 function severity(value: RecordValue): FindingSeverity {
@@ -203,7 +213,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         };
     });
     const dimensionScores = records(tables.dimensionSummary).map((row) => ({
-        dimension: dimension(row.dimension),
+        dimension: assessmentDimension(row.dimension),
         score: Math.round(number(row.score)),
         change: 0,
     }));
@@ -211,6 +221,33 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
     const score = summary.score == null ? "N/E" : String(Math.round(number(summary.score)));
     const coverage = Math.round(number(summary.assessment_coverage));
     const evidenceGaps = number(summary.unknown_count) + number(summary.missing_evidence_count);
+    const daxMeasures: DaxMeasureRisk[] = records(tables.daxMeasures).map((row) => {
+        const level = text(row.risk_level).toLowerCase();
+        return {
+            capacityId: text(row.capacity_id),
+            capacityName: text(row.capacity_name) || "Unassigned capacity",
+            workspaceId: text(row.workspace_id),
+            workspaceName: text(row.workspace_name),
+            modelId: text(row.model_id),
+            modelName: text(row.model_name),
+            tableName: text(row.table_name),
+            measureName: text(row.measure_name),
+            riskLevel: level === "high" || level === "medium" || level === "low" ? level : "none",
+            riskScore: number(row.risk_score),
+            expressionLength: number(row.expression_length),
+            expressionPreview: text(row.expression_preview),
+            signalCodes: text(row.signal_codes),
+        };
+    });
+    const daxModels = records(tables.daxModels);
+    const availableModelCount = daxModels.filter((row) => text(row.definition_status).toLowerCase() === "available").length;
+    const daxSummary = {
+        measureCount: daxModels.reduce((total, row) => total + number(row.measure_count), 0),
+        flaggedMeasureCount: daxModels.reduce((total, row) => total + number(row.flagged_measure_count), 0),
+        modelCount: daxModels.length,
+        availableModelCount,
+        definitionCoverage: daxModels.length ? Math.round((availableModelCount / daxModels.length) * 100) : 0,
+    };
     return {
         metrics: [
             { label: "Best-practice score", value: score, delta: "Latest review run", trend: "steady", intent: "score" },
@@ -219,6 +256,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
             { label: "Assessment coverage", value: `${coverage}%`, delta: `${evidenceGaps} evidence gap${evidenceGaps === 1 ? "" : "s"}`, trend: "steady", intent: coverage >= 90 ? "success" : "neutral" },
         ],
         dimensionScores,
+        daxSummary,
         findings,
         workspaceRisks,
         estate: {
@@ -227,6 +265,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
             capacity: `${new Set(workspaceRows.map((row) => text(row.capacity_name)).filter(Boolean)).size} capacities`,
             rooms,
         },
+        daxMeasures,
         source: "live",
     };
 }

@@ -1,0 +1,26 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    5000,
+    SELECTCOLUMNS(
+        FILTER('gold_dax_measures', 'gold_dax_measures'[run_id] = LatestRun),
+        "capacity_id", 'gold_dax_measures'[capacity_id],
+        "capacity_name", 'gold_dax_measures'[capacity_name],
+        "workspace_id", 'gold_dax_measures'[workspace_id],
+        "workspace_name", 'gold_dax_measures'[workspace_name],
+        "model_id", 'gold_dax_measures'[model_id],
+        "model_name", 'gold_dax_measures'[model_name],
+        "table_name", 'gold_dax_measures'[table_name],
+        "measure_name", 'gold_dax_measures'[measure_name],
+        "risk_level", 'gold_dax_measures'[risk_level],
+        "risk_score", 'gold_dax_measures'[risk_score],
+        "expression_length", 'gold_dax_measures'[expression_length],
+        "expression_preview", 'gold_dax_measures'[expression_preview],
+        "signal_codes", 'gold_dax_measures'[signal_codes]
+    ),
+    [risk_score], DESC
+)

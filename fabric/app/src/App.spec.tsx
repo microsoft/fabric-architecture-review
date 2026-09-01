@@ -20,6 +20,30 @@ describe("App", () => {
         expect(screen.getByRole("heading", { name: "Estate, prioritized" })).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: "Findings by severity" })).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: "Risk versus item count" })).toBeInTheDocument();
+        expect(screen.getByText("DAX static analysis")).toBeInTheDocument();
+        expect(screen.getByText("3 measures · 2 flagged")).toBeInTheDocument();
+        expect(screen.getByText("100% definition coverage · 3 of 3 models available")).toBeInTheDocument();
+    });
+
+    it("opens the DAX Analyzer from its non-scored overview summary", () => {
+        render(<App />);
+        fireEvent.click(screen.getByRole("button", { name: "Open DAX Analyzer" }));
+
+        expect(screen.getByRole("heading", { name: "Review DAX risk patterns" })).toBeInTheDocument();
+    });
+
+    it("provides keyboard-accessible definitions for overview evidence", () => {
+        render(<App />);
+        const scoreHelp = screen.getByRole("button", { name: "About Best-practice score" });
+        const governanceHelp = screen.getByRole("button", { name: "About Governance" });
+        const daxHelp = screen.getByRole("button", { name: "About DAX static analysis" });
+
+        expect(scoreHelp).toHaveAttribute("aria-describedby");
+        expect(governanceHelp).toHaveAttribute("aria-describedby");
+        expect(daxHelp).toHaveAttribute("aria-describedby");
+        expect(document.getElementById(scoreHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Unknown and missing-evidence checks are not treated as passes");
+        expect(document.getElementById(governanceHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("pass percentage among scored checks");
+        expect(document.getElementById(daxHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("does not measure duration");
     });
 
     it("opens a plotted workspace in its findings queue", () => {
@@ -68,6 +92,25 @@ describe("App", () => {
         expect(screen.getByText("FactTransactions")).toBeInTheDocument();
         expect(screen.getByText(/TransactionId/)).toBeInTheDocument();
         expect(screen.getAllByRole("columnheader")).toHaveLength(10);
+    });
+
+    it("filters DAX metadata by capacity before semantic model", () => {
+        render(<App />);
+        fireEvent.click(screen.getByRole("button", { name: "DAX Analyzer" }));
+
+        expect(screen.getByRole("heading", { name: "Review DAX risk patterns" })).toBeInTheDocument();
+        expect(screen.getByRole("figure", { name: "DAX measures by risk pattern" })).toBeInTheDocument();
+        expect(screen.getByRole("figure", { name: "Most common static signals" })).toBeInTheDocument();
+        expect(screen.getByText("Nested iterators")).toBeInTheDocument();
+        expect(screen.getByText("Cardinality expansion")).toBeInTheDocument();
+        expect(screen.getByText("Potentially Expensive Sales")).toBeInTheDocument();
+        expect(screen.getByText("Customer Revenue")).toBeInTheDocument();
+
+        fireEvent.change(screen.getByLabelText("Capacity"), { target: { value: "cap-shared" } });
+        expect(screen.getByLabelText("Semantic model")).toHaveTextContent("Sample Model 03");
+        expect(screen.queryByText("Potentially Expensive Sales")).not.toBeInTheDocument();
+        expect(screen.getByText("Total Revenue")).toBeInTheDocument();
+        expect(screen.getByText("No risk pattern detected")).toBeInTheDocument();
     });
 
     it("opens the selected overview finding in its workspace queue", () => {

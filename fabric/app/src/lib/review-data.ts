@@ -13,6 +13,12 @@ export type ReviewDimension =
     | "Cost"
     | "Notebook";
 
+export type AssessmentDimension =
+    | ReviewDimension
+    | "Operational excellence"
+    | "Tenant settings"
+    | "Best practices";
+
 export type FindingSeverity = "critical" | "high" | "medium" | "low";
 
 export interface ReviewMetric {
@@ -24,9 +30,17 @@ export interface ReviewMetric {
 }
 
 export interface DimensionScore {
-    dimension: ReviewDimension;
+    dimension: AssessmentDimension;
     score: number;
     change: number;
+}
+
+export interface DaxSummary {
+    measureCount: number;
+    flaggedMeasureCount: number;
+    modelCount: number;
+    availableModelCount: number;
+    definitionCoverage: number;
 }
 
 export interface ReviewFinding {
@@ -106,6 +120,22 @@ export interface VertiPaqColumnStat {
     calculated: boolean;
 }
 
+export interface DaxMeasureRisk {
+    capacityId: string;
+    capacityName: string;
+    workspaceId: string;
+    workspaceName: string;
+    modelId: string;
+    modelName: string;
+    tableName: string;
+    measureName: string;
+    riskLevel: "high" | "medium" | "low" | "none";
+    riskScore: number;
+    expressionLength: number;
+    expressionPreview: string;
+    signalCodes: string;
+}
+
 export interface WorkspaceRoom {
     id: string;
     name: string;
@@ -129,9 +159,11 @@ export interface TenantEstate {
 export interface ReviewData {
     metrics: ReviewMetric[];
     dimensionScores: DimensionScore[];
+    daxSummary: DaxSummary;
     findings: ReviewFinding[];
     workspaceRisks: WorkspaceRisk[];
     estate: TenantEstate;
+    daxMeasures: DaxMeasureRisk[];
     source: "preview" | "live";
 }
 
@@ -149,6 +181,14 @@ export const dimensionScores: DimensionScore[] = [
     { dimension: "Governance", score: 68, change: -1 },
     { dimension: "Cost", score: 88, change: 11 },
 ];
+
+export const daxSummary: DaxSummary = {
+    measureCount: 3,
+    flaggedMeasureCount: 2,
+    modelCount: 3,
+    availableModelCount: 3,
+    definitionCoverage: 100,
+};
 
 export const reviewFindings: ReviewFinding[] = [
     {
@@ -311,8 +351,14 @@ export const tenantEstate: TenantEstate = {
 export const previewReviewData: ReviewData = {
     metrics: reviewMetrics,
     dimensionScores,
+    daxSummary,
     findings: reviewFindings,
     workspaceRisks,
     estate: tenantEstate,
+    daxMeasures: [
+        { capacityId: "cap-prod", capacityName: "Stockholm Production F64", workspaceId: "finance", workspaceName: "Sample Workspace 01", modelId: "finance-sm", modelName: "Sample Model 01", tableName: "Measures", measureName: "Potentially Expensive Sales", riskLevel: "high", riskScore: 80, expressionLength: 105, expressionPreview: "SUMX(FILTER(SalesFact, SalesFact[Amount] > 0), SUMX(CROSSJOIN(Products, Stores), SalesFact[Amount]))", signalCodes: "nested_iterators, crossjoin, whole_table_filter" },
+        { capacityId: "cap-prod", capacityName: "Stockholm Production F64", workspaceId: "customer", workspaceName: "Sample Workspace 02", modelId: "customer-sm", modelName: "Sample Model 02", tableName: "Measures", measureName: "Customer Revenue", riskLevel: "medium", riskScore: 28, expressionLength: 78, expressionPreview: "SUMX(FILTER(SalesFact, SalesFact[CustomerId] <> BLANK()), SalesFact[Amount])", signalCodes: "iterator, whole_table_filter" },
+        { capacityId: "cap-shared", capacityName: "Nordic Shared F32", workspaceId: "executive", workspaceName: "Sample Workspace 03", modelId: "executive-sm", modelName: "Sample Model 03", tableName: "Measures", measureName: "Total Revenue", riskLevel: "none", riskScore: 0, expressionLength: 22, expressionPreview: "SUM(SalesFact[Amount])", signalCodes: "" },
+    ],
     source: "preview",
 };

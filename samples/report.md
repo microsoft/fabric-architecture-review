@@ -9,7 +9,7 @@
 <strong>Reviewer:</strong> Fabric Review Team<br/>
 <strong>Review date:</strong> 2026-01-15<br/>
 <strong>Tenant:</strong> <code>***</code><br/>
-<strong>FAR version:</strong> <code>2026.08.0</code>
+<strong>FAR version:</strong> <code>2026.09.0</code>
 </p>
 
 </div>
@@ -25,40 +25,44 @@
 | Workspaces reviewed | 3 |
 | Fabric capacities reviewed | 2 |
 | Activity log lookback | 7 days |
-| Total checks executed | 43 |
-| Failing checks | **30** |
+| Total checks executed | 46 |
+| Failing checks | **34** |
 | Passing checks | 7 |
-| Informational | 6 |
+| Informational | 5 |
+| Not applicable | 0 |
+| Unknown applicability | 0 |
+| Missing evidence | 0 |
+| Assessment coverage | 100.0% |
 
 ## Findings overview
 
 | Dimension | Critical | High | Medium | Low | Info |
 |---|---:|---:|---:|---:|---:|
-| Architecture | 0 | 0 | 1 | 0 | 0 |
-| Performance | 0 | 1 | 8 | 0 | 0 |
-| Governance | 0 | 0 | 1 | 0 | 0 |
+| Architecture | 0 | 1 | 1 | 0 | 0 |
+| Performance | 0 | 2 | 9 | 0 | 0 |
+| Governance | 0 | 0 | 2 | 0 | 0 |
 | Operational Excellence | 0 | 0 | 0 | 0 | 0 |
-| Security | 0 | 2 | 1 | 0 | 0 |
+| Security | 1 | 2 | 1 | 0 | 0 |
 | Cost | 0 | 0 | 2 | 0 | 0 |
-| Tenant Settings | 1 | 1 | 0 | 0 | 0 |
+| Tenant Settings | 0 | 1 | 0 | 0 | 0 |
 | Notebook Code Review (heuristic) | 0 | 1 | 3 | 2 | 0 |
 
-> Counts above include **failing checks only**. Passing and informational findings are listed in the Detailed Findings section for full traceability.
+> Counts above include **failing checks only**. Every outcome, including exclusions and evidence gaps, is listed in Detailed Findings for full traceability.
 
 ## Top risks
 
 | Severity | Rule | Title | Impact |
 |---|---|---|---|
 | <span class="sev sev-critical">CRITICAL</span> | **SEC-001** | Publish to web is disabled or restricted to a security group | Setting is enabled for the entire organization with no security group scoping. |
+| <span class="sev sev-high">HIGH</span> | **ARCH-011** | 1 lakehouse-backed Import model(s) may fit Direct Lake | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **BPA-001** | BPA-001: 2 model best-practice violation(s) across 2 model(s) | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **BPA-002** | BPA-002: 1 report issue(s) across 2 report(s) | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **BPA-003** | BPA-003: 1 Direct Lake fallback reason(s) detected | &mdash; |
+| <span class="sev sev-high">HIGH</span> | **DAX-001** | 1 measure(s) contain potentially expensive static DAX patterns | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **NBCODE-001** | Notebook cells contain potential hard-coded secrets (1 cell(s) across 1 notebook(s)) | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **PERF-001** | Throttling risk on 1 capacity(ies) (approaching rejection); worst P95 rejection 85% | &mdash; |
 | <span class="sev sev-high">HIGH</span> | **SEC-006** | Misconfigured datasource instances | 1 item(s) affected |
 | <span class="sev sev-high">HIGH</span> | **SEC-008** | Single-member gateway cluster(s) bound to data sources (SPOF) | &mdash; |
-| <span class="sev sev-high">HIGH</span> | **TENANT-003** | External data sharing is disabled or scoped to a security group | Setting is enabled for the entire organization with no security group scoping. |
-| <span class="sev sev-medium">MEDIUM</span> | **ARCH-008** | Personal (My workspace) workspaces in use | &mdash; |
 
 ## Methodology
 
@@ -72,7 +76,7 @@ This review is aligned to the [Microsoft Azure Well-Architected Framework](https
 
 An at-a-glance map of the Fabric estate captured by the collectors — the workspaces, items, capacities, access and activity this review is based on. Every number is metadata only; no customer data is read.
 
-<div class="env-overview"><div class="env-group"><div class="env-group-title">Estate</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Workspaces</div><div class="env-sub">+1 personal</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Capacities</div><div class="env-sub">F2, F64</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Fabric items</div><div class="env-sub">across workspaces</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Semantic models</div><div class="env-sub">1 Direct Lake</div></div></div></div><div class="env-group"><div class="env-group-title">Items by type</div><div class="env-cards"><div class="env-card"><div class="env-num">2</div><div class="env-label">Lakehouses</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Warehouses</div></div><div class="env-card"><div class="env-num">1</div><div class="env-label">Reports</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Notebooks</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Data pipelines</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Dataflows</div></div></div></div><div class="env-group"><div class="env-group-title">Governance & access</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Principals with access</div><div class="env-sub">users + groups</div></div><div class="env-card env-warn"><div class="env-num">5/7</div><div class="env-label">Tenant settings on</div><div class="env-sub">enabled vs reviewed</div></div><div class="env-card env-good"><div class="env-num">1/2</div><div class="env-label">Git-connected</div><div class="env-sub">source control</div></div><div class="env-card env-good"><div class="env-num">1</div><div class="env-label">Deployment pipelines</div><div class="env-sub">release management</div></div><div class="env-card env-info"><div class="env-num">1</div><div class="env-label">Gateways</div><div class="env-sub">data connectivity</div></div></div></div><div class="env-group"><div class="env-group-title">Activity & refresh</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">12</div><div class="env-label">Activity events</div><div class="env-sub">last 7 days</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Active users</div><div class="env-sub">in the window</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Refreshable models</div><div class="env-sub">scheduled refresh</div></div><div class="env-card env-bad"><div class="env-num">1</div><div class="env-label">Models with refresh failures</div><div class="env-sub">in recent history</div></div></div></div><div class="env-group"><div class="env-group-title">Review result</div><div class="env-cards"><div class="env-card env-bad"><div class="env-num">30</div><div class="env-label">Failing checks</div><div class="env-sub">need attention</div></div><div class="env-card env-good"><div class="env-num">7</div><div class="env-label">Passing checks</div><div class="env-sub">aligned to checklist</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Informational</div><div class="env-sub">context / not scored</div></div></div></div></div>
+<div class="env-overview"><div class="env-group"><div class="env-group-title">Estate</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Workspaces</div><div class="env-sub">+1 personal</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Capacities</div><div class="env-sub">F2, F64</div></div><div class="env-card env-info"><div class="env-num">6</div><div class="env-label">Fabric items</div><div class="env-sub">across workspaces</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Semantic models</div><div class="env-sub">1 Direct Lake</div></div></div></div><div class="env-group"><div class="env-group-title">Items by type</div><div class="env-cards"><div class="env-card"><div class="env-num">2</div><div class="env-label">Lakehouses</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Warehouses</div></div><div class="env-card"><div class="env-num">1</div><div class="env-label">Reports</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Notebooks</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Data pipelines</div></div><div class="env-card"><div class="env-num">0</div><div class="env-label">Dataflows</div></div></div></div><div class="env-group"><div class="env-group-title">Governance & access</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Principals with access</div><div class="env-sub">users + groups</div></div><div class="env-card env-warn"><div class="env-num">5/7</div><div class="env-label">Tenant settings on</div><div class="env-sub">enabled vs reviewed</div></div><div class="env-card env-good"><div class="env-num">1/2</div><div class="env-label">Git-connected</div><div class="env-sub">source control</div></div><div class="env-card env-good"><div class="env-num">1</div><div class="env-label">Deployment pipelines</div><div class="env-sub">release management</div></div><div class="env-card env-info"><div class="env-num">1</div><div class="env-label">Gateways</div><div class="env-sub">data connectivity</div></div></div></div><div class="env-group"><div class="env-group-title">Activity & refresh</div><div class="env-cards"><div class="env-card env-info"><div class="env-num">12</div><div class="env-label">Activity events</div><div class="env-sub">last 7 days</div></div><div class="env-card env-info"><div class="env-num">2</div><div class="env-label">Active users</div><div class="env-sub">in the window</div></div><div class="env-card env-info"><div class="env-num">3</div><div class="env-label">Refreshable models</div><div class="env-sub">scheduled refresh</div></div><div class="env-card env-bad"><div class="env-num">1</div><div class="env-label">Models with refresh failures</div><div class="env-sub">in recent history</div></div></div></div><div class="env-group"><div class="env-group-title">Review result</div><div class="env-cards"><div class="env-card env-bad"><div class="env-num">34</div><div class="env-label">Failing checks</div><div class="env-sub">need attention</div></div><div class="env-card env-good"><div class="env-num">7</div><div class="env-label">Passing checks</div><div class="env-sub">aligned to checklist</div></div><div class="env-card env-info"><div class="env-num">5</div><div class="env-label">Informational</div><div class="env-sub">context / not scored</div></div><div class="env-card env-info"><div class="env-num">0</div><div class="env-label">Not applicable</div><div class="env-sub">excluded from score</div></div><div class="env-card env-good"><div class="env-num">0</div><div class="env-label">Needs evidence</div><div class="env-sub">unknown or incomplete</div></div></div></div></div>
 
 
 <div class="page-break"></div>
@@ -90,13 +94,14 @@ flowchart TD
     classDef pass fill:#DFF6DD,stroke:#107C10,color:#0B6A0B;
     classDef fail fill:#FDE7E9,stroke:#A4262C,color:#A4262C;
     classDef info fill:#FFF4CE,stroke:#8A6914,color:#8A6914;
+    classDef na fill:#F3F2F1,stroke:#A19F9D,color:#605E5C;
+    classDef unknown fill:#FFF4CE,stroke:#8A6914,color:#8A6914;
+    classDef missing fill:#FED9CC,stroke:#D83B01,color:#8A2D0A;
     tenant(["Fabric tenant"])
-    tenant --> s_SEC_001["SEC-001\nPublish to web is disabled\nor restricted to a security\ngroup"]
-    class s_SEC_001 fail;
     tenant --> s_TENANT_003["TENANT-003\nExternal data sharing is\ndisabled or scoped to a\nsecurity group"]
     class s_TENANT_003 fail;
-    tenant --> s_SEC_002["SEC-002\nExport data is restricted to\na security group"]
-    class s_SEC_002 pass;
+    tenant --> s_TENANT_001["TENANT-001\nUsers can create Fabric\nitems is scoped to a\nsecurity group"]
+    class s_TENANT_001 pass;
 ```
 
 ### Capacity → Workspace topology
@@ -160,14 +165,53 @@ In-memory storage-engine statistics for each Import / Direct Lake semantic model
 
 <div class="page-break"></div>
 
+# DAX Analyzer - Metadata-only static risk
+
+> **Interpretation:** These signals come from measure definitions only. They identify patterns that may be expensive; they are not measured duration, capacity usage, query-plan evidence, or proof that a measure is slow.
+
+- **Coverage:** 3 semantic model(s), 1 measure definition(s), 1 measure(s) with static signals.
+
+## Measures with static-risk signals
+
+| Workspace | Semantic model | Measure | Risk | Score | Signals | Expression preview |
+|---|---|---|---|---|---|---|
+| data-bronze-dev | SalesModel | Potentially Expensive Sales | high | 80 | nested_iterators, crossjoin, whole_table_filter | SUMX(FILTER(SalesFact, SalesFact[Amount] > 0), SUMX(CROSSJOIN(Products, Stores), SalesFact[Amount])) |
+
+
+<div class="page-break"></div>
+
 # Detailed Findings
 
 
 ## Architecture
 
 
-> **1 failing** &middot; 1 informational &middot; 1 passing &middot; 3 total
+> **2 failing** &middot; 1 passing &middot; 1 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 4 total
 
+### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; ARCH-011 &mdash; 1 lakehouse-backed Import model(s) may fit Direct Lake
+
+**Evidence**
+
+- **datasetCount:** 3
+- **modeCounts:** `{"Import": 2, "Direct Lake": 1}`
+- **Directlakecandidates (1):** FinanceModel
+- **Externalimportmodels (1):** SalesModel
+
+**Examples (3)**
+
+| name | workspace | storageMode |
+|---|---|---|
+| SalesModel | data-bronze-dev | Import |
+| FinanceModel | data-gold-prod | Import |
+| DirectLakeModel | data-gold-prod | Direct Lake |
+
+**Recommendation**
+
+Evaluate moving Import models over lakehouse data to Direct Lake. Direct Lake reads Delta directly via VertiPaq with no refresh, cutting capacity CU spent on scheduled refresh and reducing data freshness lag.
+
+**Reference:** [https://learn.microsoft.com/fabric/get-started/direct-lake-overview](https://learn.microsoft.com/fabric/get-started/direct-lake-overview)
+
+---
 ### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; ARCH-008 &mdash; Personal (My workspace) workspaces in use
 
 **Evidence**
@@ -216,8 +260,30 @@ No action needed — every eligible workspace was scanned.
 ## Performance
 
 
-> **9 failing** &middot; 1 informational &middot; 1 passing &middot; 11 total
+> **11 failing** &middot; 1 passing &middot; 1 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 13 total
 
+### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; DAX-001 &mdash; 1 measure(s) contain potentially expensive static DAX patterns
+
+**Evidence**
+
+- **metadata only:** yes
+- **measures analyzed:** 1
+- **medium or high risk count:** 1
+- **high risk count:** 1
+
+**Measures (1)**
+
+| model_id | model_name | workspace_id | workspace_name |
+|---|---|---|---|
+| *** | SalesModel | *** | data-bronze-dev |
+
+**Recommendation**
+
+Review the flagged iterator, cardinality, filtering, materialization, and complexity patterns. Confirm impact with approved runtime tooling before claiming measured performance or cost.
+
+**Reference:** [https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument](https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument)
+
+---
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; PERF-001 &mdash; Throttling risk on 1 capacity(ies) (approaching rejection); worst P95 rejection 85%
 
 **Evidence**
@@ -281,24 +347,21 @@ Investigate failing datasets — common causes are expired gateway credentials, 
 **Reference:** [https://learn.microsoft.com/power-bi/connect-data/refresh-troubleshooting-refresh-scenarios](https://learn.microsoft.com/power-bi/connect-data/refresh-troubleshooting-refresh-scenarios)
 
 ---
-### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; PERF-005 &mdash; Datasets with no successful refresh in 30 days
+### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; PERF-005 &mdash; Lakehouse Delta small-file health (1 concern(s))
 
 **Evidence**
 
-- **thresholdDays:** 30
-- **count:** 3
+- **concernCount:** 1
 
-**Datasets (3)**
+**Models (1)**
 
-| name | workspace | lastSuccessfulRefresh |
-|---|---|---|
-| SalesModel | data-bronze-dev | 2026-01-10T12:40:00Z |
-| FinanceModel | data-gold-prod | 2026-01-13T12:10:00Z |
-| DirectLakeModel | data-gold-prod | 2026-01-14T12:05:00Z |
+| model | concerns |
+|---|---|
+| Sales DL | [{"table": "fact_sales", "smallFiles": 9}] |
 
 **Recommendation**
 
-Confirm whether these models are still in use; archive or fix the refresh schedule.
+Run OPTIMIZE and enable V-Order for the flagged Delta tables.
 
 **Reference:** [https://learn.microsoft.com/fabric/data-engineering/lakehouse-table-maintenance](https://learn.microsoft.com/fabric/data-engineering/lakehouse-table-maintenance)
 
@@ -426,6 +489,28 @@ Set directLakeBehavior deliberately. Use DirectLakeOnly to fail fast (so guardra
 **Reference:** [https://learn.microsoft.com/fabric/get-started/direct-lake-overview#fallback-behavior](https://learn.microsoft.com/fabric/get-started/direct-lake-overview#fallback-behavior)
 
 ---
+### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; PERF-015 &mdash; Datasets with no successful refresh in 30 days
+
+**Evidence**
+
+- **thresholdDays:** 30
+- **count:** 3
+
+**Datasets (3)**
+
+| name | workspace | lastSuccessfulRefresh |
+|---|---|---|
+| SalesModel | data-bronze-dev | 2026-01-10T12:40:00Z |
+| FinanceModel | data-gold-prod | 2026-01-13T12:10:00Z |
+| DirectLakeModel | data-gold-prod | 2026-01-14T12:05:00Z |
+
+**Recommendation**
+
+Confirm whether these models are still in use; archive or fix the refresh schedule.
+
+**Reference:** [https://learn.microsoft.com/power-bi/connect-data/refresh-data](https://learn.microsoft.com/power-bi/connect-data/refresh-data)
+
+---
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-info">INFO</span> &nbsp; PERF-002 &mdash; 7-day average CU% elevated on '***' (78.0%)
 
 **Evidence**
@@ -446,26 +531,43 @@ Average CU% between 70% and 80% is close to throttling threshold. Tune the heavi
 **Reference:** [https://learn.microsoft.com/fabric/enterprise/optimize-capacity](https://learn.microsoft.com/fabric/enterprise/optimize-capacity)
 
 ---
-### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; PERF-007 &mdash; Datasets with average refresh > 2.0h
+### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; DAX-002 &mdash; DAX definitions were scanned for 3 semantic model(s)
 
 **Evidence**
 
-- **thresholdHours:** 2
-- **count:** 0
+- **metadata only:** yes
+- **models scanned:** 3
+- **definition errors:** 0
+- **measures extracted:** 1
 
 **Recommendation**
 
-Enable incremental refresh or move to Direct Lake; long refreshes contend for capacity CU.
+Keep definition collection enabled so DAX coverage remains current.
 
-**Reference:** [https://learn.microsoft.com/power-bi/connect-data/incremental-refresh-overview](https://learn.microsoft.com/power-bi/connect-data/incremental-refresh-overview)
+**Reference:** [https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition](https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition)
 
 ---
 
 ## Governance
 
 
-> **1 failing** &middot; 1 informational &middot; 1 passing &middot; 3 total
+> **2 failing** &middot; 1 passing &middot; 1 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 4 total
 
+### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; GOV-003 &mdash; Sensitivity label coverage
+
+**Evidence**
+
+- **evaluatedItems:** 6
+- **labelledItems:** 0
+- **ratio:** 0
+
+**Recommendation**
+
+Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; enforce via tenant setting and Purview integration.
+
+**Reference:** [https://learn.microsoft.com/fabric/governance/information-protection](https://learn.microsoft.com/fabric/governance/information-protection)
+
+---
 ### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; GOV-009 &mdash; Production workspaces without endorsed semantic models
 
 **Evidence**
@@ -507,7 +609,7 @@ Endorse trusted datasets/reports as Promoted, and the authoritative ones as Cert
 
 **Evidence**
 
-- **evaluatedWorkspaces:** 2
+- **evaluatedWorkspaces:** 1
 - **minAdmins:** 2
 - **underAdminCount:** 0
 
@@ -522,7 +624,7 @@ Assign at least two workspace admins (preferably via a security group) to avoid 
 ## Operational Excellence
 
 
-> **0 failing** &middot; 0 informational &middot; 1 passing &middot; 1 total
+> **0 failing** &middot; 1 passing &middot; 0 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 1 total
 
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; OPS-001 &mdash; Production workspaces covered by a deployment pipeline
 
@@ -544,8 +646,24 @@ Attach every production workspace to a deployment pipeline so content is promote
 ## Security
 
 
-> **3 failing** &middot; 1 informational &middot; 1 passing &middot; 5 total
+> **4 failing** &middot; 1 passing &middot; 1 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 6 total
 
+### <span class="sev sev-critical">CRITICAL</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; SEC-001 &mdash; Publish to web is disabled or restricted to a security group
+
+**Evidence**
+
+- **setting name:** PublishToWeb
+- **enabled:** yes
+- **canSpecifySecurityGroups:** yes
+- **reason:** Setting is enabled for the entire organization with no security group scoping.
+
+**Recommendation**
+
+Tenant setting "Publish to web" is disabled or restricted to a specific security group.
+
+**Reference:** [https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web)
+
+---
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; SEC-006 &mdash; Misconfigured datasource instances
 
 **Evidence**
@@ -635,7 +753,7 @@ Consolidate broad access into Entra security groups; remove unused direct assign
 ## Cost
 
 
-> **2 failing** &middot; 1 informational &middot; 1 passing &middot; 4 total
+> **2 failing** &middot; 1 passing &middot; 0 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 3 total
 
 ### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; COST-002 &mdash; Reviewer attested Pause/Resume but no Azure automation matched the capacity
 
@@ -678,34 +796,17 @@ Right-size: either consolidate workspaces onto this capacity or downgrade the SK
 **Reference:** [https://learn.microsoft.com/fabric/enterprise/optimize-capacity](https://learn.microsoft.com/fabric/enterprise/optimize-capacity)
 
 ---
-### <span class="sev sev-medium">MEDIUM</span> &nbsp; <span class="status status-info">INFO</span> &nbsp; COST-003 &mdash; Non-production capacities (candidates for Pause/Resume)
+### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; COST-001 &mdash; Capacity right-sizing from sustained CU% (0 outside target band)
 
 **Evidence**
 
-- **count:** 1
-
-**Capacities (1)**
-
-| name | sku |
-|---|---|
-| Capacity Dev | F2 |
+- **idleBelowPct:** 20
+- **saturatedAbovePct:** 85
+- **capacitiesEvaluated:** 1
 
 **Recommendation**
 
-Configure an Azure Automation runbook or schedule to pause non-production capacities outside business hours.
-
-**Reference:** [https://learn.microsoft.com/fabric/enterprise/pause-resume](https://learn.microsoft.com/fabric/enterprise/pause-resume)
-
----
-### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; COST-001 &mdash; Active capacities with no assigned workspaces
-
-**Evidence**
-
-- **count:** 0
-
-**Recommendation**
-
-Pause or delete empty capacities; they incur SKU charges with zero utilization.
+Downsize or consolidate chronically idle capacities; optimize workloads, enable autoscale, or upsize chronically saturated capacities.
 
 **Reference:** [https://learn.microsoft.com/fabric/enterprise/optimize-capacity](https://learn.microsoft.com/fabric/enterprise/optimize-capacity)
 
@@ -714,24 +815,8 @@ Pause or delete empty capacities; they incur SKU charges with zero utilization.
 ## Tenant Settings
 
 
-> **2 failing** &middot; 0 informational &middot; 1 passing &middot; 3 total
+> **1 failing** &middot; 1 passing &middot; 0 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 2 total
 
-### <span class="sev sev-critical">CRITICAL</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; SEC-001 &mdash; Publish to web is disabled or restricted to a security group
-
-**Evidence**
-
-- **setting name:** PublishToWeb
-- **enabled:** yes
-- **canSpecifySecurityGroups:** yes
-- **reason:** Setting is enabled for the entire organization with no security group scoping.
-
-**Recommendation**
-
-Tenant setting "Publish to web" is disabled or restricted to a specific security group.
-
-**Reference:** [https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web)
-
----
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; TENANT-003 &mdash; External data sharing is disabled or scoped to a security group
 
 **Evidence**
@@ -748,27 +833,28 @@ External sharing tenant settings ("Allow sharing to external users", "Invite ext
 **Reference:** [https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing](https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing)
 
 ---
-### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; SEC-002 &mdash; Export data is restricted to a security group
+### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-pass">PASS</span> &nbsp; TENANT-001 &mdash; Users can create Fabric items is scoped to a security group
 
 **Evidence**
 
-- **setting name:** ExportData
-- **enabled:** no
+- **setting name:** CreateFabricItem
+- **enabled:** yes
 - **canSpecifySecurityGroups:** yes
-- **reason:** Setting is disabled (effectively scoped to no one).
+- **reason:** Enabled but scoped to 1 security group(s).
+- **Enabledsecuritygroups (1):** ***
 
 **Recommendation**
 
-Tenant setting "Export data" is restricted to a security group, not enabled tenant-wide.
+"Users can create Fabric items" is scoped to a specific security group, not enabled for the entire organization.
 
-**Reference:** [https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing)
+**Reference:** [https://learn.microsoft.com/fabric/admin/fabric-switch](https://learn.microsoft.com/fabric/admin/fabric-switch)
 
 ---
 
 ## Notebook Code Review (heuristic)
 
 
-> **6 failing** &middot; 0 informational &middot; 0 passing &middot; 6 total
+> **6 failing** &middot; 0 passing &middot; 0 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 6 total
 
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; NBCODE-001 &mdash; Notebook cells contain potential hard-coded secrets (1 cell(s) across 1 notebook(s))
 
@@ -918,7 +1004,7 @@ Prefer .format("delta"). Delta gives ACID, time travel, V-Order and is required 
 ## Best Practices
 
 
-> **6 failing** &middot; 1 informational &middot; 0 passing &middot; 7 total
+> **6 failing** &middot; 0 passing &middot; 1 informational &middot; 0 not applicable &middot; 0 unknown &middot; 0 missing evidence &middot; 7 total
 
 ### <span class="sev sev-high">HIGH</span> &nbsp; <span class="status status-fail">FAIL</span> &nbsp; BPA-001 &mdash; BPA-001: 2 model best-practice violation(s) across 2 model(s)
 
@@ -1031,9 +1117,11 @@ Findings are prioritized by severity and the effort typically required to remedi
 | Rule | Title | Recommendation |
 |---|---|---|
 | **SEC-001** | Publish to web is disabled or restricted to a security group | Tenant setting "Publish to web" is disabled or restricted to a specific security group. |
+| **ARCH-011** | 1 lakehouse-backed Import model(s) may fit Direct Lake | Evaluate moving Import models over lakehouse data to Direct Lake. Direct Lake reads Delta directly via VertiPaq with no refresh, cutting capacity CU spent on scheduled refresh and reducing data freshness lag. |
 | **BPA-001** | BPA-001: 2 model best-practice violation(s) across 2 model(s) | Clear high-impact BPA rule violations (storage, formatting, perf) in the flagged models. |
 | **BPA-002** | BPA-002: 1 report issue(s) across 2 report(s) | Fix reports binding to missing fields or with orphaned visuals before publishing. |
 | **BPA-003** | BPA-003: 1 Direct Lake fallback reason(s) detected | Resolve fallback causes (guardrails, unsupported types) so models stay on Direct Lake. |
+| **DAX-001** | 1 measure(s) contain potentially expensive static DAX patterns | Review the flagged iterator, cardinality, filtering, materialization, and complexity patterns. Confirm impact with approved runtime tooling before claiming measured performance or cost. |
 | **NBCODE-001** | Notebook cells contain potential hard-coded secrets (1 cell(s) across 1 notebook(s)) | Replace literal keys / SAS / tokens / passwords with Key Vault lookups via notebookutils.credentials.getSecret(...) or a workspace-managed-identity flow. |
 | **PERF-001** | Throttling risk on 1 capacity(ies) (approaching rejection); worst P95 rejection 85% | A throttling bucket has reached or is approaching 100% - the point where Fabric actually delays or rejects operations. In the Metrics App, open the named capacity's Throttling page, click the tallest peaks, drill to Timepoint Detail, and sort items by '% of Base capacity' / Total CU (s). Tune the top CU consumers (stagger semantic-model refreshes, reduce query/refresh cost, scope Spark jobs), then enable autoscale or scale-out for the peak windows, or upsize the SKU. |
 | **SEC-006** | Misconfigured datasource instances | Repair gateway bindings, refresh expired OAuth credentials, or remove orphaned datasources. |
@@ -1050,13 +1138,15 @@ Findings are prioritized by severity and the effort typically required to remedi
 | **BPA-007** | BPA-007: 1 capacity(ies) on legacy P-SKU need F-SKU migration | Plan migration from P-SKU Premium capacities to Fabric F-SKUs before EOL. |
 | **COST-002** | Reviewer attested Pause/Resume but no Azure automation matched the capacity | Either grant the signed-in user Reader on the subscription that hosts the automation account / Logic App and re-run, or unset CAPACITY_AUTO_PAUSE_CONFIGURED if the schedule no longer exists. |
 | **COST-005** | Large capacities (F64+) hosting fewer than 5 workspaces | Right-size: either consolidate workspaces onto this capacity or downgrade the SKU. |
+| **GOV-003** | Sensitivity label coverage | Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; enforce via tenant setting and Purview integration. |
 | **GOV-009** | Production workspaces without endorsed semantic models | Certify the authoritative semantic models in production workspaces so downstream reports build on governed, trusted data. |
 | **NBCODE-002** | Notebook cells install packages inline (%pip / !pip / %conda) (1 cell(s) across 1 notebook(s)) | Move dependencies to a Fabric environment so installs are baked in once, not repeated on every run, and so library versions are pinned across promotions. |
 | **NBCODE-003** | Notebook cells call unbounded .collect() / .toPandas() on Spark DataFrames (1 cell(s) across 1 notebook(s)) | Bare .collect()/.toPandas() pulls every row to the driver and is a common OOM cause. Bound the result first (.limit(N), .first(), .head(N), .take(N), or aggregate to a single row), or persist with .write.format("delta") instead of materialising on the driver. Note: Fabric's display() is safe — it auto-truncates and is not flagged by this rule. |
 | **NBCODE-004** | Notebook cells use Databricks-only APIs (1 cell(s) across 1 notebook(s)) | Replace dbutils.* with notebookutils.*, /dbfs paths with abfss:// or attached lakehouse references, and Databricks MLflow URIs with the Fabric MLflow integration. |
 | **PERF-003** | Semantic models over size threshold (1 over 2048 MB) | For large Import models, reduce cardinality and unused columns, add aggregations or incremental refresh, and evaluate Direct Lake where source tables live in OneLake Delta. |
 | **PERF-004** | Datasets with high refresh-failure ratio | Investigate failing datasets — common causes are expired gateway credentials, source schema drift, or out-of-memory in Import models. |
-| **PERF-005** | Datasets with no successful refresh in 30 days | Confirm whether these models are still in use; archive or fix the refresh schedule. |
+| **PERF-005** | Lakehouse Delta small-file health (1 concern(s)) | Run OPTIMIZE and enable V-Order for the flagged Delta tables. |
+| **PERF-015** | Datasets with no successful refresh in 30 days | Confirm whether these models are still in use; archive or fix the refresh schedule. |
 | **PERF-006** | Refreshable datasets without a scheduled refresh history | Configure scheduled refresh (or document the manual-only contract) so data stays current. |
 | **PERF-011** | Capacities running hot (>=70% avg CU 7d) without autoscale | Enable autoscale (or schedule a manual scale-out window) on capacities that regularly exceed 70% average CU - otherwise the next workload increase will throttle. |
 | **SEC-004** | Workspaces with individual users (not groups) as admins | Replace individual admin assignments with Entra security groups for lifecycle management. |

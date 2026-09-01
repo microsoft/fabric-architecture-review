@@ -39,6 +39,10 @@ def _gold() -> Dict[str, List[Dict[str, Any]]]:
 
 def test_expected_values_are_computable() -> None:
     gold = _gold()
+    by_id = {case.id: case for case in EVAL_CASES}
+    assert {"top_dax_measure", "dax_definition_gaps"} <= set(by_id)
+    assert by_id["top_dax_measure"].expected(gold) == "Potentially Expensive Sales"
+    assert by_id["dax_definition_gaps"].expected(gold).isdigit()
     for case in EVAL_CASES:
         expected = case.expected(gold)
         assert isinstance(expected, str)

@@ -289,6 +289,33 @@ def _semantic_model_definitions() -> dict[str, Any]:
     }
 
 
+def _dax_analysis() -> dict[str, Any]:
+    expression = "SUMX(FILTER(SalesFact, SalesFact[Amount] > 0), SUMX(CROSSJOIN(Products, Stores), SalesFact[Amount]))"
+    return {
+        "available": True,
+        "metadata_only": True,
+        "models_scanned": 3,
+        "definition_errors": 0,
+        "measures": [{
+            "model_id": DS_A,
+            "model_name": "SalesModel",
+            "workspace_id": WS1,
+            "workspace_name": "data-bronze-dev",
+            "table_name": "SalesFact",
+            "measure_name": "Potentially Expensive Sales",
+            "expression": expression,
+            "expression_length": len(expression),
+            "risk_score": 80,
+            "risk_level": "high",
+            "signals": [
+                {"code": "nested_iterators", "category": "iteration", "points": 25, "message": "Expression contains iterator calls."},
+                {"code": "crossjoin", "category": "cardinality", "points": 35, "message": "CROSSJOIN can create a large intermediate row set."},
+                {"code": "whole_table_filter", "category": "filtering", "points": 20, "message": "FILTER iterates a whole table."},
+            ],
+        }],
+    }
+
+
 def _capacity_metrics() -> dict[str, Any]:
     return {
         "capacityCount": 2,
@@ -483,6 +510,7 @@ def _corpus() -> dict[str, Any]:
         "workspace_inventory.json": _workspace_inventory(),
         "semantic_models.json": _semantic_models(),
         "semantic_model_definitions.json": _semantic_model_definitions(),
+        "dax_analysis.json": _dax_analysis(),
         "capacity_metrics.json": _capacity_metrics(),
         "capacity_metrics_app.json": _capacity_metrics_app(),
         "gateways.json": _gateways(),

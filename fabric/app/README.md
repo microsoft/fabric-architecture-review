@@ -5,7 +5,7 @@ Licensed under the MIT License. See LICENSE file in the project root for full li
 
 # Fabric Architecture Review app
 
-The Fabric Architecture Review (FAR) app is a Fabric-hosted React workbench for exploring the latest architecture-review run. It presents the review score, prioritized findings, workspace estate, governance posture, semantic-model optimization, performance and cost signals, architecture inventory, notebook code smells, and a conversational Fabric Data Agent.
+The Fabric Architecture Review (FAR) app is a Fabric-hosted React workbench for exploring the latest architecture-review run. It presents the review score, prioritized findings, workspace estate, governance posture, semantic-model optimization, a dedicated metadata-only DAX Analyzer, performance and cost signals, architecture inventory, notebook code smells, and a conversational Fabric Data Agent.
 
 The app consumes review metadata and aggregate engineering statistics. It does not query customer business rows, notebook source, or notebook output.
 
@@ -25,6 +25,7 @@ flowchart LR
 
 - The application shell is a static React/Vite site hosted by an existing Fabric AppBackend through Rayfin.
 - Live lens data is queried from the `reviewModel` semantic-model binding through Fabric App Data.
+- The **DAX Analyzer** lens filters capacity first and semantic model second, then shows explainable static expression risks. It never executes DAX or presents its scores as measured duration, CU, or cost.
 - Data Agent chat runs directly from the browser using a delegated Microsoft Entra token and MCP Streamable HTTP.
 - The semantic model, Data Agent, and app may be in different Fabric workspaces. Configure each item with its actual parent workspace ID.
 - Rayfin Functions and Azure Functions are disabled and are not part of this implementation.

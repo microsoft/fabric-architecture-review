@@ -38,6 +38,7 @@ try {
     Invoke-Analyzer "analyzers.tenant_settings_review" "Tenant settings baseline" "findings_tenant_settings.json"
     Invoke-Analyzer "analyzers.architecture_review"    "Architecture review"      "findings_architecture.json"
     Invoke-Analyzer "analyzers.performance_review"     "Performance review"       "findings_performance.json"
+    Invoke-Analyzer "analyzers.dax_review"             "Metadata-only DAX review" "findings_dax.json"
     Invoke-Analyzer "analyzers.semantic_model_storage_review" "Semantic model storage-mode / DirectLake feasibility" "findings_storage_mode.json"
     Invoke-Analyzer "analyzers.governance_review"      "Governance review"        "findings_governance.json"
     Invoke-Analyzer "analyzers.operational_excellence_review" "Operational Excellence review" "findings_operational_excellence.json"

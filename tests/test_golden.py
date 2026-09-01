@@ -35,6 +35,7 @@ EXPECTED_COUNTS: Dict[str, int] = {
     "findings_tenant_settings": 7,
     "findings_architecture": 13,
     "findings_performance": 13,
+    "findings_dax": 2,
     "findings_storage_mode": 4,
     "findings_governance": 9,
     "findings_operational_excellence": 3,
@@ -43,7 +44,7 @@ EXPECTED_COUNTS: Dict[str, int] = {
     "findings_notebook_code": 6,
     "findings_best_practices": 7,
 }
-EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 78
+EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 80
 
 
 def _load_golden(basename: str) -> List[Dict[str, Any]]:

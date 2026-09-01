@@ -11,6 +11,8 @@ import { buildLiveReviewData, type LiveReviewTables } from "@/lib/live-review-ad
 import { liveReviewQueries } from "@/queries/live";
 
 export function useLiveReviewData() {
+    const daxModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxModels });
+    const daxMeasures = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxMeasures });
     const dimensionSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.dimensionSummary });
     const estateNodes = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.estateNodes });
     const findingTargets = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.findingTargets });
@@ -21,7 +23,7 @@ export function useLiveReviewData() {
     const runSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.runSummary });
     const semanticModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.semanticModels });
     const workspaceRisk = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.workspaceRisk });
-    const results = useMemo(() => ({ dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk }), [dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk]);
+    const results = useMemo(() => ({ daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk }), [daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk]);
     const failed = Object.entries(results).find(([, result]) => result.error || result.data?.status === "error");
     const loading = Object.values(results).some((result) => result.isLoading || !result.data);
     const data = useMemo(() => {
@@ -32,6 +34,8 @@ export function useLiveReviewData() {
             return result.data.table;
         };
         const tables: LiveReviewTables = {
+            daxModels: table("daxModels"),
+            daxMeasures: table("daxMeasures"),
             dimensionSummary: table("dimensionSummary"),
             estateNodes: table("estateNodes"),
             findingTargets: table("findingTargets"),

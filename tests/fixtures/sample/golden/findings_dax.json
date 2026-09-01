@@ -1,0 +1,50 @@
+[
+  {
+    "rule_id": "DAX-001",
+    "dimension": "performance",
+    "severity": "high",
+    "status": "fail",
+    "title": "1 measure(s) contain potentially expensive static DAX patterns",
+    "evidence": {
+      "metadata_only": true,
+      "measures_analyzed": 1,
+      "medium_or_high_risk_count": 1,
+      "high_risk_count": 1,
+      "measures": [
+        {
+          "model_id": "0000001f-0000-4000-8000-00000000001f",
+          "model_name": "SalesModel",
+          "workspace_id": "00000001-0000-4000-8000-000000000001",
+          "workspace_name": "data-bronze-dev",
+          "table_name": "SalesFact",
+          "measure_name": "Potentially Expensive Sales",
+          "risk_score": 80,
+          "risk_level": "high",
+          "signal_codes": [
+            "nested_iterators",
+            "crossjoin",
+            "whole_table_filter"
+          ]
+        }
+      ]
+    },
+    "recommendation": "Review the flagged iterator, cardinality, filtering, materialization, and complexity patterns. Confirm impact with approved runtime tooling before claiming measured performance or cost.",
+    "microsoft_learn_url": "https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument"
+  },
+  {
+    "rule_id": "DAX-002",
+    "dimension": "performance",
+    "severity": "medium",
+    "status": "pass",
+    "title": "DAX definitions were scanned for 3 semantic model(s)",
+    "evidence": {
+      "metadata_only": true,
+      "models_scanned": 3,
+      "definition_errors": 0,
+      "measures_extracted": 1,
+      "notes": []
+    },
+    "recommendation": "Keep definition collection enabled so DAX coverage remains current.",
+    "microsoft_learn_url": "https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition"
+  }
+]

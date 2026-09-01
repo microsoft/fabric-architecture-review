@@ -48,6 +48,8 @@ retain historical IDs but are disabled and do not emit findings.
 | PERF-012 | medium | Import-mode semantic models are audited for DirectLake-migration feasibility | [Learn](https://learn.microsoft.com/fabric/get-started/direct-lake-overview) |
 | PERF-013 | medium | Direct Lake semantic models declare an explicit fallback behaviour | [Learn](https://learn.microsoft.com/fabric/get-started/direct-lake-overview#fallback-behavior) |
 | PERF-014 | low | Scheduled semantic-model refreshes in the same workspace do not pile up into overlapping windows | [Learn](https://learn.microsoft.com/power-bi/connect-data/refresh-scheduled-refresh) |
+| DAX-001 | high | Measure definitions avoid static DAX patterns that can create expensive iterators, broad intermediate tables, or complex filter evaluation; this does not claim measured runtime cost | [Learn](https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument) |
+| DAX-002 | medium | Semantic-model definitions are available for metadata-only DAX analysis; definition errors remain explicit evidence gaps | [Learn](https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition) |
 
 ## Governance
 

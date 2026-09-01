@@ -719,6 +719,81 @@ def build_gold(
                 "used_size": _vp_int(h, "used_size", "hierarchy_size", "size"),
             }))
 
+    # ---- gold_dax_models + gold_dax_measures -------------------------
+    dax = _load(raw, "dax_analysis.json") or {}
+    dax_measures = dax.get("measures") or []
+    dax_by_model: Dict[str, List[Dict[str, Any]]] = {}
+    for measure in dax_measures:
+        model_key = str(measure.get("model_id") or "").lower()
+        if model_key:
+            dax_by_model.setdefault(model_key, []).append(measure)
+
+    workspace_by_id = {
+        str(ws.get("id") or ws.get("objectId") or "").lower(): ws
+        for ws in (wsi.get("workspaces") or scanner.get("workspaces") or [])
+        if ws.get("id") or ws.get("objectId")
+    }
+    dax_capacity_names = {
+        str(capacity.get("id") or "").lower(): capacity.get("displayName") or capacity.get("name") or ""
+        for capacity in cap.get("capacities") or []
+        if capacity.get("id")
+    }
+    definition_models = {
+        str(model.get("id") or "").lower(): model
+        for model in (_load(raw, "semantic_model_definitions.json") or {}).get("models") or []
+        if model.get("id")
+    }
+
+    for model in sm.get("datasets") or []:
+        model_id = model.get("id")
+        model_key = str(model_id or "").lower()
+        workspace_id = model.get("workspaceId") or model.get("groupId")
+        workspace = workspace_by_id.get(str(workspace_id or "").lower(), {})
+        workspace_name = model.get("workspaceName") or workspace.get("name") or ""
+        if workspace_name.strip().lower() in _personal_names:
+            continue
+        capacity_id = workspace.get("capacityId") or ""
+        capacity_name = dax_capacity_names.get(str(capacity_id).lower(), "") or "Unassigned capacity"
+        definition = definition_models.get(model_key)
+        model_measures = dax_by_model.get(model_key, [])
+        flagged = [measure for measure in model_measures if measure.get("risk_level") in ("medium", "high")]
+        tables["gold_dax_models"].append(_coerce_row("gold_dax_models", {
+            **meta,
+            "capacity_id": capacity_id,
+            "capacity_name": capacity_name,
+            "workspace_id": workspace_id,
+            "workspace_name": workspace_name,
+            "model_id": model_id,
+            "model_name": model.get("name"),
+            "definition_status": "error" if definition and definition.get("error") else "available" if definition else "missing",
+            "measure_count": len(model_measures),
+            "flagged_measure_count": len(flagged),
+            "high_risk_count": sum(1 for measure in model_measures if measure.get("risk_level") == "high"),
+            "max_risk_score": max((int(measure.get("risk_score") or 0) for measure in model_measures), default=0),
+        }))
+        for measure in model_measures:
+            signals = measure.get("signals") or []
+            expression = str(measure.get("expression") or "")
+            risk_level = str(measure.get("risk_level") or "none").lower()
+            tables["gold_dax_measures"].append(_coerce_row("gold_dax_measures", {
+                **meta,
+                "capacity_id": capacity_id,
+                "capacity_name": capacity_name,
+                "workspace_id": workspace_id,
+                "workspace_name": workspace_name,
+                "model_id": model_id,
+                "model_name": model.get("name") or measure.get("model_name"),
+                "table_name": measure.get("table_name"),
+                "measure_name": measure.get("measure_name"),
+                "risk_level": risk_level,
+                "risk_rank": {"high": 3, "medium": 2, "low": 1, "none": 0}.get(risk_level, 0),
+                "risk_score": int(measure.get("risk_score") or 0),
+                "expression_length": int(measure.get("expression_length") or len(expression)),
+                "expression_preview": expression[:500],
+                "signal_codes": ", ".join(str(signal.get("code")) for signal in signals if signal.get("code")),
+                "signal_details_json": json.dumps(signals, ensure_ascii=False),
+            }))
+
     # ---- gold_notebook_smells -----------------------------------------
     nb_idx = _notebook_index(scanner)
     for f in findings:

@@ -4,6 +4,7 @@
 """Static contracts for production orchestration and packaging."""
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -53,6 +54,20 @@ def _notebook_code(relative_path: str) -> str:
     )
 
 
+def test_release_version_is_consistent_across_tracked_surfaces() -> None:
+    version = _text("VERSION").strip()
+    npm_version = ".".join(str(int(part)) for part in version.split("."))
+    package = json.loads(_text("fabric/app/package.json"))
+    package_lock = json.loads(_text("fabric/app/package-lock.json"))
+
+    assert package["version"] == npm_version
+    assert package_lock["version"] == npm_version
+    assert package_lock["packages"][""]["version"] == npm_version
+    assert f'version: "{npm_version}"' in _text("fabric/app/src/lib/data-agent-factory.ts")
+    assert f"## {version}" in _text("CHANGELOG.md")
+    assert f"<code>{version}</code>" in _text("samples/report.md")
+
+
 def test_fabric_setup_deploys_complete_ordered_pipeline() -> None:
     code = _notebook_code("fabric/setup.ipynb")
 
@@ -77,6 +92,54 @@ def test_fabric_setup_resolves_immutable_release_ref() -> None:
     assert 'GITHUB_REF = RELEASE_TAG or (("v" + _branch_version)' in code
     assert 'checkout", "--force", "FETCH_HEAD"' in code
     assert 'GITHUB_REF = GITHUB_BRANCH' in code
+    assert 'def load_agent_nb():' in code
+    assert '"GITHUB_REPO_URL": GITHUB_REPO_URL' in code
+    assert '"GITHUB_BRANCH": GITHUB_BRANCH' in code
+    assert '"GITHUB_REF": GITHUB_REF' in code
+    assert 'load_agent_nb())' in code
+
+
+def test_data_agent_notebook_pins_tested_preview_sdk() -> None:
+    code = _notebook_code("fabric/notebooks/05_agent.ipynb")
+
+    assert "%pip install -q fabric-data-agent-sdk==0.1.30a0" in code
+
+
+def test_setup_stamps_compilable_data_agent_source() -> None:
+    setup_code = _notebook_code("fabric/setup.ipynb")
+    function_start = setup_code.index("def load_agent_nb():")
+    function_end = setup_code.index("\ncollect_id =", function_start)
+    function_code = setup_code[function_start:function_end]
+    agent_notebook = json.loads(_text("fabric/notebooks/05_agent.ipynb"))
+    namespace = {
+        "json": json,
+        "GITHUB_REPO_URL": "https://example.invalid/repository.git",
+        "GITHUB_BRANCH": "test-branch",
+        "GITHUB_REF": "test-ref",
+        "load_nb": lambda _relative_path: agent_notebook,
+    }
+
+    exec(function_code, namespace)
+    stamped_notebook = namespace["load_agent_nb"]()
+    deploy_cell = next(
+        cell for cell in stamped_notebook["cells"]
+        if "# Deploy + publish the data agent" in "".join(cell.get("source", []))
+    )
+
+    ast.parse("".join(deploy_cell["source"]))
+    for parameter in ("GITHUB_REPO_URL", "GITHUB_BRANCH", "GITHUB_REF"):
+        stamped_line = next(
+            line for line in deploy_cell["source"] if line.lstrip().startswith(parameter + " ")
+        )
+        assert stamped_line.endswith("\n")
+
+
+def test_fabric_stage_notebooks_invoke_dax_pipeline() -> None:
+    collect_code = _notebook_code("fabric/notebooks/01_collect.ipynb")
+    analyze_code = _notebook_code("fabric/notebooks/02_analyze.ipynb")
+
+    assert '"collectors.dax_analysis"' in collect_code
+    assert '("analyzers.dax_review", "findings_dax.json")' in analyze_code
 
 
 @pytest.mark.parametrize(

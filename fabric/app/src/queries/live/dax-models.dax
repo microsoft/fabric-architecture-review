@@ -1,0 +1,12 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+SELECTCOLUMNS(
+    FILTER('gold_dax_models', 'gold_dax_models'[run_id] = LatestRun),
+    "definition_status", 'gold_dax_models'[definition_status],
+    "measure_count", 'gold_dax_models'[measure_count],
+    "flagged_measure_count", 'gold_dax_models'[flagged_measure_count]
+)

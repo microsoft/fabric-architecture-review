@@ -10,7 +10,7 @@ The Fabric Architecture Review is aligned to the [Azure Well-Architected Framewo
 | Security | Security, Tenant Settings | Tenant-wide vs scoped settings, workspace role membership, sensitivity labels, guest access |
 | Cost Optimization | Cost, Performance | SKU right-sizing vs sustained CU%, pause/resume on non-prod, orphaned items |
 | Operational Excellence | Operational Excellence, Governance, Architecture | ALM maturity: deployment-pipeline coverage, Git source control, dev→prod promotion path; naming conventions, monitoring |
-| Performance Efficiency | Performance | Throttling events, semantic model size, refresh SLOs, small-file problem, VertiPaq column/table footprint (size, encoding, cardinality) |
+| Performance Efficiency | Performance | Throttling events, semantic model size, refresh SLOs, small-file problem, VertiPaq footprint, metadata-only DAX definition risk patterns |
 
 ## Phases
 
@@ -19,6 +19,13 @@ The Fabric Architecture Review is aligned to the [Azure Well-Architected Framewo
 3. **Analyze** — Apply checklist rules from `config/review-checklist.yaml` against thresholds in `config/thresholds.yaml`. Emit findings as structured JSON.
 4. **Report** — Render findings to a client-ready PDF with executive summary, detailed findings (grouped by dimension), and a prioritized roadmap.
 5. **Review & handover** — Walk the client through findings; capture decisions; archive the engagement folder.
+
+The DAX Analyzer parses TMDL or `model.bim` measure definitions already returned by
+Fabric `getDefinition`. It assigns deterministic, explainable signals for patterns such
+as nested iterators, broad virtual tables, whole-table filters, and complex row context.
+These are prioritization hints only: no DAX is executed, and a signal is never presented
+as measured duration, query-plan cost, capacity usage, or proof that a measure is slow.
+Definition failures reduce coverage through `DAX-002` instead of being treated as clean models.
 
 ## Scoring
 

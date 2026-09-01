@@ -116,6 +116,7 @@ ACCENT = {
     "TenantSettings": "#2D79FF",
     "BestPractices": "#107C41",
     "SemanticModels": "#23A99A",
+    "DaxAnalyzer": "#C43D57",
     "ModelDetail": "#1E8A97",
     "ModelInternals": "#1E8A97",
     "Notebooks": "#B88745",
@@ -917,6 +918,7 @@ _HOME_TILES = [
     ("BestPractices", "Best Practices", "BPA, Delta & capacity health", "#107C41"),
     ("SemanticModels", "Semantic models", "VertiPaq memory footprint", GOOD),
     ("ModelDetail", "Model detail", "Tables, columns & encoding", "#00787A"),
+    ("DaxAnalyzer", "DAX analyzer", "Static measure risk signals", ACCENT["DaxAnalyzer"]),
     ("Notebooks", "Notebooks", "Spark code anti-patterns", "#8E562E"),
     ("AgentEval", "Agent Eval", "Data-agent accuracy", "#7A4FBF"),
 ]
@@ -977,6 +979,7 @@ def _home_page() -> Dict[str, Any]:
         ("Trends", "\U0001F4C8  Trends", ACCENT["Trends"]),
         ("OperationalExcellence", "\U0001F503  Operational excellence", ACCENT["OperationalExcellence"]),
         ("BestPractices", "\u2705  Best practices", ACCENT["BestPractices"]),
+        ("DaxAnalyzer", "DAX  DAX analyzer", ACCENT["DaxAnalyzer"]),
         ("AgentEval", "\U0001F916  Agent eval", ACCENT["AgentEval"]),
     ]
     qw, qh, qgap = 288, 34, 8
@@ -1375,6 +1378,48 @@ def _semantic_models_page() -> Dict[str, Any]:
             "filters": [_latest_run_filter(page)]}
 
 
+def _dax_analyzer_page() -> Dict[str, Any]:
+    """Metadata-only DAX risk patterns with capacity -> model selection."""
+    page = "DaxAnalyzer"
+    entity = "gold_dax_measures"
+    visuals = [_banner(
+        page, "DAX Analyzer — static risk patterns",
+        "Select a capacity, then a semantic model. Signals come from model metadata "
+        "and indicate potentially expensive patterns; no DAX is executed and no "
+        "runtime cost or duration is inferred.",
+    )]
+    visuals.append(_field_slicer(
+        page, "capacity", entity, "capacity_name",
+        16, _ROW_KPI_Y, 280, _KPI_H, "Capacity", 1,
+    ))
+    visuals.append(_field_slicer(
+        page, "model", entity, "model_name",
+        304, _ROW_KPI_Y, 320, _KPI_H, "Semantic model", 2,
+    ))
+    for index, (key, measure, title) in enumerate([
+        ("measures", "DAX Measure Count", "Measures"),
+        ("flagged", "DAX Flagged Measure Count", "Flagged measures"),
+        ("high", "DAX High Risk Count", "High risk"),
+        ("average", "DAX Average Risk Score", "Average risk score"),
+    ]):
+        visuals.append(_card(page, key, entity, measure, 640 + index * 216, _ROW_KPI_Y, title, 3 + index))
+    visuals.append(_stacked_hbar(
+        page, "risk", entity, "model_name", "DAX Measure Count", "risk_level",
+        16, _CONTENT_Y, 440, _CONTENT_H,
+        "Measure risk distribution by semantic model", 7, measure=True,
+        color=(entity, "risk_level", {"high": BAD, "medium": ORANGE, "low": LOWBLUE, "none": GOOD}),
+    ))
+    visuals.append(_table(
+        page, "details", entity,
+        ["capacity_name", "model_name", "table_name", "measure_name", "risk_level",
+         "risk_score", "signal_codes", "expression_preview"], [],
+        472, _CONTENT_Y, PAGE_W - 472 - 16, _CONTENT_H,
+        "Measures — explainable static signals and expression preview", 8,
+    ))
+    return {"name": page, "display": "DAX Analyzer", "visuals": visuals,
+            "filters": [_latest_run_filter(page)]}
+
+
 def _model_detail_page() -> Dict[str, Any]:
     """Drill page: pick a model + table, see VertiPaq Analyzer-style column stats."""
     page = "ModelDetail"
@@ -1495,6 +1540,7 @@ def _pages() -> List[Dict[str, Any]]:
         _tenant_settings_page(),
         _best_practices_page(),
         _semantic_models_page(),
+        _dax_analyzer_page(),
         _model_detail_page(),
         _model_internals_page(),
         _notebook_page(),

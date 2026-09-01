@@ -15,7 +15,7 @@ It evaluates eight review dimensions against a documented rule catalog:
 | | Dimension | Example checks |
 |---|---|---|
 | 🏛️ | **Architecture** | Medallion layering, capacity assignment, shortcuts, Git, deployment pipelines, storage mode |
-| ⚡ | **Performance** | Throttling, CU%, model size, refresh SLOs, VertiPaq footprint, job reliability |
+| ⚡ | **Performance** | Throttling, CU%, model size, refresh SLOs, VertiPaq footprint, static DAX risk, job reliability |
 | 🛡️ | **Security** | Tenant settings, workspace access, gateways, private connectivity |
 | 🧭 | **Governance** | Admin coverage, sensitivity labels, naming, sharing volume, workspace lifecycle, endorsement |
 | ⚙️ | **Operational Excellence** | ALM for production: deployment-pipeline coverage, Git source control, dev→prod promotion path |
@@ -69,6 +69,7 @@ it reads, and code review rejects any change that breaks this contract.
 - Capacity utilization and throttling metrics
 - Item counts, sizes, owners, capacity assignment
 - Semantic model **definition metadata** via Fabric `getDefinition` / TMDL (table/column names, partition modes, source hints, calculated tables/columns — **no row data**)
+- DAX measure definitions from TMDL or `model.bim`, analyzed statically for explainable iterator, cardinality, filtering, materialization, and complexity risks. No DAX is executed; scores are not measured duration, CU, or cost
 - Semantic model **VertiPaq storage statistics** (Fabric runs only) via `semantic-link-labs` — per-table/column size, encoding, data type from storage-engine DMVs. Exact column **cardinality** is opt-in (`VERTIPAQ_STATS_READ_DATA=true`) and returns aggregate distinct-counts only, never row values
 - **Best Practice Analyzer** results (Fabric runs only) via `semantic-link-labs` — model/report BPA rule outcomes, Direct Lake fallback reasons, Delta table health, unused object names, and capacity SKU readiness. Outcomes + engine metadata only, never row data
 - Pipeline / notebook **run history** (duration, status, error codes)
@@ -539,7 +540,7 @@ established. Workload-specific controls use the archetype in the same conservati
 |---|---|---|---|
 | Tenant Settings | `tenant_settings` | `tenant_settings_review` (`SEC-001/002`, `TENANT-001..005`) | ✅ |
 | Architecture | `scanner_api`, `workspace_inventory`, `git_integration`, `lakehouse_warehouse`, `deployment_pipelines`, `realtime_intelligence`, `semantic_models`, `pipeline_definitions` | `architecture_review` (`ARCH-001..015`; superseded IDs disabled) | ✅ |
-| Performance | `semantic_models`, `capacity_metrics`, `capacity_metrics_app` (opt-in), `pipelines_notebooks`, `semantic_model_definitions`, `vertipaq_stats` (Fabric) | `performance_review`, `semantic_model_storage_review` (`PERF-001..015`) | ✅ |
+| Performance | `semantic_models`, `capacity_metrics`, `capacity_metrics_app` (opt-in), `pipelines_notebooks`, `semantic_model_definitions`, `dax_analysis`, `vertipaq_stats` (Fabric) | `performance_review`, `semantic_model_storage_review`, `dax_review` (`PERF-001..015`, `DAX-001..002`) | ✅ |
 | Governance | `scanner_api`, `git_integration`, `activity_logs` | `governance_review` (`GOV-001..009`) | ✅ |
 | Operational Excellence | `scanner_api`, `deployment_pipelines`, `git_integration` | `operational_excellence_review` (`OPS-001..003`) | ✅ |
 | Security | `scanner_api`, `tenant_settings`, `gateways` | `security_review` (`SEC-003..011`) | ✅ |
@@ -567,6 +568,7 @@ established. Workload-specific controls use the archetype in the same conservati
 - **Capacity hygiene** (`COST-006/007`) — Trial / Embedded capacities flagged when they host real workspaces (trials expire; Embedded is sized for app embedding), and clusters of small F-SKUs surfaced as consolidation candidates.
 - **Notebook code-smell scan** (`NBCODE-001..006`) — heuristic regex over decoded notebook source: hard-coded secrets, inline `%pip install`, `.collect()`/`.toPandas()`/`display()`, Databricks-only APIs, hard-coded `abfss://` paths/GUIDs, non-Delta writes. Findings reference notebook name + cell index only — cell content never leaves the analyzer (marked `heuristic: true`).
 - **VertiPaq footprint** (`vertipaq_stats`, **Fabric-only**) — storage-engine scan of every Import / Direct Lake model (per-table/column size, encoding, data type, optional cardinality). Powers the report's VertiPaq Footprint section. Metadata only; cardinality opt-in.
+- **DAX Analyzer** (`DAX-001/002`) — parses TMDL/BIM measure definitions, flags explainable static-risk patterns, and tracks definition coverage. Potential risk is prioritized by capacity then semantic model; runtime impact must be confirmed separately.
 
 **Opt-in deep metrics.** `PERF-001/002` are sourced from the Capacity Metrics App via
 `executeQueries` against pre-aggregated tables — gated behind `CAPACITY_METRICS_APP_INSTALLED=true`.

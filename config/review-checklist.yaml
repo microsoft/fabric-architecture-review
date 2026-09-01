@@ -294,6 +294,24 @@ rules:
       documented as manual-only, or retired.
     microsoft_learn_url: https://learn.microsoft.com/power-bi/connect-data/refresh-data
 
+  - id: DAX-001
+    dimension: performance
+    severity: high
+    description: >
+      Semantic-model measures avoid static DAX patterns that can create expensive
+      iterators, broad intermediate tables, or complex filter evaluation. This is
+      metadata-only risk detection and does not claim measured runtime cost.
+    microsoft_learn_url: https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument
+
+  - id: DAX-002
+    dimension: performance
+    severity: medium
+    description: >
+      Semantic-model definitions are available for metadata-only DAX analysis across
+      the in-scope estate. Definition errors and unavailable metadata remain explicit
+      evidence gaps rather than being interpreted as clean models.
+    microsoft_learn_url: https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition
+
   # ==================== GOVERNANCE ====================
   - id: GOV-001
     dimension: governance

@@ -4,7 +4,7 @@
   "license": "MIT",
   "author": "Microsoft",
   "private": true,
-  "version": "2026.8.2",
+  "version": "2026.9.0",
   "type": "module",
   "scripts": {
     "generate:fabric": "node ./node_modules/@microsoft/fabric-app-data-cli/dist/index.js generate -o src/fabric.generated.ts",

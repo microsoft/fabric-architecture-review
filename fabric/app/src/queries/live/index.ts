@@ -6,6 +6,8 @@
 //-----------------------------------------------------------------------
 
 import dimensionSummary from "./dimension-summary.dax?raw";
+import daxModels from "./dax-models.dax?raw";
+import daxMeasures from "./dax-measures.dax?raw";
 import estateNodes from "./estate-nodes.dax?raw";
 import findingTargets from "./finding-targets.dax?raw";
 import findings from "./findings.dax?raw";
@@ -18,6 +20,8 @@ import workspaceRisk from "./workspace-risk.dax?raw";
 
 export const liveReviewQueries = {
     connection: "reviewModel",
+    daxModels,
+    daxMeasures,
     dimensionSummary,
     estateNodes,
     findingTargets,

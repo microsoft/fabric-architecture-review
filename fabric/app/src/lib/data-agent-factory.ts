@@ -36,6 +36,7 @@ const reviewEvidenceDomains = [
     { pattern: /\b(?:security|access|permissions?)\b/i, label: "security findings" },
     { pattern: /\b(?:architecture|lineage|inventory|lakehouses?|pipelines?|reports?|warehouses?|workspaces?)\b/i, label: "architecture findings and inventory" },
     { pattern: /\b(?:semantic models?|storage modes?|Direct Lake|Import|DirectQuery)\b/i, label: "semantic-model and storage evidence" },
+    { pattern: /\b(?:DAX|measure expressions?|iterator|CROSSJOIN|static risk)\b/i, label: "metadata-only DAX risk evidence" },
     { pattern: /\b(?:performance|capacity|duration|latency)\b/i, label: "performance and capacity findings" },
     { pattern: /\b(?:cost|spend|utilization|waste)\b/i, label: "cost and utilization findings" },
     { pattern: /\b(?:best practices?|BPA(?:-\d+)?)\b/i, label: "best-practice findings" },
@@ -180,7 +181,7 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 buildDataAgentEndpoint(this.workspaceId, this.dataAgentId),
                 { requestInit: { headers: { Authorization: `Bearer ${token}` } } },
             );
-            const client = new Client({ name: "fabric-architecture-review", version: "2026.8.2" });
+            const client = new Client({ name: "fabric-architecture-review", version: "2026.9.0" });
             try {
                 await client.connect(transport);
                 const tools = await client.listTools(undefined, { timeout: requestTimeoutMs });

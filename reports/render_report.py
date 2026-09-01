@@ -742,6 +742,79 @@ def _vertipaq_section(raw_dir: Path) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
+def _dax_section(raw_dir: Path) -> str:
+    """Render metadata-only DAX coverage and static-risk details."""
+    heading = "# DAX Analyzer - Metadata-only static risk"
+    disclaimer = (
+        "> **Interpretation:** These signals come from measure definitions only. "
+        "They identify patterns that may be expensive; they are not measured duration, "
+        "capacity usage, query-plan evidence, or proof that a measure is slow."
+    )
+    analysis = _load_json(raw_dir / "dax_analysis.json")
+    if not isinstance(analysis, dict):
+        return (
+            f"{heading}\n\n{disclaimer}\n\n"
+            "> _DAX metadata was not collected. Run the DAX collector after semantic-model "
+            "definition collection to populate this page._\n"
+        )
+
+    measures = [row for row in (analysis.get("measures") or []) if isinstance(row, dict)]
+    risky = sorted(
+        (row for row in measures if int(row.get("risk_score") or 0) > 0),
+        key=lambda row: (-int(row.get("risk_score") or 0), str(row.get("measure_name") or "")),
+    )
+    parts = [heading, "", disclaimer, ""]
+    parts.append(
+        f"- **Coverage:** {int(analysis.get('models_scanned') or 0)} semantic model(s), "
+        f"{len(measures)} measure definition(s), {len(risky)} measure(s) with static signals."
+    )
+    errors = int(analysis.get("definition_errors") or 0)
+    if errors:
+        parts.append(
+            f"- **Evidence gap:** {errors} semantic model definition(s) could not be analyzed; "
+            "results are incomplete for those models."
+        )
+
+    if not measures:
+        parts.extend(["", "> _No measure definitions were available for static DAX analysis._"])
+        return "\n".join(parts).rstrip() + "\n"
+    if not risky:
+        parts.extend(["", "No configured static-risk patterns were detected in the collected measures."])
+        return "\n".join(parts).rstrip() + "\n"
+
+    rows: List[List[Any]] = []
+    for row in risky[:25]:
+        signals = row.get("signals") or []
+        codes = ", ".join(
+            str(signal.get("code")) for signal in signals
+            if isinstance(signal, dict) and signal.get("code")
+        )
+        expression = " ".join(str(row.get("expression") or "").split())
+        if len(expression) > 180:
+            expression = expression[:177] + "..."
+        rows.append([
+            row.get("workspace_name") or "",
+            row.get("model_name") or "",
+            row.get("measure_name") or "",
+            row.get("risk_level") or "none",
+            int(row.get("risk_score") or 0),
+            codes,
+            expression,
+        ])
+    parts.extend([
+        "",
+        "## Measures with static-risk signals",
+        "",
+        _markdown_table(
+            ["Workspace", "Semantic model", "Measure", "Risk", "Score", "Signals", "Expression preview"],
+            rows,
+        ),
+    ])
+    if len(risky) > len(rows):
+        parts.extend(["", f"_{len(risky) - len(rows)} additional signalled measure(s) are available in Gold._"])
+    return "\n".join(parts).rstrip() + "\n"
+
+
 def _load_json(path: Path) -> Any | None:
     if not path.exists():
         return None
@@ -839,8 +912,10 @@ def render(findings_path: Path, out_path: Path, templates_dir: Path, raw_dir: Pa
 
     vertipaq_md = _vertipaq_section(raw_dir or Path("output/raw"))
 
+    dax_md = _dax_section(raw_dir or Path("output/raw"))
+
     merged = "\n\n<div class=\"page-break\"></div>\n\n".join(
-        [s for s in [exec_md, overview_md, diagrams_md, vertipaq_md, find_md, rec_md] if s]
+        [s for s in [exec_md, overview_md, diagrams_md, vertipaq_md, dax_md, find_md, rec_md] if s]
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(merged, encoding="utf-8")

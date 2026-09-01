@@ -69,6 +69,19 @@ SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMNS
 
 These DMVs describe **how the model is built** (tables, columns, measures, relationships, memory footprint). They do not return business rows.
 
+### DAX definition analysis (`collectors.dax_analysis`)
+
+The DAX Analyzer reads TMDL or `model.bim` measure expressions from semantic-model
+definitions already collected through Fabric `getDefinition`. It performs static text
+analysis only: it does not execute a measure, issue `EVALUATE`, inspect a query plan, or
+read model rows. Consequently its risk score describes potentially expensive syntax
+patterns, not observed duration, CU consumption, or runtime cost.
+
+Measure expressions can reveal proprietary business logic or embedded literal values.
+Treat `semantic_model_definitions.json`, `dax_analysis.json`, the DAX Gold tables, and
+generated expression previews as confidential review metadata. They stay within the
+review workspace/output controls and must not be copied into public samples or logs.
+
 ### VertiPaq Analyzer statistics (`collectors.vertipaq_stats`, Fabric runs only)
 
 `collectors.vertipaq_stats` uses `semantic-link-labs`' `vertipaq_analyzer` **inside a Fabric notebook** to report each model's storage footprint. By default it reads only the storage-engine DMVs above (`DISCOVER_STORAGE_TABLE_COLUMNS`, `DISCOVER_OBJECT_MEMORY_USAGE`, `TMSCHEMA_*`), which return table/column **sizes, encoding, data type and % of model** — metadata only, no data query.

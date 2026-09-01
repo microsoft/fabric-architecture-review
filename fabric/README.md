@@ -156,6 +156,8 @@ from the shared schema in [../reports/powerbi/schema.py](../reports/powerbi/sche
 | `gold_capacities` | capacities at scan time | *Cost* / *Performance* pages |
 | `gold_workspaces` | workspaces in scope (+ admin count, last activity, inactive flag) | *Governance* page + data agent |
 | `gold_semantic_models` | models + storage mode + VertiPaq size / column counts | *Architecture* + *Semantic Models* pages |
+| `gold_dax_models` | one metadata-only definition-coverage and DAX risk summary per model | *DAX Analyzer* page + data agent |
+| `gold_dax_measures` | one row per DAX measure with capacity/model hierarchy and explainable static signals | *DAX Analyzer* page + data agent + ontology |
 | `gold_model_tables` | one row per model table (VertiPaq) | *Model detail* page |
 | `gold_model_columns` | one row per model column (size, encoding, data type, cardinality) | *Model detail* page |
 | `gold_model_partitions` | one row per model partition (mode, record/segment counts) | *Model internals* page |
@@ -185,7 +187,7 @@ informational.
 The **Fabric Arch Review - Governance** semantic model
 ([../reports/powerbi/semantic_model.py](../reports/powerbi/semantic_model.py)) binds to these tables in
 **Direct Lake** mode (no import, no scheduled refresh) and the report
-([../reports/powerbi/report.py](../reports/powerbi/report.py)) is a **17-page platform-assessment
+([../reports/powerbi/report.py](../reports/powerbi/report.py)) is an **18-page platform-assessment
 dashboard**:
 
 | Page | What it shows |
@@ -197,6 +199,7 @@ dashboard**:
 | **Architecture, Performance, Cost, Governance, Operational Excellence, Security, Tenant Settings** | One page per review dimension — KPI cards, a severity donut, a ranked bar of failing checks, a dimension-specific detail table, and the dimension-filtered findings list |
 | **Best Practices** | Fabric-only BPA outcomes — a violation-count KPI and a breakdown of model/report BPA, Direct Lake fallback, Delta health, unused objects, and capacity SKU readiness |
 | **Semantic Models** | Per-model VertiPaq burden (size, column / calculated-column counts, storage mode) with a size-by-model bar and a model-hotspot **scatter** (size vs. refresh, sized by columns) |
+| **DAX Analyzer** | Select capacity then semantic model; inspect measure counts, risk distribution, explainable static signals, and expression previews without executing DAX or claiming measured runtime cost |
 | **Model detail** | Pick a model + table from slicers and inspect every column the way DAX Studio's VertiPaq Analyzer does — data type, encoding, cardinality, size |
 | **Model internals** | Per-model partitions, relationships, and user hierarchies |
 | **Notebooks** | NBCODE code-smell matches with a severity donut and a top-notebooks ranked bar |

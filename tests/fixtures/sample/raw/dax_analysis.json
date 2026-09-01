@@ -1,0 +1,40 @@
+{
+  "available": true,
+  "metadata_only": true,
+  "models_scanned": 3,
+  "definition_errors": 0,
+  "measures": [
+    {
+      "model_id": "0000001f-0000-4000-8000-00000000001f",
+      "model_name": "SalesModel",
+      "workspace_id": "00000001-0000-4000-8000-000000000001",
+      "workspace_name": "data-bronze-dev",
+      "table_name": "SalesFact",
+      "measure_name": "Potentially Expensive Sales",
+      "expression": "SUMX(FILTER(SalesFact, SalesFact[Amount] > 0), SUMX(CROSSJOIN(Products, Stores), SalesFact[Amount]))",
+      "expression_length": 105,
+      "risk_score": 80,
+      "risk_level": "high",
+      "signals": [
+        {
+          "code": "nested_iterators",
+          "category": "iteration",
+          "points": 25,
+          "message": "Expression contains iterator calls."
+        },
+        {
+          "code": "crossjoin",
+          "category": "cardinality",
+          "points": 35,
+          "message": "CROSSJOIN can create a large intermediate row set."
+        },
+        {
+          "code": "whole_table_filter",
+          "category": "filtering",
+          "points": 20,
+          "message": "FILTER iterates a whole table."
+        }
+      ]
+    }
+  ]
+}

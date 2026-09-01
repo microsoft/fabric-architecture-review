@@ -16,12 +16,14 @@ import {
     Check,
     ChevronRight,
     CircleDot,
+    Code2,
     Database,
     ExternalLink,
     FileWarning,
     Focus,
     Gauge,
     GitFork,
+    Info,
     LayoutDashboard,
     Menu,
     Moon,
@@ -55,7 +57,7 @@ function EstateMapFallback({ compact = false }: { compact?: boolean }) {
     return <div className={cn("campus-explorer grid place-items-center bg-muted text-200 text-muted-foreground", compact && "campus-explorer-compact")}>Loading estate topology…</div>;
 }
 
-type ViewId = "overview" | "findings" | EstateReviewArea | "estate";
+type ViewId = "overview" | "findings" | EstateReviewArea | "estate" | "dax";
 
 const navItems = [
     { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
@@ -63,6 +65,7 @@ const navItems = [
     { id: "estate" as const, label: "Estate map", icon: Network },
     { id: "governance" as const, label: "Governance", icon: ShieldCheck },
     { id: "models" as const, label: "Semantic model optimization", icon: Database },
+    { id: "dax" as const, label: "DAX Analyzer", icon: Code2 },
     { id: "efficiency" as const, label: "Performance + cost", icon: Gauge },
     { id: "architecture" as const, label: "Architecture", icon: GitFork },
     { id: "notebooks" as const, label: "Notebooks", icon: BookOpenCheck },
@@ -74,6 +77,7 @@ const viewTitles: Record<ViewId, string> = {
     estate: "3D estate",
     governance: "Governance",
     models: "Semantic model optimization",
+    dax: "DAX Analyzer",
     efficiency: "Performance and cost",
     architecture: "Architecture",
     notebooks: "Notebook engineering",
@@ -85,6 +89,40 @@ const severityClass: Record<FindingSeverity, string> = {
     medium: "bg-warning-soft text-warning-strong",
     low: "bg-info-soft text-info-strong",
 };
+
+const metricDefinitions: Record<string, string> = {
+    "Best-practice score": "Pass percentage among checks that produced a scored result in the latest review. Unknown and missing-evidence checks are not treated as passes.",
+    "Critical + high": "Failed checks classified as critical or high severity in the latest review.",
+    "Workspaces at risk": "Workspaces with a non-green risk status based on their issue count and aggregate finding risk.",
+    "Assessment coverage": "Percentage of all review checks that produced a definitive result. Unknown and missing-evidence checks reduce coverage.",
+    "Agent accuracy": "Deterministic evaluation result for the connected Data Agent when live evaluation evidence is available.",
+};
+
+const dimensionDefinitions: Record<string, string> = {
+    Architecture: "Architecture, topology, lineage, and design checks that produced scored results.",
+    Performance: "Query, refresh, storage-mode, and capacity-performance checks that produced scored results.",
+    Cost: "Capacity utilization, avoidable spend, and consolidation checks that produced scored results.",
+    Governance: "Ownership, endorsement, workspace administration, and governance checks that produced scored results.",
+    "Operational excellence": "Deployment pipeline, Git integration, monitoring, and operational practice checks that produced scored results.",
+    Security: "Access, sharing, gateway, and security-control checks that produced scored results.",
+    "Tenant settings": "Fabric tenant-setting checks that produced scored results from collected administrator metadata.",
+    "Best practices": "Artifact and semantic-model best-practice checks that produced scored results.",
+    Notebook: "Static notebook code checks that produced scored results.",
+};
+
+function DefinitionTooltip({ definition, label, align = "left" }: { definition: string; label: string; align?: "left" | "right" }) {
+    const tooltipId = useId();
+    return (
+        <span className="group relative inline-flex shrink-0">
+            <button aria-describedby={tooltipId} aria-label={`About ${label}`} className="grid icon-size-300 place-items-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="button">
+                <Info className="icon-size-150" aria-hidden="true" />
+            </button>
+            <span className={cn("pointer-events-none absolute top-[calc(100%+0.4rem)] z-30 hidden w-72 border border-border bg-foreground px-300 py-200 text-100 font-normal leading-200 text-background shadow-lg group-hover:block group-focus-within:block", align === "right" ? "right-0" : "left-0")} id={tooltipId} role="tooltip">
+                {definition}
+            </span>
+        </span>
+    );
+}
 
 function BrandMark() {
     return (
@@ -152,7 +190,10 @@ function MetricStrip() {
             {metrics.map((metric, index) => (
                 <article className={cn("relative p-400 md:p-500", index % 2 !== 0 && "border-l border-border", index > 1 && "border-t border-border xl:border-t-0", index === 2 && "xl:border-l")} key={metric.label}>
                     <div className="mb-300 flex items-start justify-between gap-200">
-                        <p className="text-200 font-medium text-muted-foreground">{metric.label}</p>
+                        <div className="flex items-center gap-100">
+                            <p className="text-200 font-medium text-muted-foreground">{metric.label}</p>
+                            <DefinitionTooltip align={index === metrics.length - 1 ? "right" : "left"} definition={metricDefinitions[metric.label] ?? "Latest value calculated from the connected architecture review evidence."} label={metric.label} />
+                        </div>
                         {metric.trend === "up" ? (
                             <ArrowUpRight className="icon-size-200 text-success-strong" aria-hidden="true" />
                         ) : metric.trend === "down" ? (
@@ -172,8 +213,8 @@ function MetricStrip() {
     );
 }
 
-function ScorePanel({ onOpenFindings }: { onOpenFindings: () => void }) {
-    const { dimensionScores } = useReviewData();
+function ScorePanel({ onOpenDax, onOpenFindings }: { onOpenDax: () => void; onOpenFindings: () => void }) {
+    const { daxSummary, dimensionScores } = useReviewData();
     return (
         <section className="border-b border-border bg-card p-500 lg:border-b-0 lg:border-r">
             <div className="mb-500 flex items-start justify-between gap-300">
@@ -189,7 +230,7 @@ function ScorePanel({ onOpenFindings }: { onOpenFindings: () => void }) {
                 {dimensionScores.map((item) => (
                     <div key={item.dimension}>
                         <div className="mb-200 flex items-center justify-between gap-300 text-200">
-                            <span className="font-medium">{item.dimension}</span>
+                            <span className="flex items-center gap-100 font-medium">{item.dimension}<DefinitionTooltip definition={`${dimensionDefinitions[item.dimension]} The score is the pass percentage among scored checks; unknown and missing-evidence checks are excluded.`} label={item.dimension} /></span>
                             <span className="flex items-center gap-200 font-numeric">
                                 <strong>{item.score}</strong>
                                 <span className={item.change >= 0 ? "text-success-strong" : "text-destructive"}>
@@ -202,6 +243,18 @@ function ScorePanel({ onOpenFindings }: { onOpenFindings: () => void }) {
                         </div>
                     </div>
                 ))}
+            </div>
+            <div className="mt-500 border-t border-border pt-400">
+                <div className="flex items-start gap-300">
+                    <span className="grid icon-size-500 shrink-0 place-items-center bg-primary-soft text-primary-strong"><Code2 className="icon-size-200" aria-hidden="true" /></span>
+                    <div className="min-w-0 flex-1">
+                        <p className="flex items-center gap-100 text-300 font-semibold">DAX static analysis<DefinitionTooltip definition="Summarizes semantic-model definitions available for metadata-only DAX analysis. Flagged measures contain static syntax signals; this does not measure duration, capacity consumption, or runtime performance." label="DAX static analysis" /></p>
+                        <p className="mt-100 text-200 text-muted-foreground">{daxSummary.measureCount.toLocaleString()} measures · {daxSummary.flaggedMeasureCount.toLocaleString()} flagged</p>
+                        <p className="mt-100 text-100 text-muted-foreground">{daxSummary.definitionCoverage}% definition coverage · {daxSummary.availableModelCount} of {daxSummary.modelCount} models available</p>
+                    </div>
+                </div>
+                <button className="mt-300 inline-flex items-center gap-100 text-200 font-semibold text-primary-strong underline" onClick={onOpenDax} type="button">Open DAX Analyzer<ArrowRight className="icon-size-100" aria-hidden="true" /></button>
+                <p className="mt-200 text-100 leading-200 text-muted-foreground">Metadata coverage and static syntax signals only; no runtime performance is inferred.</p>
             </div>
         </section>
     );
@@ -287,13 +340,13 @@ function WorkspacePanel({ onOpenWorkspace }: { onOpenWorkspace: (workspaceId: st
     );
 }
 
-function Overview({ onOpenFindings, onOpenFinding, onOpenWorkspace }: { onOpenFindings: () => void; onOpenFinding: (finding: ReviewFinding) => void; onOpenWorkspace: (workspaceId: string) => void }) {
+function Overview({ onOpenDax, onOpenFindings, onOpenFinding, onOpenWorkspace }: { onOpenDax: () => void; onOpenFindings: () => void; onOpenFinding: (finding: ReviewFinding) => void; onOpenWorkspace: (workspaceId: string) => void }) {
     return (
         <>
             <MetricStrip />
             <OverviewPlots onOpenWorkspace={onOpenWorkspace} />
             <div className="grid border-b border-border lg:grid-cols-5">
-                <div className="lg:col-span-2"><ScorePanel onOpenFindings={onOpenFindings} /></div>
+                <div className="lg:col-span-2"><ScorePanel onOpenDax={onOpenDax} onOpenFindings={onOpenFindings} /></div>
                 <div className="lg:col-span-3"><PriorityFindings onOpenFinding={onOpenFinding} /></div>
             </div>
             <div className="grid lg:grid-cols-2">
@@ -453,6 +506,80 @@ function SemanticModelOptimizationView({ initialContext }: { initialContext?: Es
                 </aside>
             </div>
             {selectedModel && <VertiPaqAnalyzer model={selectedModel} />}
+        </div>
+    );
+}
+
+function DaxAnalyzerView() {
+    const { daxMeasures } = useReviewData();
+    const capacitySelectId = useId();
+    const modelSelectId = useId();
+    const [capacityId, setCapacityId] = useState("all");
+    const [modelId, setModelId] = useState("all");
+    const capacities = [...new Map(daxMeasures.map((measure) => [measure.capacityId || measure.capacityName, {
+        id: measure.capacityId || measure.capacityName,
+        name: measure.capacityName,
+    }])).values()].sort((left, right) => left.name.localeCompare(right.name));
+    const capacityMeasures = daxMeasures.filter((measure) => capacityId === "all" || (measure.capacityId || measure.capacityName) === capacityId);
+    const models = [...new Map(capacityMeasures.map((measure) => [measure.modelId, { id: measure.modelId, name: measure.modelName }])).values()]
+        .sort((left, right) => left.name.localeCompare(right.name));
+    const visibleMeasures = capacityMeasures
+        .filter((measure) => modelId === "all" || measure.modelId === modelId)
+        .sort((left, right) => right.riskScore - left.riskScore || left.measureName.localeCompare(right.measureName));
+    const flagged = visibleMeasures.filter((measure) => measure.riskLevel === "high" || measure.riskLevel === "medium");
+    const averageRisk = visibleMeasures.length
+        ? Math.round(visibleMeasures.reduce((total, measure) => total + measure.riskScore, 0) / visibleMeasures.length)
+        : 0;
+    const distribution: LensBarDatum[] = (["high", "medium", "low", "none"] as const).map((level) => ({
+        label: level === "none" ? "No pattern" : `${level[0].toUpperCase()}${level.slice(1)} risk`,
+        value: visibleMeasures.filter((measure) => measure.riskLevel === level).length,
+        detail: "Static metadata classification",
+        tone: level === "high" ? "danger" : level === "medium" ? "warning" : level === "low" ? "info" : "success",
+    }));
+    const signalLabels: Record<string, string> = {
+        crossjoin: "Cardinality expansion",
+        iterator: "Iterator",
+        materialization: "Materialization",
+        nested_iterators: "Nested iterators",
+        whole_table_filter: "Broad table filter",
+    };
+    const signalCounts = visibleMeasures.flatMap((measure) => measure.signalCodes.split(",").map((signal) => signal.trim()).filter(Boolean))
+        .reduce<Record<string, number>>((counts, signal) => ({ ...counts, [signal]: (counts[signal] ?? 0) + 1 }), {});
+    const signalData: LensBarDatum[] = Object.entries(signalCounts)
+        .sort(([, left], [, right]) => right - left)
+        .slice(0, 5)
+        .map(([signal, count]) => ({
+            label: signalLabels[signal] ?? signal.replaceAll("_", " "),
+            value: count,
+            detail: "Measures containing this syntax signal",
+            tone: "warning",
+        }));
+    if (!signalData.length) signalData.push({ label: "No detected signals", value: 0, detail: "No static syntax signals in this selection", tone: "success" });
+
+    return (
+        <div className="p-400 md:p-600">
+            <div className="mb-500 grid gap-400">
+                <div className="min-w-0">
+                    <p className="section-kicker">Semantic model developer lens</p>
+                    <h2 className="font-heading text-hero-800 font-semibold leading-hero-800">Review DAX risk patterns</h2>
+                    <p className="mt-200 max-w-3xl text-200 leading-300 text-muted-foreground">Metadata-only analysis of potentially expensive iterators, cardinality expansion, broad filtering, materialization and expression complexity. No DAX is executed and these scores are not measured duration or cost.</p>
+                </div>
+                <div className="grid max-w-4xl gap-200 sm:grid-cols-2">
+                    <label className="grid min-w-0 gap-100 text-200 font-semibold text-muted-foreground" htmlFor={capacitySelectId}><span>Capacity</span><select aria-label="Capacity" className="w-full min-w-0 rounded-lg border border-input bg-card px-300 py-200 text-200 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" id={capacitySelectId} onChange={(event) => { setCapacityId(event.target.value); setModelId("all"); }} value={capacityId}><option value="all">All capacities</option>{capacities.map((capacity) => <option key={capacity.id} value={capacity.id}>{capacity.name}</option>)}</select></label>
+                    <label className="grid min-w-0 gap-100 text-200 font-semibold text-muted-foreground" htmlFor={modelSelectId}><span>Semantic model</span><select aria-label="Semantic model" className="w-full min-w-0 rounded-lg border border-input bg-card px-300 py-200 text-200 text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" id={modelSelectId} onChange={(event) => setModelId(event.target.value)} value={modelId}><option value="all">All semantic models</option>{models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
+                </div>
+            </div>
+            <section className="grid border border-border bg-card sm:grid-cols-2 xl:grid-cols-4" aria-label="DAX Analyzer metrics">
+                {[["Measures", visibleMeasures.length], ["Flagged", flagged.length], ["High risk", visibleMeasures.filter((measure) => measure.riskLevel === "high").length], ["Average static risk", averageRisk]].map(([label, value], index) => <article className={cn("p-400", index > 0 && "border-t border-border sm:border-l sm:border-t-0", index === 2 && "sm:border-l-0 xl:border-l")} key={label}><p className="text-200 text-muted-foreground">{label}</p><p className="mt-200 font-numeric text-hero-700 font-semibold">{value}</p></article>)}
+            </section>
+            <div className="mt-400 grid gap-400 xl:grid-cols-2">
+                <LensBarPlot kicker="Static classification" title="DAX measures by risk pattern" description="Counts reflect explainable syntax signals in semantic-model metadata, not runtime profiling." data={distribution} />
+                <LensBarPlot kicker="Pattern frequency" title="Most common static signals" description="A measure can contribute to more than one signal; counts identify recurring review themes rather than execution impact." data={signalData} />
+            </div>
+            <section className="mt-400 overflow-hidden border border-border bg-card" aria-label="DAX measure risk details">
+                <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-300 border-b border-border bg-secondary px-400 py-300 text-100 font-bold uppercase text-muted-foreground md:grid-cols-[minmax(0,1fr)_9rem_6rem_minmax(12rem,1fr)]"><span>Measure / model</span><span>Risk</span><span className="hidden md:block">Length</span><span className="hidden md:block">Static signals</span></div>
+                {visibleMeasures.length ? visibleMeasures.map((measure) => <article className="grid grid-cols-[minmax(0,1fr)_6rem] gap-300 border-b border-border px-400 py-400 last:border-b-0 md:grid-cols-[minmax(0,1fr)_9rem_6rem_minmax(12rem,1fr)]" key={`${measure.modelId}:${measure.tableName}:${measure.measureName}`}><div className="min-w-0"><p className="text-300 font-semibold">{measure.measureName}</p><p className="mt-100 text-100 text-muted-foreground">{measure.modelName} · {measure.tableName} · {measure.workspaceName}</p><code className="mt-200 block overflow-hidden text-ellipsis whitespace-nowrap text-100 text-muted-foreground" title={measure.expressionPreview}>{measure.expressionPreview}</code></div><div><span className={cn("inline-flex px-200 py-100 text-100 font-bold uppercase", measure.riskLevel === "high" ? "bg-destructive-soft text-destructive" : measure.riskLevel === "medium" ? "bg-warning-soft text-warning-strong" : measure.riskLevel === "low" ? "bg-info-soft text-info-strong" : "bg-success-soft text-success-strong")}>{measure.riskLevel}</span><p className="mt-100 font-numeric text-100 text-muted-foreground">Score {measure.riskScore}</p></div><span className="hidden font-numeric text-200 md:block">{measure.expressionLength}</span><span className="hidden break-words text-200 text-muted-foreground md:block">{measure.signalCodes || "No risk pattern detected"}</span></article>) : <p className="p-500 text-200 text-muted-foreground">No DAX measure metadata is available for this selection.</p>}
+            </section>
         </div>
     );
 }
@@ -662,11 +789,12 @@ function ReviewWorkbenchContent() {
                             <div className="hidden items-center gap-200 text-200 text-muted-foreground md:flex"><Check className="icon-size-200 text-success-strong" /> {estate.rooms.length} workspaces</div>
                         </div>
                         {reviewContext && <SelectionContext context={reviewContext} onClear={() => setReviewContext(null)} />}
-                        {currentView === "overview" && <Overview onOpenFindings={() => openFindings()} onOpenFinding={(finding) => openFindings(finding.workspaceIds[0])} onOpenWorkspace={openFindings} />}
+                        {currentView === "overview" && <Overview onOpenDax={() => navigate("dax")} onOpenFindings={() => openFindings()} onOpenFinding={(finding) => openFindings(finding.workspaceIds[0])} onOpenWorkspace={openFindings} />}
                         {currentView === "findings" && <FindingsView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "estate" && <EstateView onOpenArea={openEstateArea} />}
                         {currentView === "governance" && <GovernanceView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "models" && <SemanticModelOptimizationView initialContext={reviewContext ?? undefined} />}
+                        {currentView === "dax" && <DaxAnalyzerView />}
                         {currentView === "efficiency" && <EfficiencyView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "architecture" && <ArchitectureView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "notebooks" && <NotebooksView initialWorkspaceId={reviewContext?.workspaceId} />}

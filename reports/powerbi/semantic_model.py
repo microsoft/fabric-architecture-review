@@ -41,6 +41,8 @@ RELATIONSHIP_TABLE = "gold_model_relationships"
 HIERARCHY_TABLE = "gold_model_hierarchies"
 # Table that carries the Best Practice Analyzer violation count measure.
 BPA_TABLE = "gold_bpa_violations"
+# Table that carries metadata-only DAX measure signals.
+DAX_TABLE = "gold_dax_measures"
 # Table that carries the severity heatmap data + its colour measure.
 SEVERITY_MATRIX_TABLE = "gold_severity_matrix"
 # Table that carries the deployed-version banner measures (Home page footer).
@@ -116,6 +118,18 @@ _COLUMN_DESCRIPTIONS: Dict[str, str] = {
     "column_count": "Number of columns.",
     "calc_column_count": "Number of calculated columns (a common refresh + memory cost driver).",
     "max_refresh_seconds": "Longest observed refresh duration in seconds.",
+    "definition_status": "DAX definition collection status for the semantic model: complete, error, or missing.",
+    "measure_count": "Number of DAX measure definitions extracted from the semantic model.",
+    "flagged_measure_count": "Number of measures with medium or high metadata-only static-risk scores.",
+    "high_risk_count": "Number of measures with a high metadata-only static-risk score.",
+    "max_risk_score": "Highest metadata-only DAX static-risk score among measures in the semantic model.",
+    "measure_name": "DAX measure display name.",
+    "risk_level": "Metadata-only DAX static-risk band: high, medium, low, or none; not measured runtime performance.",
+    "risk_rank": "Numeric DAX risk ordering used for sorting: high before medium, low, and none.",
+    "expression_length": "Number of characters in the collected DAX measure expression.",
+    "expression_preview": "Truncated DAX definition text for review; confidential model metadata, not an executed query.",
+    "signal_codes": "Comma-separated codes for explainable static DAX patterns detected in the expression.",
+    "signal_details_json": "JSON details for static DAX signals, including category, score contribution, and explanation.",
     "risk_score": "Workspace risk score 0-100 (higher = worse); weighted from failing findings.",
     "status_rank": "Risk status ordering: 3 red, 2 amber, 1 green, 0 blue, -1 grey. >= 2 means at risk.",
     "issue_count": "Number of failing findings attributed to this workspace.",
@@ -135,6 +149,7 @@ _COLUMN_DESCRIPTIONS_BY_TABLE: Dict[tuple, str] = {
     ("gold_model_columns", "cardinality"): "Distinct-value count of the column (drives dictionary size).",
     ("gold_model_columns", "encoding"): "VertiPaq column encoding: VALUE (numeric) or HASH (dictionary).",
     ("gold_model_columns", "data_type"): "Column data type in the semantic model.",
+    ("gold_dax_measures", "risk_score"): "Metadata-only DAX static-risk score 0-100, summed from explainable syntax signals; not measured duration, CU, or cost.",
     ("gold_release", "status"): "Deployed-version status line, e.g. 'FAR v2026.06.0 - up to date'.",
     ("gold_release", "update_note"): "Upgrade guidance shown only when a newer release exists.",
 }
@@ -398,6 +413,29 @@ def _bpa_measures() -> List[Dict[str, Any]]:
     return out
 
 
+def _dax_measures() -> List[Dict[str, Any]]:
+    """Metadata-only DAX measure and risk counts."""
+    defs = [
+        ("DAX Measure Count", "COUNTROWS(gold_dax_measures)", "0",
+         "DAX measures extracted from semantic-model definitions in context."),
+        ("DAX Flagged Measure Count",
+         'CALCULATE(COUNTROWS(gold_dax_measures), gold_dax_measures[risk_level] IN {"medium", "high"})', "0",
+         "Measures containing medium or high static-risk patterns; this is not a runtime timing."),
+        ("DAX High Risk Count",
+         'CALCULATE(COUNTROWS(gold_dax_measures), gold_dax_measures[risk_level] = "high")', "0",
+         "Measures containing high-scoring static DAX risk patterns."),
+        ("DAX Average Risk Score", "AVERAGE(gold_dax_measures[risk_score])", "0.0",
+         "Average static DAX risk score from 0 to 100 in context."),
+    ]
+    return [{
+        "name": name,
+        "expression": expression,
+        "formatString": format_string,
+        "description": description,
+        "lineageTag": _lineage("measure", name),
+    } for name, expression, format_string, description in defs]
+
+
 def _agent_eval_measures() -> List[Dict[str, Any]]:
     """Deterministic Data Agent accuracy measures on ``gold_agent_eval``.
 
@@ -517,6 +555,8 @@ def _table(table) -> Dict[str, Any]:
         t["measures"] = _notebook_measures()
     if table.name == BPA_TABLE:
         t["measures"] = _bpa_measures()
+    if table.name == DAX_TABLE:
+        t["measures"] = _dax_measures()
     if table.name == SEVERITY_MATRIX_TABLE:
         t["measures"] = _severity_matrix_measures()
     if table.name == RELEASE_TABLE:

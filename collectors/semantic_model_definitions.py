@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Fetch TMDL/BIM definitions for Import-mode semantic models via the Fabric
+"""Fetch TMDL/BIM definitions for semantic models via the Fabric
 ``getDefinition`` API, so the storage-mode analyzer can audit each model for
 DirectLake-migration blockers (M-based partitions, calculated columns,
 unsupported types, missing lakehouse-table binding).
@@ -25,9 +25,9 @@ Why this exists:
   DirectLake-feasibility review needs.
 
 Scoping:
-  By default the collector only fetches definitions for datasets whose
-  storage mode is non-DirectLake (Import / Push). DirectLake-bound models
-  don't need re-auditing. Override with ``SEMANTIC_MODEL_DEF_ALL=1``.
+    By default the collector fetches all in-scope definitions so metadata-only
+    DAX analysis covers Direct Lake and Import models. Set
+    ``SEMANTIC_MODEL_DEF_ALL=0`` to limit collection to non-DirectLake models.
 
 DATA SAFETY:
   TMDL/BIM definitions are *model metadata* (table names, column types,
@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import json
 import os
 import time
@@ -52,6 +53,8 @@ FAB = "https://api.fabric.microsoft.com/v1"
 
 LRO_MAX_POLLS = int(os.environ.get("SEMANTIC_MODEL_DEF_LRO_MAX_POLLS", "20"))
 LRO_DEFAULT_RETRY_AFTER = int(os.environ.get("SEMANTIC_MODEL_DEF_LRO_RETRY_AFTER", "3"))
+CHECKPOINT_INTERVAL = max(1, int(os.environ.get("SEMANTIC_MODEL_DEF_CHECKPOINT_INTERVAL", "10")))
+MODEL_DELAY_SECONDS = max(0.0, float(os.environ.get("SEMANTIC_MODEL_DEF_MODEL_DELAY_SECONDS", "0")))
 
 # Storage modes that warrant a definition fetch (anything that *could* be
 # migrated to DirectLake but currently isn't).
@@ -172,6 +175,32 @@ def _normalise(
     return rec
 
 
+def _candidate_fingerprint(candidates: List[Dict[str, Any]]) -> str:
+    keys = sorted(
+        f"{dataset.get('workspaceId') or dataset.get('groupId') or ''}:{dataset.get('id') or ''}"
+        for dataset in candidates
+    )
+    return hashlib.sha256("\n".join(keys).encode("utf-8")).hexdigest()
+
+
+def _write_progress(
+    target: Path,
+    models: List[Dict[str, Any]],
+    errors: int,
+    fingerprint: str,
+    status: str,
+) -> None:
+    payload = {
+        "models": models,
+        "errors": errors,
+        "candidate_fingerprint": fingerprint,
+        "status": status,
+    }
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(target)
+
+
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -185,7 +214,8 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
     catalog = json.loads(src.read_text(encoding="utf-8-sig"))
     datasets = catalog.get("datasets") or []
-    fetch_all = _truthy(os.environ.get("SEMANTIC_MODEL_DEF_ALL"))
+    fetch_all_setting = os.environ.get("SEMANTIC_MODEL_DEF_ALL")
+    fetch_all = fetch_all_setting is None or _truthy(fetch_all_setting)
 
     if fetch_all:
         candidates = datasets
@@ -196,34 +226,50 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         ]
 
     if not candidates:
-        print("Semantic model definitions: no Import-mode datasets in scope - nothing to fetch.")
+        print("Semantic model definitions: no datasets in scope - nothing to fetch.")
         target.write_text(json.dumps({"models": []}, indent=2), encoding="utf-8")
         return target
 
     provider = get_default_provider()
-    headers = provider.headers(scope=FABRIC_SCOPE)
+    fingerprint = _candidate_fingerprint(candidates)
 
     print(f"Semantic model definitions: fetching getDefinition for {len(candidates)} model(s)...")
 
     models_out: List[Dict[str, Any]] = []
+    if target.exists():
+        try:
+            previous = json.loads(target.read_text(encoding="utf-8-sig"))
+            if previous.get("status") == "in_progress" and previous.get("candidate_fingerprint") == fingerprint:
+                models_out = [model for model in previous.get("models") or [] if not model.get("error")]
+                if models_out:
+                    print(f"  resuming {len(models_out)} successful model definition(s) from checkpoint")
+        except (json.JSONDecodeError, OSError, AttributeError):
+            models_out = []
+    completed = {
+        (model.get("workspaceId"), model.get("id"))
+        for model in models_out
+    }
     errors = 0
     for i, ds in enumerate(candidates, 1):
         wsid = ds.get("workspaceId") or ds.get("groupId")
         did = ds.get("id")
         if not (wsid and did):
             continue
+        if (wsid, did) in completed:
+            continue
+        if MODEL_DELAY_SECONDS:
+            time.sleep(MODEL_DELAY_SECONDS)
+        headers = provider.headers(scope=FABRIC_SCOPE)
         defn, err = _get_definition(headers, wsid, did)
         rec = _normalise(ds, defn, err)
         models_out.append(rec)
         if err:
             errors += 1
-        if i % 10 == 0:
+        if i % CHECKPOINT_INTERVAL == 0:
+            _write_progress(target, models_out, errors, fingerprint, "in_progress")
             print(f"  ... models {i}/{len(candidates)}")
 
-    target.write_text(
-        json.dumps({"models": models_out, "errors": errors}, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_progress(target, models_out, errors, fingerprint, "completed")
     print(f"Wrote {target} ({len(models_out)} model def(s), {errors} error(s)).")
     return target
 

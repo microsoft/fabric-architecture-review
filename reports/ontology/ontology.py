@@ -19,6 +19,7 @@ instead of one opaque box:
 * **Workspace**     <- ``gold_workspaces``         key ``(workspace_id, run_id)``
 * **SemanticModel** <- ``gold_semantic_models``    key ``(model_id, run_id)``
 * **ModelTable**    <- ``gold_model_tables``       key ``(model_id, table_name, run_id)``
+* **DaxMeasure**    <- ``gold_dax_measures``       key ``(model_id, table_name, measure_name, run_id)``
 * **Report**        <- ``gold_reports``            key ``(report_id, run_id)``
 * **Notebook**      <- ``gold_notebooks``          key ``(notebook_id, run_id)``
 * **Pipeline**      <- ``gold_pipelines``          key ``(pipeline_id, run_id)``
@@ -32,6 +33,7 @@ foreign keys within the same ``run_id`` so every review run is its own graph):
 * **Workspace  -HostedOnCapacity-> Capacity**       (``gold_workspaces``)
 * **SemanticModel -InWorkspace-> Workspace**        (``gold_semantic_models``)
 * **ModelTable -BelongsToModel-> SemanticModel**    (``gold_model_tables``)
+* **DaxMeasure -MeasureBelongsToModel-> SemanticModel** (``gold_dax_measures``)
 * **Report -ReportInWorkspace-> Workspace**         (``gold_reports``)
 * **Notebook -NotebookInWorkspace-> Workspace**     (``gold_notebooks``)
 * **Pipeline -PipelineInWorkspace-> Workspace**     (``gold_pipelines``)
@@ -169,6 +171,25 @@ ENTITIES: List[Entity] = [
         ],
     ),
     Entity(
+        name="DaxMeasure",
+        table="gold_dax_measures",
+        id_props=("ModelId", "TableName", "MeasureName", "RunId"),
+        display="MeasureName",
+        props=[
+            Prop("ModelId", "model_id", "String"),
+            Prop("TableName", "table_name", "String"),
+            Prop("MeasureName", "measure_name", "String"),
+            Prop("RunId", "run_id", "String"),
+            Prop("ModelName", "model_name", "String"),
+            Prop("WorkspaceName", "workspace_name", "String"),
+            Prop("CapacityName", "capacity_name", "String"),
+            Prop("RiskLevel", "risk_level", "String"),
+            Prop("RiskScore", "risk_score", "BigInt"),
+            Prop("SignalCodes", "signal_codes", "String"),
+            Prop("ExpressionPreview", "expression_preview", "String"),
+        ],
+    ),
+    Entity(
         name="Finding",
         table="gold_findings",
         id_props=("RuleId", "RunId"),
@@ -283,6 +304,19 @@ RELATIONSHIPS: List[Relationship] = [
         source_keys=[
             KeyBinding("model_id", "ModelId"),
             KeyBinding("table_name", "TableName"),
+            KeyBinding("run_id", "RunId"),
+        ],
+        target_keys=[KeyBinding("model_id", "ModelId"), KeyBinding("run_id", "RunId")],
+    ),
+    Relationship(
+        name="MeasureBelongsToModel",
+        source="DaxMeasure",
+        target="SemanticModel",
+        table="gold_dax_measures",
+        source_keys=[
+            KeyBinding("model_id", "ModelId"),
+            KeyBinding("table_name", "TableName"),
+            KeyBinding("measure_name", "MeasureName"),
             KeyBinding("run_id", "RunId"),
         ],
         target_keys=[KeyBinding("model_id", "ModelId"), KeyBinding("run_id", "RunId")],

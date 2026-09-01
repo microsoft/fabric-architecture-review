@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 EVALUATE
 SELECTCOLUMNS(
     FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()),
