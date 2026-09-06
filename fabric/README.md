@@ -104,7 +104,7 @@ them via `@pipeline().parameters.*`, exactly the way the shared `RUN_ID` is reso
 | `SP_CLIENT_ID` / `SP_CONNECTION_NAME` | blank / `sp-fabric-arch-review` | *Optional* read-only **service principal** for unattended/scheduled baselines. You create the cloud connection **manually** (setup just prints a reminder); the secret never touches setup or pipeline params. Optionally use `SP_SECRET_KEYVAULT` + `SP_SECRET_NAME` for a Key Vault secret instead. Blank = run as the notebook's executing identity. See [auth-setup.md](../docs/auth-setup.md). |
 | `TENANT_ID` | blank | Label recorded in the report (does **not** redirect the token in Fabric) |
 | `WORKSPACE_IDS` | blank | Comma-separated workspace GUIDs to restrict the review to (blank = tenant-wide) |
-| `ACTIVITY_DAYS_LOG` | `7` | Admin Activity Log lookback window in days (1–30 per Fabric Admin API) |
+| `ACTIVITY_DAYS_LOG` | `7` | Admin Activity Log lookback window in days (1–28 per Fabric Admin API) |
 | `CLIENT_NAME` | `Contoso` | Client name on the report cover |
 | `ENGAGEMENT_NAME` | `Fabric Architecture Review` | Engagement title on the report cover |
 | `REVIEWER_NAME` | blank | Reviewer name on the report cover |

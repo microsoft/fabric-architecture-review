@@ -730,6 +730,35 @@ def _findings_table(page: str, x: float, y: float, w: float, h: float, tab: int)
                   x, y, w, h, "Findings — rule, result, where it happens, and the fix", tab)
 
 
+def _cost_impacts_table(page: str, x: float, y: float, w: float, h: float, tab: int) -> Dict[str, Any]:
+    visual = _table(
+        page, "cost_impacts", "gold_cost_finding_impacts",
+        ["rule_id", "severity", "status", "affected_type", "affected_name", "sku",
+         "workspace_count", "item_count", "title"], [],
+        x, y, w, h, "Cost findings — select an affected object to filter capacity contents", tab,
+    )
+    visual["filterConfig"] = {"filters": [{
+        "name": _id(page, "filter", "visible_cost_impacts"),
+        "field": {"Column": {
+            "Expression": {"SourceRef": {"Entity": "gold_cost_finding_impacts"}},
+            "Property": "show_in_findings",
+        }},
+        "type": "Categorical",
+        "filter": {
+            "Version": 2,
+            "From": [{"Name": "i", "Entity": "gold_cost_finding_impacts", "Type": 0}],
+            "Where": [{"Condition": {"In": {
+                "Expressions": [{"Column": {
+                    "Expression": {"SourceRef": {"Source": "i"}},
+                    "Property": "show_in_findings",
+                }}],
+                "Values": [[{"Literal": {"Value": "true"}}]],
+            }}}],
+        },
+    }]}
+    return visual
+
+
 def _kpi_row(page: str, cards: List[tuple], start_tab: int = 1) -> List[Dict[str, Any]]:
     """Lay out KPI cards left-to-right. ``cards`` = [(key, measure, label), ...]."""
     out = []
@@ -844,6 +873,17 @@ def _dimension_page(dimension: str, display: str, detail: Optional[Dict[str, Any
                                "Rule x severity", 8, measure=True))
     fy = by + bh + 12
     fh = PAGE_H - fy - 16
+    if dimension == "cost" and detail:
+        half = (PAGE_W - 32 - 12) // 2
+        visuals.append(_cost_impacts_table(page, 16, fy, half, fh, 10))
+        visuals.append(_table(
+            page, "detail", detail["entity"], detail["cols"], [],
+            16 + half + 12, fy, half, fh, detail["title"], 11,
+        ))
+        return {
+            "name": page, "display": display, "visuals": visuals,
+            "filters": [_dimension_filter(page, dimension), _latest_run_filter(page)],
+        }
     actions = _DIMENSION_ACTIONS.get(dimension)
     if actions:
         panel_w = 300
@@ -1316,8 +1356,14 @@ def _tenant_settings_page() -> Dict[str, Any]:
     ty = by + bh + 12
     visuals.append(_table(page, "settings", "gold_findings",
                           ["rule_id", "severity", "status", "title", "recommendation"], [],
-                          16, ty, PAGE_W - 32, PAGE_H - ty - 16,
+                          16, ty, 610, PAGE_H - ty - 16,
                           "Settings — current state, severity and recommended action", 8))
+    visuals.append(_table(
+        page, "settingchanges", "gold_tenant_setting_changes",
+        ["event_time", "actor", "setting_name", "old_value", "new_value", "operation"], [],
+        638, ty, PAGE_W - 638 - 16, PAGE_H - ty - 16,
+        "Observed tenant-setting changes during the audit window", 9,
+    ))
     return {"name": page, "display": "Tenant Settings", "visuals": visuals,
             "filters": [_dimension_filter(page, "tenant_settings"), _latest_run_filter(page)]}
 
@@ -1529,8 +1575,8 @@ def _pages() -> List[Dict[str, Any]]:
                         {"entity": "gold_capacities", "title": "Capacities",
                          "cols": ["capacity_name", "sku", "kind", "state", "region"]}),
         _dimension_page("cost", "Cost",
-                        {"entity": "gold_capacities", "title": "Capacities",
-                         "cols": ["capacity_name", "sku", "kind", "state", "region"]}),
+                        {"entity": "gold_cost_impact_items", "title": "Capacity contents — workspaces and items",
+                         "cols": ["capacity_name", "sku", "workspace_name", "item_type", "item_name"]}),
         _dimension_page("governance", "Governance",
                         {"entity": "gold_workspaces", "title": "Workspaces",
                          "cols": ["workspace_name", "on_capacity", "item_count"]}),

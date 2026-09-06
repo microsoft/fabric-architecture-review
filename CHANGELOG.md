@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.09.1
+
+- Added tenant-setting audit history from observed Activity Events, with actor, timestamp, operation, setting, and available before/after values across Gold, the Direct Lake report, Data Agent, and Rayfin app.
+- Clamped activity-log collection to the supported 28-day maximum while retaining the seven-day default and legacy environment-variable alias.
+- Enriched capacity cost evidence with capacity, workspace, and item detail across Gold, the report, Data Agent, and Rayfin app.
+- Added affected capacity or workspace rows for every Cost finding in the report; selecting one filters the adjacent capacity-contents table while preserving the complete default inventory.
+- Prevented `COST-005` from scoring partial workspace scans as tenant-wide evidence and surfaced the scope limitation in downstream experiences.
+
 ## 2026.09.0
 
 - Added metadata-only DAX definition collection from TMDL and `model.bim`, with explicit missing/error coverage and static pattern-risk rules `DAX-001` and `DAX-002`.

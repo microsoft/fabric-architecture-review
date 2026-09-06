@@ -11,6 +11,8 @@ import { buildLiveReviewData, type LiveReviewTables } from "@/lib/live-review-ad
 import { liveReviewQueries } from "@/queries/live";
 
 export function useLiveReviewData() {
+    const capacities = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacities });
+    const capacityItems = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacityItems });
     const daxModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxModels });
     const daxMeasures = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxMeasures });
     const dimensionSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.dimensionSummary });
@@ -22,8 +24,9 @@ export function useLiveReviewData() {
     const notebookSmells = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.notebookSmells });
     const runSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.runSummary });
     const semanticModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.semanticModels });
+    const tenantSettingChanges = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.tenantSettingChanges });
     const workspaceRisk = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.workspaceRisk });
-    const results = useMemo(() => ({ daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk }), [daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, workspaceRisk]);
+    const results = useMemo(() => ({ capacities, capacityItems, daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, tenantSettingChanges, workspaceRisk }), [capacities, capacityItems, daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, tenantSettingChanges, workspaceRisk]);
     const failed = Object.entries(results).find(([, result]) => result.error || result.data?.status === "error");
     const loading = Object.values(results).some((result) => result.isLoading || !result.data);
     const data = useMemo(() => {
@@ -34,6 +37,8 @@ export function useLiveReviewData() {
             return result.data.table;
         };
         const tables: LiveReviewTables = {
+            capacities: table("capacities"),
+            capacityItems: table("capacityItems"),
             daxModels: table("daxModels"),
             daxMeasures: table("daxMeasures"),
             dimensionSummary: table("dimensionSummary"),
@@ -45,6 +50,7 @@ export function useLiveReviewData() {
             notebookSmells: table("notebookSmells"),
             runSummary: table("runSummary"),
             semanticModels: table("semanticModels"),
+            tenantSettingChanges: table("tenantSettingChanges"),
             workspaceRisk: table("workspaceRisk"),
         };
         return buildLiveReviewData(tables);

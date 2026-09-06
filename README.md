@@ -75,7 +75,7 @@ it reads, and code review rejects any change that breaks this contract.
 - Pipeline / notebook **run history** (duration, status, error codes)
 - Pipeline activity JSON and notebook **source code** (cells only, never `outputs`) via Fabric `getDefinition` — used for parameter-contract checks (`ARCH-012`) and a heuristic code-smell scan (`NBCODE-001..006`)
 - Git integration configuration
-- Admin Activity Log (configurable lookback — default last **7 days**, max 30)
+- Admin Activity Log (configurable lookback — default last **7 days**, max 28)
 - *Opt-in only:* pre-aggregated Capacity Metrics App tables (DAX via `executeQueries`)
 - *Opt-in only:* Azure ARM read of Automation runbooks / Logic Apps for capacity Pause/Resume detection
 
@@ -405,7 +405,7 @@ All settings live in `.env` (copy from [.env.example](.env.example)). Highlights
 | `CLIENT_NAME`, `ENGAGEMENT_NAME`, `REVIEWER_NAME` | Engagement metadata rendered into the report. | `Contoso` / `Fabric Architecture Review` / *(empty)* |
 | `OUTPUT_DIR` | Per-engagement output folder; all raw/findings/report land under it. | `output` |
 | `WORKSPACE_IDS` | Comma/whitespace-separated workspace GUIDs to scope the run. Empty = tenant-wide. | *(empty)* |
-| `ACTIVITY_DAYS_LOG` | Activity-log lookback window in days (1–30 per Fabric Admin API). Legacy alias `ACTIVITY_LOG_DAYS` is still honoured. In Fabric this is exposed as a selectable pipeline parameter. | `7` |
+| `ACTIVITY_DAYS_LOG` | Activity-log lookback window in days (1–28 per Fabric Admin API). Legacy alias `ACTIVITY_LOG_DAYS` is still honoured. In Fabric this is exposed as a selectable pipeline parameter. Tenant-setting audit history reports changes observed within this window. | `7` |
 | `FOOTER_LABEL` | Override the PDF footer label. | `<CLIENT_NAME> — <ENGAGEMENT_NAME>` |
 | `REPORT_BRAND` | Brand / organization label on the PDF cover and page header. Empty = no brand (no Microsoft or any brand shown). | *(empty)* |
 | `REPORT_LOGO` | Path to a PNG cover logo (any brand). Empty/missing = no logo; none is shipped. | *(empty)* |

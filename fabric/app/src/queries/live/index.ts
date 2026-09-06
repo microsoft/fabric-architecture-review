@@ -5,6 +5,8 @@
 // </copyright>
 //-----------------------------------------------------------------------
 
+import capacities from "./capacities.dax?raw";
+import capacityItems from "./capacity-items.dax?raw";
 import dimensionSummary from "./dimension-summary.dax?raw";
 import daxModels from "./dax-models.dax?raw";
 import daxMeasures from "./dax-measures.dax?raw";
@@ -16,10 +18,13 @@ import modelTables from "./model-tables.dax?raw";
 import notebookSmells from "./notebook-smells.dax?raw";
 import runSummary from "./run-summary.dax?raw";
 import semanticModels from "./semantic-models.dax?raw";
+import tenantSettingChanges from "./tenant-setting-changes.dax?raw";
 import workspaceRisk from "./workspace-risk.dax?raw";
 
 export const liveReviewQueries = {
     connection: "reviewModel",
+    capacities,
+    capacityItems,
     daxModels,
     daxMeasures,
     dimensionSummary,
@@ -31,5 +36,6 @@ export const liveReviewQueries = {
     notebookSmells,
     runSummary,
     semanticModels,
+    tenantSettingChanges,
     workspaceRisk,
 } as const;

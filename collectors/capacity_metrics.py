@@ -30,6 +30,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
+from collectors._common import get_scope_workspace_ids
 from collectors._http import collect_value, get_json
 from collectors.auth import POWERBI_SCOPE, get_default_provider
 
@@ -85,6 +86,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     print(f"  {len(capacities)} capacity(ies) visible.")
 
     workspaces_by_cap = _workspaces_by_capacity(Path(output_dir))
+    workspace_scope_limited = bool(get_scope_workspace_ids())
 
     enriched: List[Dict[str, Any]] = []
     for i, cap in enumerate(capacities, 1):
@@ -108,6 +110,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
                 "workloads": wls,
                 "assignedWorkspaceCount": len(ws_list),
                 "assignedWorkspaces": ws_list,
+                "workspaceScopeLimited": workspace_scope_limited,
             }
         )
         if i % 10 == 0:
@@ -125,7 +128,12 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     target = target_dir / "capacity_metrics.json"
     target.write_text(
         json.dumps(
-            {"summary": summary, "capacities": enriched, "deepMetricsAvailable": False},
+            {
+                "summary": summary,
+                "capacities": enriched,
+                "deepMetricsAvailable": False,
+                "workspaceScopeLimited": workspace_scope_limited,
+            },
             indent=2,
             ensure_ascii=False,
         ),

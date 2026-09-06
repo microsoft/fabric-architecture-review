@@ -129,6 +129,8 @@ describe("App", () => {
         fireEvent.click(screen.getByRole("button", { name: "Performance + cost" }));
         expect(screen.getByRole("heading", { name: "Balance speed and capacity efficiency" })).toBeInTheDocument();
         expect(screen.getByRole("heading", { name: "Performance and cost posture" })).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Workspaces and items behind the cost evidence" })).toBeInTheDocument();
+        expect(screen.getByText("Tenant scope")).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: "Architecture" }));
         expect(screen.getByRole("heading", { name: "Understand design and lineage" })).toBeInTheDocument();
@@ -140,6 +142,17 @@ describe("App", () => {
         expect(screen.getByText("Unbounded Spark collect or toPandas action can exhaust driver memory.")).toBeInTheDocument();
         expect(screen.getByText("Affected cells")).toBeInTheDocument();
         expect(screen.getByText("4, 7")).toBeInTheDocument();
+    });
+
+    it("shows current tenant-setting posture separately from observed audit history", () => {
+        render(<App />);
+        fireEvent.click(screen.getByRole("button", { name: "Tenant settings" }));
+
+        expect(screen.getByRole("heading", { name: "Review posture and observed changes" })).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Settings requiring action" })).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Tenant-setting audit history" })).toBeInTheDocument();
+        expect(screen.getByText("sample.admin@example.com")).toBeInTheDocument();
+        expect(screen.getByText(/does not prove that no changes occurred outside the window/)).toBeInTheDocument();
     });
 
     it("reports supported ownership separately from uncollected classification", () => {

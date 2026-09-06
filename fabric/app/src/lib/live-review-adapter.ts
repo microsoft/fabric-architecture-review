@@ -10,6 +10,8 @@ import type { AssessmentDimension, DaxMeasureRisk, EstateHealth, EstateItem, Est
 
 export interface LiveReviewTables {
     daxModels: QueryTable;
+        capacities: QueryTable;
+        capacityItems: QueryTable;
     daxMeasures: QueryTable;
     dimensionSummary: QueryTable;
     estateNodes: QueryTable;
@@ -20,6 +22,7 @@ export interface LiveReviewTables {
     modelTables: QueryTable;
     runSummary: QueryTable;
     semanticModels: QueryTable;
+    tenantSettingChanges: QueryTable;
     workspaceRisk: QueryTable;
 }
 
@@ -38,6 +41,10 @@ function text(value: RecordValue) {
 function number(value: RecordValue) {
     const result = Number(value ?? 0);
     return Number.isFinite(result) ? result : 0;
+}
+
+function boolean(value: RecordValue) {
+    return value === true || value === 1 || text(value).toLowerCase() === "true";
 }
 
 function dimension(value: RecordValue): ReviewDimension {
@@ -98,7 +105,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
     const findingRows = records(tables.findings);
     const findings = findingRows.map((row) => ({
         id: text(row.rule_id),
-        dimension: dimension(row.dimension),
+        dimension: assessmentDimension(row.dimension),
         severity: severity(row.severity),
         title: text(row.title),
         affected: text(row.affected),
@@ -248,6 +255,37 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         availableModelCount,
         definitionCoverage: daxModels.length ? Math.round((availableModelCount / daxModels.length) * 100) : 0,
     };
+    const capacityItems = records(tables.capacityItems);
+    const capacities = records(tables.capacities).map((row) => ({
+        id: text(row.capacity_id),
+        name: text(row.capacity_name),
+        sku: text(row.sku),
+        kind: text(row.kind),
+        state: text(row.state),
+        region: text(row.region),
+        assignedWorkspaceCount: number(row.assigned_workspace_count),
+        observedWorkspaceCount: number(row.observed_workspace_count),
+        observedItemCount: number(row.observed_item_count),
+        workspaceScopeLimited: boolean(row.workspace_scope_limited),
+        items: capacityItems.filter((item) => text(item.capacity_id) === text(row.capacity_id)).map((item) => ({
+            id: text(item.item_id),
+            name: text(item.item_name),
+            type: text(item.item_type),
+            workspaceId: text(item.workspace_id),
+            workspaceName: text(item.workspace_name),
+        })),
+    }));
+    const tenantSettingChanges = records(tables.tenantSettingChanges).map((row) => ({
+        id: text(row.event_id),
+        eventTime: text(row.event_time),
+        actor: text(row.actor),
+        operation: text(row.operation),
+        settingName: text(row.setting_name),
+        oldValue: text(row.old_value),
+        newValue: text(row.new_value),
+        details: text(row.change_details),
+        auditWindowDays: number(row.audit_window_days),
+    }));
     return {
         metrics: [
             { label: "Best-practice score", value: score, delta: "Latest review run", trend: "steady", intent: "score" },
@@ -266,6 +304,8 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
             rooms,
         },
         daxMeasures,
+        capacities,
+        tenantSettingChanges,
         source: "live",
     };
 }

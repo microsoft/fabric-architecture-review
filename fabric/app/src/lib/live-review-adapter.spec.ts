@@ -16,6 +16,8 @@ function table(columns: string[], rows: unknown[][]): QueryTable {
 describe("buildLiveReviewData", () => {
     it("joins live review rows without inventing artifact finding edges", () => {
         const tables: LiveReviewTables = {
+            capacities: table(["capacity_id", "capacity_name", "sku", "kind", "state", "region", "assigned_workspace_count", "observed_workspace_count", "observed_item_count", "workspace_scope_limited"], [["cap-1", "F64", "F64", "Fabric", "Active", "North Europe", 3, 1, 2, true]]),
+            capacityItems: table(["capacity_id", "workspace_id", "workspace_name", "item_id", "item_name", "item_type"], [["cap-1", "ws-1", "Workspace One", "model-1", "Sales", "SemanticModel"]]),
             daxModels: table(["definition_status", "measure_count", "flagged_measure_count"], [["available", 1, 1], ["missing", 0, 0]]),
             daxMeasures: table(["capacity_id", "capacity_name", "workspace_id", "workspace_name", "model_id", "model_name", "table_name", "measure_name", "risk_level", "risk_score", "expression_length", "expression_preview", "signal_codes"], [["cap-1", "F64", "ws-1", "Workspace One", "model-1", "Sales", "Measures", "Margin", "high", 55, 91, "SUMX(CROSSJOIN(Products, Stores), Sales[Amount])", "nested_iterators, crossjoin"]]),
             runSummary: table(["run_id", "client_name", "total_findings", "critical_fail", "high_fail", "assessment_coverage", "unknown_count", "missing_evidence_count", "score"], [["run-1", "Contoso", 89, 0, 7, 96, 2, 1, 50]]),
@@ -25,6 +27,7 @@ describe("buildLiveReviewData", () => {
             workspaceRisk: table(["workspace_id", "workspace_name", "capacity_name", "owner", "item_count", "issue_count", "risk_score", "status"], [["ws-1", "Workspace One", "F64", "Owner", 2, 3, 42, "amber"]]),
             estateNodes: table(["node_id", "node_type", "node_name", "workspace_id", "workspace_name", "owner", "issue_count", "risk_score"], [["model-1", "SemanticModel", "Sales", "ws-1", "Workspace One", "Data owner", 0, 0], ["nb-1", "Notebook", "Prepare Sales", "ws-1", "Workspace One", "Engineering", 0, 0], ["capacity-1", "Capacity", "F64", "", "", "", 0, 0]]),
             semanticModels: table(["model_id", "model_name", "workspace_id", "workspace_name", "storage_mode", "total_size", "table_count", "column_count", "calc_column_count"], [["model-1", "Sales", "ws-1", "Workspace One", "Direct Lake", 1073741824, 12, 80, 3]]),
+            tenantSettingChanges: table(["event_id", "event_time", "actor", "operation", "setting_name", "old_value", "new_value", "change_details", "audit_window_days"], [["event-1", "2026-06-10T09:42:00Z", "admin@contoso.com", "UpdatedAdminFeatureSwitch", "Export reports", "Disabled", "Enabled", "Changed tenant switch", 28]]),
             modelTables: table(["model_id", "table_name", "row_count", "total_size", "dictionary_size", "column_count"], [["model-1", "Sales Fact", 1000, 1048576, 2048, 8]]),
             modelColumns: table(["model_id", "table_name", "column_name", "data_type", "encoding", "cardinality", "total_size", "dictionary_size", "is_calculated"], [["model-1", "Sales Fact", "Customer", "String", "Hash", 500, 524288, 4096, false]]),
             notebookSmells: table(["rule_id", "notebook_name", "workspace_name", "cells", "notebook_url"], [["NBCODE-003", "Prepare Sales", "Workspace One", "4, 8", "https://app.fabric.microsoft.com/notebook"]]),
@@ -44,6 +47,8 @@ describe("buildLiveReviewData", () => {
         expect(room.capacityName).toBe("F64");
         expect(result.findings[0].workspaceIds).toEqual(["ws-1"]);
         expect(result.daxMeasures[0]).toMatchObject({ capacityName: "F64", modelName: "Sales", measureName: "Margin", riskLevel: "high", riskScore: 55 });
+        expect(result.capacities[0]).toMatchObject({ name: "F64", assignedWorkspaceCount: 3, observedWorkspaceCount: 1, workspaceScopeLimited: true, items: [{ name: "Sales", workspaceName: "Workspace One" }] });
+        expect(result.tenantSettingChanges[0]).toMatchObject({ actor: "admin@contoso.com", settingName: "Export reports", auditWindowDays: 28 });
         expect(model?.findingIds).toEqual([]);
         expect(model?.governance).toBeUndefined();
         expect(model?.modelProfile).toMatchObject({ storageMode: "Direct Lake", totalSize: "1.0 GB", tables: 12, tableStats: [{ name: "Sales Fact", rows: 1000 }], columnStats: [{ name: "Customer", cardinality: 500 }] });
@@ -55,8 +60,9 @@ describe("buildLiveReviewData", () => {
     it("keeps specialist assessment dimensions distinct in the pulse", () => {
         const dimensions = ["governance", "operational_excellence", "tenant_settings", "best_practices"];
         const baseTables = {
+            capacities: table([], []), capacityItems: table([], []),
             daxModels: table(["definition_status", "measure_count", "flagged_measure_count"], []),
-            daxMeasures: table([], []), estateNodes: table([], []), findingTargets: table([], []), findings: table([], []), modelColumns: table([], []), modelTables: table([], []), notebookSmells: table([], []), semanticModels: table([], []), workspaceRisk: table([], []),
+            daxMeasures: table([], []), estateNodes: table([], []), findingTargets: table([], []), findings: table([], []), modelColumns: table([], []), modelTables: table([], []), notebookSmells: table([], []), semanticModels: table([], []), tenantSettingChanges: table([], []), workspaceRisk: table([], []),
             runSummary: table(["run_id", "client_name", "score", "assessment_coverage"], [["run-1", "Contoso", 80, 100]]),
             dimensionSummary: table(["dimension", "score"], dimensions.map((dimensionName) => [dimensionName, 80])),
         } as LiveReviewTables;

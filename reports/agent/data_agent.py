@@ -78,7 +78,18 @@ DATA YOU HAVE
 - gold_workspace_risk / gold_graph_nodes / gold_graph_edges: the estate map -
   workspaces, capacities, items and their relationships, each with a 0-100 risk
   score and a status.
-- gold_capacities, gold_workspaces, gold_semantic_models: inventory + storage modes.
+- gold_capacities: capacity inventory plus assigned/observed workspace counts,
+  observed item count, and workspace_scope_limited. Never treat scoped counts as
+  tenant-wide capacity utilization.
+- gold_capacity_items: one row per observed item with capacity, workspace and item
+  identity; use it to explain COST-005 and show exactly what a capacity hosts.
+- gold_cost_finding_impacts: one row per Cost finding and affected capacity or
+  workspace, with explicit placeholder rows when no object is affected or evidence
+  is unavailable. gold_cost_impact_items maps each impact to its hosted contents.
+- gold_workspaces, gold_semantic_models: workspace inventory + storage modes.
+- gold_tenant_setting_changes: observed tenant-setting audit events in the configured
+  activity window, including actor, timestamp, operation and setting. Old/new values
+  are nullable because the Activity Events payload does not always provide them.
 - gold_notebook_smells: notebook code-smell (NBCODE rule) matches per notebook.
 - gold_bpa_violations: individual Best Practice Analyzer / model-health violations.
 - gold_dax_models / gold_dax_measures: metadata-only DAX definition coverage and
@@ -127,6 +138,16 @@ IMPROVEMENT / ADVISORY QUESTIONS ("how do I improve X", "what should we fix")
   SKU or autoscale is warranted; all passing with low utilisation suggests headroom
   (a smaller SKU may be viable). Report the capacity SKUs from gold_capacities. Note:
   live CU% needs the Capacity Metrics app (GOV-007); without it the view is point-in-time.
+- Large-capacity consolidation / COST-005: read gold_capacities first. If
+  workspace_scope_limited = 1, state that the evidence is partial and do not recommend
+  downsizing from workspace counts. Otherwise join gold_capacity_items by capacity_id
+  to list the capacity, its workspaces and every observed item.
+- Cost finding targets: use gold_cost_finding_impacts to name the affected capacity
+  or workspace for each Cost rule. Use gold_cost_impact_items on impact_key when the
+  user asks which observed items are hosted by that target.
+- Tenant settings: use gold_findings WHERE dimension = 'tenant_settings' for the
+  current posture. Use gold_tenant_setting_changes for changes observed during the
+  activity-log window. Say "no changes were observed" rather than "no changes occurred".
 - "Unused / closeable workspaces": gold_workspaces rows with item_count = 0 are
   empty; is_inactive = true marks workspaces with no activity in the review window
   (last_activity is the most recent event). Finding GOV-006 corroborates archival.
@@ -272,10 +293,30 @@ DEFAULT_LAKEHOUSE_FEWSHOTS: List[Dict[str, str]] = [
     {
         "question": "List the capacities and their SKUs.",
         "query": (
-            "SELECT c.capacity_name, c.sku, c.kind, c.is_dedicated, c.state, c.region "
+        "SELECT c.capacity_name, c.sku, c.kind, c.is_dedicated, c.state, c.region, "
+        "c.assigned_workspace_count, c.observed_workspace_count, c.observed_item_count, "
+        "c.workspace_scope_limited "
             "FROM gold_capacities c JOIN gold_run_summary r ON c.run_id = r.run_id "
             "WHERE r.is_latest = 1 ORDER BY c.kind, c.capacity_name;"
         ),
+    },
+    {
+      "question": "What workspaces and items are hosted on each large capacity?",
+      "query": (
+        "SELECT i.capacity_name, i.sku, i.workspace_name, i.item_type, i.item_name, "
+        "i.workspace_scope_limited FROM gold_capacity_items i "
+        "JOIN gold_run_summary r ON i.run_id = r.run_id WHERE r.is_latest = 1 "
+        "ORDER BY i.capacity_name, i.workspace_name, i.item_type, i.item_name;"
+      ),
+    },
+    {
+      "question": "Who changed tenant settings during the audit window?",
+      "query": (
+        "SELECT c.event_time, c.actor, c.setting_name, c.old_value, c.new_value, "
+        "c.operation, c.audit_window_days FROM gold_tenant_setting_changes c "
+        "JOIN gold_run_summary r ON c.run_id = r.run_id WHERE r.is_latest = 1 "
+        "ORDER BY c.event_time DESC;"
+      ),
     },
     {
         "question": "How can I improve my architecture design?",

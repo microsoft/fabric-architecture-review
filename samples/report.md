@@ -9,7 +9,7 @@
 <strong>Reviewer:</strong> Fabric Review Team<br/>
 <strong>Review date:</strong> 2026-01-15<br/>
 <strong>Tenant:</strong> <code>***</code><br/>
-<strong>FAR version:</strong> <code>2026.09.0</code>
+<strong>FAR version:</strong> <code>2026.09.1</code>
 </p>
 
 </div>

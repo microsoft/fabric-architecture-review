@@ -29,6 +29,7 @@ import {
     Moon,
     Network,
     Scale,
+    Settings2,
     ShieldCheck,
     Sun,
     TableProperties,
@@ -57,13 +58,14 @@ function EstateMapFallback({ compact = false }: { compact?: boolean }) {
     return <div className={cn("campus-explorer grid place-items-center bg-muted text-200 text-muted-foreground", compact && "campus-explorer-compact")}>Loading estate topology…</div>;
 }
 
-type ViewId = "overview" | "findings" | EstateReviewArea | "estate" | "dax";
+type ViewId = "overview" | "findings" | EstateReviewArea | "estate" | "dax" | "tenant-settings";
 
 const navItems = [
     { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
     { id: "findings" as const, label: "Findings", icon: FileWarning },
     { id: "estate" as const, label: "Estate map", icon: Network },
     { id: "governance" as const, label: "Governance", icon: ShieldCheck },
+    { id: "tenant-settings" as const, label: "Tenant settings", icon: Settings2 },
     { id: "models" as const, label: "Semantic model optimization", icon: Database },
     { id: "dax" as const, label: "DAX Analyzer", icon: Code2 },
     { id: "efficiency" as const, label: "Performance + cost", icon: Gauge },
@@ -76,6 +78,7 @@ const viewTitles: Record<ViewId, string> = {
     findings: "Risk decision queue",
     estate: "3D estate",
     governance: "Governance",
+    "tenant-settings": "Tenant settings",
     models: "Semantic model optimization",
     dax: "DAX Analyzer",
     efficiency: "Performance and cost",
@@ -178,7 +181,7 @@ function Sidebar({ currentView, onNavigate }: { currentView: ViewId; onNavigate:
                     </div>
                 </div>
             </nav>
-            <div className="border-t border-border p-400 text-100 text-muted-foreground">Release 2026.08 · {source === "live" ? "Live" : "Preview"}</div>
+            <div className="border-t border-border p-400 text-100 text-muted-foreground">Release 2026.09.1 · {source === "live" ? "Live" : "Preview"}</div>
         </aside>
     );
 }
@@ -656,7 +659,7 @@ function GovernanceView({ initialWorkspaceId }: { initialWorkspaceId?: string })
 }
 
 function EfficiencyView({ initialWorkspaceId }: { initialWorkspaceId?: string }) {
-    const { dimensionScores, estate, findings: reviewFindings } = useReviewData();
+    const { capacities, dimensionScores, estate, findings: reviewFindings } = useReviewData();
     const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? "all");
     const findings = findingsForWorkspace(reviewFindings.filter((finding) => ["Performance", "Cost"].includes(finding.dimension)), workspaceId);
     const performanceScore = dimensionScores.find((score) => score.dimension === "Performance")?.score ?? 0;
@@ -665,11 +668,30 @@ function EfficiencyView({ initialWorkspaceId }: { initialWorkspaceId?: string })
         { label: "Performance", value: performanceScore, detail: "Query, refresh, and capacity pressure", tone: performanceScore >= 80 ? "success" : performanceScore >= 60 ? "warning" : "danger" },
         { label: "Cost", value: costScore, detail: "Spend, utilization, and consolidation", tone: costScore >= 80 ? "success" : costScore >= 60 ? "warning" : "danger" },
     ];
+    const visibleCapacities = capacities.map((capacity) => ({
+        ...capacity,
+        items: capacity.items.filter((item) => workspaceId === "all" || item.workspaceId === workspaceId),
+    })).filter((capacity) => workspaceId === "all" || capacity.items.length > 0);
     return <div className="p-400 md:p-600">
         <div className="mb-500 flex flex-col gap-300 md:flex-row md:items-end md:justify-between"><div><p className="section-kicker">Capacity and query speed</p><h2 className="font-heading text-hero-800 font-semibold leading-hero-800">Balance speed and capacity efficiency</h2><p className="mt-200 max-w-search text-200 leading-300 text-muted-foreground">One engineering workspace for throttling, refresh duration, storage-mode fallback, idle windows and capacity concentration.</p></div><WorkspaceSelect rooms={estate.rooms} value={workspaceId} onChange={setWorkspaceId} /></div>
         <section className="grid gap-300 md:grid-cols-3">{[["Performance score", performanceScore.toString(), "Query, refresh and capacity pressure"], ["Cost score", costScore.toString(), "Spend, utilization and consolidation"], ["Combined actions", findings.length.toString(), "Ranked by user impact and avoidable cost"]].map(([label, value, detail]) => <article className="border border-border bg-card p-400" key={label}><Scale className="icon-size-300 text-primary-strong" /><p className="mt-300 text-200 text-muted-foreground">{label}</p><p className="mt-100 font-numeric text-hero-700 font-semibold">{value}</p><p className="mt-200 text-100 text-muted-foreground">{detail}</p></article>)}</section>
         <div className="mt-400"><LensBarPlot kicker="Review score" title="Performance and cost posture" description="Both review dimensions use the same zero-to-100 scale, making relative headroom visible without mixing in action counts." data={efficiencyScores} maximum={100} /></div>
+        <section className="mt-400 border border-border bg-card p-400"><div className="flex flex-col gap-200 md:flex-row md:items-end md:justify-between"><div><p className="section-kicker">Capacity contents</p><h3 className="section-title">Workspaces and items behind the cost evidence</h3></div><p className="text-100 text-muted-foreground">{visibleCapacities.length} capacit{visibleCapacities.length === 1 ? "y" : "ies"} in view</p></div><div className="mt-300 space-y-300">{visibleCapacities.map((capacity) => <article className="border border-border" key={capacity.id}><div className="grid gap-200 bg-secondary p-300 sm:grid-cols-[minmax(0,1fr)_repeat(3,auto)] sm:items-center"><div><p className="text-300 font-semibold">{capacity.name}</p><p className="text-100 text-muted-foreground">{capacity.sku} · {capacity.kind} · {capacity.region || "Region not recorded"}</p></div><p className="font-numeric text-100">{capacity.observedWorkspaceCount} observed workspaces</p><p className="font-numeric text-100">{capacity.observedItemCount} observed items</p><span className={cn("px-200 py-100 text-100 font-semibold", capacity.workspaceScopeLimited ? "bg-warning-soft text-warning-strong" : "bg-success-soft text-success-strong")}>{capacity.workspaceScopeLimited ? "Partial scope" : "Tenant scope"}</span></div>{capacity.workspaceScopeLimited && <p className="border-t border-warning/30 bg-warning-soft px-300 py-200 text-100 text-warning-strong">Counts reflect selected workspaces only and must not be used alone for capacity downsizing.</p>}<div className="divide-y divide-border">{capacity.items.length ? capacity.items.map((item) => <div className="grid gap-100 px-300 py-200 text-200 sm:grid-cols-[minmax(0,1fr)_10rem_12rem]" key={`${capacity.id}-${item.workspaceId}-${item.id}`}><p className="truncate font-semibold">{item.name}</p><p className="truncate text-muted-foreground">{item.type}</p><p className="truncate text-muted-foreground">{item.workspaceName}</p></div>) : <p className="px-300 py-300 text-200 text-muted-foreground">No item rows were observed for this capacity.</p>}</div></article>)}</div></section>
         <section className="mt-400 border border-border bg-card p-400"><p className="section-kicker">Joint decision queue</p><div className="mt-300 divide-y divide-border">{findings.map((finding) => <article className="grid gap-300 py-400 md:grid-cols-[8rem_minmax(0,1fr)_minmax(0,1fr)]" key={finding.id}><p className="font-monospace text-100 font-bold text-primary-strong">{finding.dimension} · {finding.id}</p><div><h3 className="text-300 font-semibold">{finding.title}</h3><p className="mt-100 text-100 text-muted-foreground">{finding.affected}</p></div><p className="text-200 text-muted-foreground">{finding.recommendation}</p></article>)}</div></section>
+    </div>;
+}
+
+function TenantSettingsView() {
+    const { findings: reviewFindings, tenantSettingChanges } = useReviewData();
+    const findings = reviewFindings.filter((finding) => finding.dimension === "Tenant settings");
+    const auditWindowDays = Math.max(0, ...tenantSettingChanges.map((change) => change.auditWindowDays));
+    return <div className="p-400 md:p-600">
+        <div className="mb-500"><p className="section-kicker">Administrator controls</p><h2 className="font-heading text-hero-800 font-semibold leading-hero-800">Review posture and observed changes</h2><p className="mt-200 max-w-search text-200 leading-300 text-muted-foreground">Current tenant-setting findings come from administrator metadata. Change history contains only events observed in the configured activity-log window.</p></div>
+        <section className="grid border border-border bg-card sm:grid-cols-3" aria-label="Tenant setting metrics">{[["Open controls", findings.length], ["Observed changes", tenantSettingChanges.length], ["Audit window", auditWindowDays ? `${auditWindowDays} days` : "No events"]].map(([label, value], index) => <article className={cn("p-400", index > 0 && "border-t border-border sm:border-l sm:border-t-0")} key={label}><p className="text-200 text-muted-foreground">{label}</p><p className="mt-200 font-numeric text-hero-700 font-semibold">{value}</p></article>)}</section>
+        <div className="mt-400 grid gap-400 xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]">
+            <section className="border border-border bg-card p-400"><p className="section-kicker">Current posture</p><h3 className="section-title">Settings requiring action</h3><div className="mt-300 divide-y divide-border">{findings.length ? findings.map((finding) => <article className="py-300" key={finding.id}><div className="flex items-center justify-between gap-300"><p className="font-monospace text-100 font-bold text-destructive">{finding.id}</p><span className={cn("px-200 py-100 text-100 font-semibold uppercase", severityClass[finding.severity])}>{finding.severity}</span></div><p className="mt-200 text-300 font-semibold">{finding.title}</p><p className="mt-100 text-200 text-muted-foreground">{finding.recommendation}</p></article>) : <p className="py-400 text-200 text-muted-foreground">No failed tenant-setting checks were recorded in the latest review.</p>}</div></section>
+            <section className="border border-border bg-card p-400"><p className="section-kicker">Observed activity</p><h3 className="section-title">Tenant-setting audit history</h3><p className="mt-100 text-100 text-muted-foreground">No events means no changes were observed; it does not prove that no changes occurred outside the window.</p><div className="mt-300 divide-y divide-border">{tenantSettingChanges.length ? tenantSettingChanges.map((change) => <article className="grid gap-200 py-300 md:grid-cols-[10rem_minmax(0,1fr)_12rem]" key={change.id}><div><p className="font-numeric text-100 font-semibold">{change.eventTime ? new Date(change.eventTime).toLocaleString() : "Time not recorded"}</p><p className="mt-100 truncate text-100 text-muted-foreground">{change.actor || "Actor not recorded"}</p></div><div><p className="text-300 font-semibold">{change.settingName || "Tenant setting"}</p><p className="mt-100 text-100 text-muted-foreground">{change.oldValue || "Previous value unavailable"} <ArrowRight className="mx-100 inline icon-size-100" /> {change.newValue || "New value unavailable"}</p></div><p className="truncate text-100 text-muted-foreground">{change.operation}</p></article>) : <p className="py-400 text-200 text-muted-foreground">No tenant-setting changes were observed during the configured audit window.</p>}</div></section>
+        </div>
     </div>;
 }
 
@@ -793,6 +815,7 @@ function ReviewWorkbenchContent() {
                         {currentView === "findings" && <FindingsView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "estate" && <EstateView onOpenArea={openEstateArea} />}
                         {currentView === "governance" && <GovernanceView initialWorkspaceId={reviewContext?.workspaceId} />}
+                        {currentView === "tenant-settings" && <TenantSettingsView />}
                         {currentView === "models" && <SemanticModelOptimizationView initialContext={reviewContext ?? undefined} />}
                         {currentView === "dax" && <DaxAnalyzerView />}
                         {currentView === "efficiency" && <EfficiencyView initialWorkspaceId={reviewContext?.workspaceId} />}

@@ -60,6 +60,53 @@ GOLD_TABLES: List[Table] = [
         "One row per evaluated checklist rule per run.",
     ),
     Table(
+        "gold_cost_finding_impacts",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("impact_key"),
+            _c("show_in_findings", "boolean"),
+            _c("rule_id"),
+            _c("severity"),
+            _c("severity_rank", "int64"),
+            _c("status"),
+            _c("title"),
+            _c("recommendation"),
+            _c("affected_type"),
+            _c("affected_id"),
+            _c("affected_name"),
+            _c("capacity_id"),
+            _c("capacity_name"),
+            _c("sku"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+            _c("workspace_count", "int64"),
+            _c("item_count", "int64"),
+            _c("detail"),
+        ],
+        "One row per Cost rule and affected capacity or workspace. A hidden all-items "
+        "row keeps the Cost detail table complete until a finding impact is selected.",
+    ),
+    Table(
+        "gold_cost_impact_items",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("impact_key"),
+            _c("capacity_id"),
+            _c("capacity_name"),
+            _c("sku"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+            _c("item_id"),
+            _c("item_name"),
+            _c("item_type"),
+        ],
+        "Many-to-many Cost finding impact to capacity-content mapping. An item appears "
+        "once per applicable impact; it is not a second canonical item inventory. "
+        "Selecting an affected object filters this table to matching contents.",
+    ),
+    Table(
         "gold_run_summary",
         [
             _c("run_id"),
@@ -115,10 +162,53 @@ GOLD_TABLES: List[Table] = [
             _c("is_dedicated", "boolean"),
             _c("state"),
             _c("region"),
+            _c("assigned_workspace_count", "int64"),
+            _c("observed_workspace_count", "int64"),
+            _c("observed_item_count", "int64"),
+            _c("workspace_scope_limited", "boolean"),
         ],
         "Capacities seen at scan time. 'kind' classifies the SKU "
         "(Fabric / Premium / Premium Per User / Embedded / Trial); "
-        "'is_dedicated' is false for the per-user PPU reservation.",
+        "'is_dedicated' is false for the per-user PPU reservation. Assigned "
+        "workspace count is collector-reported; observed counts describe the "
+        "workspace review scope and workspace_scope_limited marks partial evidence.",
+    ),
+    Table(
+        "gold_capacity_items",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("capacity_id"),
+            _c("capacity_name"),
+            _c("sku"),
+            _c("workspace_id"),
+            _c("workspace_name"),
+            _c("item_id"),
+            _c("item_name"),
+            _c("item_type"),
+            _c("workspace_scope_limited", "boolean"),
+        ],
+        "One row per observed Fabric item with its workspace and capacity, for "
+        "capacity right-sizing drilldown. Rows reflect the configured workspace scope.",
+    ),
+    Table(
+        "gold_tenant_setting_changes",
+        [
+            _c("run_id"),
+            _c("run_timestamp", "dateTime"),
+            _c("event_id"),
+            _c("event_time", "dateTime"),
+            _c("actor"),
+            _c("operation"),
+            _c("setting_name"),
+            _c("old_value"),
+            _c("new_value"),
+            _c("change_details"),
+            _c("audit_window_days", "int64"),
+            _c("audit_fetched_at", "dateTime"),
+        ],
+        "Observed tenant-setting changes in the configured activity-log window. "
+        "Before/after values are populated only when supplied by the audit event.",
     ),
     Table(
         "gold_workspaces",

@@ -55,6 +55,27 @@ _NODE_TYPE_BY_KEY = {
     "SQLAnalyticsEndpoint": "SQLEndpoint",
 }
 
+_CURATED_ITEM_TYPE_BY_KEY = {
+    "datasets": "SemanticModel",
+    "reports": "Report",
+    "Notebook": "Notebook",
+    "DataPipeline": "Pipeline",
+    "Lakehouse": "Lakehouse",
+}
+
+_TENANT_SETTING_CHANGE_OPERATIONS = frozenset({
+    "UpdatedAdminFeatureSwitch",
+    "UpdateCapacityTenantSettingDelegation",
+    "DeleteCapacityTenantSettingDelegation",
+    "UpdateDomainTenantSettingDelegation",
+    "DeleteDomainTenantSettingDelegation",
+    "UpdateWorkspaceTenantSettingDelegation",
+    "DeleteWorkspaceTenantSettingDelegation",
+    "UpdateTenantDlpPolicies",
+    "UpdateDatasourceShareTenantPolicy",
+    "UpdateDatasourceSharePrincipalsPolicy",
+})
+
 
 def _extra_ws_items(scan_ws_entry: Dict[str, Any]):
     """Yield ``(node_type, id, name)`` for every estate item in a scanner
@@ -75,6 +96,70 @@ def _extra_ws_items(scan_ws_entry: Dict[str, Any]):
             if not iid:
                 continue
             yield node_type, iid, item.get("name") or item.get("displayName") or iid
+
+
+def _workspace_items(scan_ws_entry: Dict[str, Any]):
+    """Yield every observed item as ``(type, id, name)`` without duplicates."""
+    seen = set()
+    for key, item_type in _CURATED_ITEM_TYPE_BY_KEY.items():
+        for item in scan_ws_entry.get(key) or []:
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id") or item.get("objectId")
+            if not item_id or str(item_id) in seen:
+                continue
+            seen.add(str(item_id))
+            yield item_type, item_id, item.get("name") or item.get("displayName") or item_id
+    for item_type, item_id, item_name in _extra_ws_items(scan_ws_entry):
+        if str(item_id) in seen:
+            continue
+        seen.add(str(item_id))
+        yield item_type, item_id, item_name
+
+
+def _modified_property(event: Dict[str, Any], *names: str) -> Any:
+    wanted = {name.lower() for name in names}
+    for prop in event.get("ModifiedProperties") or []:
+        if not isinstance(prop, dict):
+            continue
+        prop_name = str(prop.get("Name") or prop.get("name") or "").lower()
+        if prop_name in wanted:
+            return prop.get("NewValue") if "NewValue" in prop else prop.get("newValue")
+    return None
+
+
+def _tenant_setting_change(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    operation = event.get("Activity") or event.get("Operation") or ""
+    if operation not in _TENANT_SETTING_CHANGE_OPERATIONS:
+        return None
+    properties = event.get("ModifiedProperties") or []
+    setting_name = (
+        event.get("SettingName")
+        or event.get("FeatureSwitchName")
+        or event.get("ItemName")
+        or _modified_property(event, "SettingName", "FeatureSwitchName", "TenantSettingName", "SwitchName")
+        or operation
+    )
+    old_value = event.get("OldValue")
+    new_value = event.get("NewValue")
+    if isinstance(properties, list):
+        changed = [p for p in properties if isinstance(p, dict) and (
+            "OldValue" in p or "NewValue" in p or "oldValue" in p or "newValue" in p
+        )]
+        if old_value is None and len(changed) == 1:
+            old_value = changed[0].get("OldValue", changed[0].get("oldValue"))
+        if new_value is None and len(changed) == 1:
+            new_value = changed[0].get("NewValue", changed[0].get("newValue"))
+    return {
+        "event_id": event.get("Id") or event.get("ActivityId") or event.get("RequestId"),
+        "event_time": event.get("CreationTime"),
+        "actor": event.get("UserId") or event.get("UserEmail") or event.get("UserKey"),
+        "operation": operation,
+        "setting_name": setting_name,
+        "old_value": None if old_value is None else str(old_value),
+        "new_value": None if new_value is None else str(new_value),
+        "change_details": json.dumps(properties or event.get("Details") or {}, ensure_ascii=False),
+    }
 
 
 # Base URL used to build clickable deep-links to a Fabric notebook. Fabric does
@@ -367,6 +452,99 @@ def _affected_summary(ev: Any) -> str:
     return f"{total} affected: {base}" if base else f"{total} affected"
 
 
+def _cost_finding_targets(
+    finding: Dict[str, Any],
+    capacities_by_id: Dict[str, Dict[str, Any]],
+    capacities_by_name: Dict[str, Dict[str, Any]],
+    workspaces_by_id: Dict[str, Dict[str, Any]],
+    workspaces_by_name: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Normalize the varied Cost evidence shapes into selectable affected objects."""
+    rule_id = finding.get("rule_id") or ""
+    evidence = finding.get("evidence") or {}
+    targets: List[Dict[str, Any]] = []
+
+    def add_capacity(value: Any) -> None:
+        raw = value if isinstance(value, dict) else {"name": value}
+        capacity_id = str(raw.get("id") or raw.get("capacityId") or "")
+        capacity_name = str(raw.get("name") or raw.get("displayName") or "")
+        capacity = capacities_by_id.get(capacity_id.lower()) or capacities_by_name.get(capacity_name.lower()) or {}
+        resolved_id = capacity_id or str(capacity.get("id") or "")
+        resolved_name = capacity_name or str(capacity.get("displayName") or capacity.get("name") or "")
+        if not resolved_id and not resolved_name:
+            return
+        workspace_count = raw.get("workspaceCount", raw.get("workspaces"))
+        if workspace_count is None:
+            workspace_count = capacity.get("assignedWorkspaceCount")
+        related_workspaces = [
+            workspace for workspace in workspaces_by_id.values()
+            if str(workspace.get("capacityId") or "").lower() == resolved_id.lower()
+        ]
+        item_count = raw.get("itemCount")
+        if item_count is None:
+            item_count = sum(
+                1 for workspace in related_workspaces for _ in _workspace_items(workspace)
+            )
+        detail = raw.get("classification") or raw.get("state") or ""
+        if raw.get("avgCU7d") is not None:
+            detail = f"{detail + '; ' if detail else ''}average CU {raw['avgCU7d']:.1f}%"
+        targets.append({
+            "affected_type": "Capacity",
+            "affected_id": resolved_id,
+            "affected_name": resolved_name,
+            "capacity_id": resolved_id,
+            "capacity_name": resolved_name,
+            "sku": raw.get("sku") or capacity.get("sku"),
+            "workspace_id": "",
+            "workspace_name": "",
+            "workspace_count": workspace_count,
+            "item_count": item_count,
+            "detail": detail,
+        })
+
+    def add_workspace(raw: Dict[str, Any]) -> None:
+        workspace_id = str(raw.get("id") or raw.get("workspaceId") or "")
+        workspace_name = str(raw.get("workspace") or raw.get("workspaceName") or raw.get("name") or "")
+        workspace = workspaces_by_id.get(workspace_id.lower()) or workspaces_by_name.get(workspace_name.lower()) or {}
+        resolved_id = workspace_id or str(workspace.get("id") or workspace.get("objectId") or "")
+        resolved_name = workspace_name or str(workspace.get("name") or "")
+        capacity_id = str(raw.get("capacityId") or workspace.get("capacityId") or "")
+        capacity = capacities_by_id.get(capacity_id.lower()) or {}
+        if not resolved_id and not resolved_name:
+            return
+        targets.append({
+            "affected_type": "Workspace",
+            "affected_id": resolved_id,
+            "affected_name": resolved_name,
+            "capacity_id": capacity_id,
+            "capacity_name": capacity.get("displayName") or capacity.get("name") or "",
+            "sku": capacity.get("sku"),
+            "workspace_id": resolved_id,
+            "workspace_name": resolved_name,
+            "workspace_count": None,
+            "item_count": sum(1 for _ in _workspace_items(workspace)),
+            "detail": raw.get("type") or "",
+        })
+
+    if rule_id == "COST-001":
+        for capacity in evidence.get("outsideBand") or []:
+            add_capacity(capacity)
+    elif rule_id == "COST-002":
+        names = evidence.get("nonProductionCapacities") or evidence.get("unknownCapacities") or []
+        if not names and finding.get("status") in ("fail", "info"):
+            names = evidence.get("capacitiesAtScan") or []
+        for capacity in names:
+            add_capacity(capacity)
+    elif rule_id == "COST-004":
+        for workspace in evidence.get("examples") or []:
+            if isinstance(workspace, dict):
+                add_workspace(workspace)
+    else:
+        for capacity in evidence.get("capacities") or []:
+            add_capacity(capacity)
+    return targets
+
+
 def build_gold(
     findings: List[Dict[str, Any]],
     raw_dir: str | Path,
@@ -488,18 +666,163 @@ def build_gold(
 
     # ---- gold_capacities ----------------------------------------------
     cap = _load(raw, "capacity_metrics.json") or {}
+    scanner_for_capacity = _load(raw, "scanner.json") or {}
+    scope_limited = bool(cap.get("workspaceScopeLimited"))
+    capacity_names = {}
+    observed_workspaces: Dict[str, set] = {}
+    observed_items: Dict[str, int] = {}
+    for workspace in scanner_for_capacity.get("workspaces") or []:
+        capacity_id = str(workspace.get("capacityId") or "").lower()
+        if not capacity_id:
+            continue
+        observed_workspaces.setdefault(capacity_id, set()).add(
+            str(workspace.get("id") or workspace.get("objectId") or "")
+        )
+        for _item in _workspace_items(workspace):
+            observed_items[capacity_id] = observed_items.get(capacity_id, 0) + 1
     for c in cap.get("capacities") or []:
         sku = c.get("sku")
+        capacity_id = c.get("id")
+        capacity_key = str(capacity_id or "").lower()
+        capacity_name = c.get("displayName") or c.get("name")
+        capacity_names[capacity_key] = capacity_name
         tables["gold_capacities"].append(_coerce_row("gold_capacities", {
             **meta,
-            "capacity_id": c.get("id"),
-            "capacity_name": c.get("displayName") or c.get("name"),
+            "capacity_id": capacity_id,
+            "capacity_name": capacity_name,
             "sku": sku,
             "kind": _capacity_kind(sku),
             "is_dedicated": _is_dedicated_capacity(sku),
             "state": c.get("state"),
             "region": c.get("region"),
+            "assigned_workspace_count": c.get("assignedWorkspaceCount"),
+            "observed_workspace_count": len(observed_workspaces.get(capacity_key, set())),
+            "observed_item_count": observed_items.get(capacity_key, 0),
+            "workspace_scope_limited": bool(c.get("workspaceScopeLimited", scope_limited)),
         }))
+
+    capacity_skus = {
+        str(c.get("id") or "").lower(): c.get("sku")
+        for c in cap.get("capacities") or []
+    }
+    for workspace in scanner_for_capacity.get("workspaces") or []:
+        capacity_id = workspace.get("capacityId")
+        capacity_key = str(capacity_id or "").lower()
+        if not capacity_id:
+            continue
+        for item_type, item_id, item_name in _workspace_items(workspace):
+            tables["gold_capacity_items"].append(_coerce_row("gold_capacity_items", {
+                **meta,
+                "capacity_id": capacity_id,
+                "capacity_name": capacity_names.get(capacity_key),
+                "sku": capacity_skus.get(capacity_key),
+                "workspace_id": workspace.get("id") or workspace.get("objectId"),
+                "workspace_name": workspace.get("name"),
+                "item_id": item_id,
+                "item_name": item_name,
+                "item_type": item_type,
+                "workspace_scope_limited": scope_limited,
+            }))
+
+    capacities_by_id = {
+        str(capacity.get("id") or "").lower(): capacity
+        for capacity in cap.get("capacities") or []
+        if capacity.get("id")
+    }
+    capacities_by_name = {
+        str(capacity.get("displayName") or capacity.get("name") or "").lower(): capacity
+        for capacity in cap.get("capacities") or []
+        if capacity.get("displayName") or capacity.get("name")
+    }
+    workspaces_by_id = {
+        str(workspace.get("id") or workspace.get("objectId") or "").lower(): workspace
+        for workspace in scanner_for_capacity.get("workspaces") or []
+        if workspace.get("id") or workspace.get("objectId")
+    }
+    workspaces_by_name = {
+        str(workspace.get("name") or "").lower(): workspace
+        for workspace in scanner_for_capacity.get("workspaces") or []
+        if workspace.get("name")
+    }
+    all_impact_key = f"{run_id}|cost|all"
+    tables["gold_cost_finding_impacts"].append(_coerce_row("gold_cost_finding_impacts", {
+        **meta,
+        "impact_key": all_impact_key,
+        "show_in_findings": False,
+        "affected_type": "All",
+        "affected_name": "All capacity contents",
+    }))
+    for item in tables["gold_capacity_items"]:
+        tables["gold_cost_impact_items"].append(_coerce_row("gold_cost_impact_items", {
+            **meta,
+            "impact_key": all_impact_key,
+            **{key: item.get(key) for key in (
+                "capacity_id", "capacity_name", "sku", "workspace_id", "workspace_name",
+                "item_id", "item_name", "item_type",
+            )},
+        }))
+
+    for finding in findings:
+        if (finding.get("dimension") or "").lower() != "cost":
+            continue
+        targets = _cost_finding_targets(
+            finding, capacities_by_id, capacities_by_name, workspaces_by_id, workspaces_by_name,
+        ) or [{
+            "affected_type": "None",
+            "affected_name": {
+                "pass": "No affected object",
+                "not_applicable": "Not applicable",
+                "missing_evidence": "Evidence unavailable",
+                "unknown": "Scope unknown",
+            }.get((finding.get("status") or "").lower(), "Estate-wide review"),
+        }]
+        for index, target_info in enumerate(targets, 1):
+            impact_key = f"{run_id}|{finding.get('rule_id') or 'cost'}|{index}"
+            tables["gold_cost_finding_impacts"].append(_coerce_row("gold_cost_finding_impacts", {
+                **meta,
+                "impact_key": impact_key,
+                "show_in_findings": True,
+                "rule_id": finding.get("rule_id"),
+                "severity": (finding.get("severity") or "medium").lower(),
+                "severity_rank": SEVERITY_RANK.get((finding.get("severity") or "medium").lower(), 2),
+                "status": (finding.get("status") or "info").lower(),
+                "title": finding.get("title"),
+                "recommendation": finding.get("recommendation"),
+                **target_info,
+            }))
+            capacity_id = str(target_info.get("capacity_id") or "").lower()
+            workspace_id = str(target_info.get("workspace_id") or "").lower()
+            matched = [
+                item for item in tables["gold_capacity_items"]
+                if (workspace_id and str(item.get("workspace_id") or "").lower() == workspace_id)
+                or (not workspace_id and capacity_id and str(item.get("capacity_id") or "").lower() == capacity_id)
+            ]
+            if not matched and (capacity_id or workspace_id):
+                matched = [target_info]
+            for item in matched:
+                tables["gold_cost_impact_items"].append(_coerce_row("gold_cost_impact_items", {
+                    **meta,
+                    "impact_key": impact_key,
+                    **{key: item.get(key) for key in (
+                        "capacity_id", "capacity_name", "sku", "workspace_id", "workspace_name",
+                        "item_id", "item_name", "item_type",
+                    )},
+                }))
+
+    # ---- gold_tenant_setting_changes ---------------------------------
+    activity = _load(raw, "activity_logs.json") or {}
+    for event in activity.get("events") or []:
+        change = _tenant_setting_change(event)
+        if change:
+            tables["gold_tenant_setting_changes"].append(_coerce_row(
+                "gold_tenant_setting_changes",
+                {
+                    **meta,
+                    **change,
+                    "audit_window_days": activity.get("windowDays"),
+                    "audit_fetched_at": activity.get("fetchedAt"),
+                },
+            ))
 
     # ---- gold_workspaces ----------------------------------------------
     wsi = _load(raw, "workspace_inventory.json") or {}

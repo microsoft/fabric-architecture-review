@@ -872,7 +872,7 @@ def render(findings_path: Path, out_path: Path, templates_dir: Path, raw_dir: Pa
         far_version=_far_version,
         workspace_count=scope["workspaces"],
         capacity_count=scope["capacities"],
-        activity_log_days=os.environ.get("ACTIVITY_LOG_DAYS", "30"),
+        activity_log_days=os.environ.get("ACTIVITY_DAYS_LOG", os.environ.get("ACTIVITY_LOG_DAYS", "7")),
         summary_by_dimension=_summary(findings),
         top_findings=fails[:10],
         total_rules=len(findings),

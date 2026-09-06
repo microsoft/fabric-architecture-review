@@ -195,6 +195,16 @@ def test_fabric_gold_notebook_replaces_and_verifies_run_rows() -> None:
     assert code.index("frames = {}") < code.index("DeltaTable.forName(spark, name).delete")
 
 
+def test_every_gold_table_has_run_replacement_key() -> None:
+    from reports.powerbi.schema import GOLD_TABLES
+
+    missing = [
+        table.name for table in GOLD_TABLES
+        if not any(column.name == "run_id" for column in table.columns)
+    ]
+    assert missing == []
+
+
 def test_app_builds_always_typecheck() -> None:
     package = json.loads(_text("fabric/app/package.json"))
     for command in (package["scripts"]["build"], package["scripts"]["build:fabric"]):

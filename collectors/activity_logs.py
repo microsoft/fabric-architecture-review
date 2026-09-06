@@ -8,7 +8,7 @@ Endpoint:
       ?startDateTime='YYYY-MM-DDT00:00:00'&endDateTime='YYYY-MM-DDT23:59:59'
 
 The activity API returns one calendar day per request. We loop day by day for
-the requested window (default last 7 days, max 30 per API limit).
+the requested window (default last 7 days, max 28 per API limit).
 
 Docs: https://learn.microsoft.com/power-bi/enterprise/service-admin-auditing
 
@@ -31,7 +31,7 @@ from collectors._http import request
 from collectors.auth import POWERBI_SCOPE, get_default_provider
 
 PBI_ADMIN = "https://api.powerbi.com/v1.0/myorg/admin"
-MAX_DAYS = 30
+MAX_DAYS = 28
 DEFAULT_DAYS = 7
 
 # Pipeline parameter name (and its legacy alias) for the activity-log lookback

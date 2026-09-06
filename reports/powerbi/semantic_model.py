@@ -571,7 +571,7 @@ def _table(table) -> Dict[str, Any]:
 def _relationships() -> List[Dict[str, Any]]:
     rels = []
     for table in GOLD_TABLES:
-        if table.name == RUN_TABLE:
+        if table.name in (RUN_TABLE, "gold_cost_impact_items"):
             continue
         if not any(c.name == "run_id" for c in table.columns):
             continue
@@ -583,6 +583,14 @@ def _relationships() -> List[Dict[str, Any]]:
             "toColumn": "run_id",
             "crossFilteringBehavior": "oneDirection",
         })
+    rels.append({
+        "name": _lineage("rel", "gold_cost_impact_items", "impact"),
+        "fromTable": "gold_cost_impact_items",
+        "fromColumn": "impact_key",
+        "toTable": "gold_cost_finding_impacts",
+        "toColumn": "impact_key",
+        "crossFilteringBehavior": "oneDirection",
+    })
     return rels
 
 

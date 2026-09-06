@@ -1,0 +1,25 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    5000,
+    SELECTCOLUMNS(
+        FILTER('gold_capacity_items', 'gold_capacity_items'[run_id] = LatestRun),
+        "capacity_id", 'gold_capacity_items'[capacity_id],
+        "capacity_name", 'gold_capacity_items'[capacity_name],
+        "sku", 'gold_capacity_items'[sku],
+        "workspace_id", 'gold_capacity_items'[workspace_id],
+        "workspace_name", 'gold_capacity_items'[workspace_name],
+        "item_id", 'gold_capacity_items'[item_id],
+        "item_name", 'gold_capacity_items'[item_name],
+        "item_type", 'gold_capacity_items'[item_type],
+        "workspace_scope_limited", 'gold_capacity_items'[workspace_scope_limited]
+    ),
+    [capacity_name], ASC,
+    [workspace_name], ASC,
+    [item_type], ASC,
+    [item_name], ASC
+)

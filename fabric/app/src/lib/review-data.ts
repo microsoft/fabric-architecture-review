@@ -45,12 +45,46 @@ export interface DaxSummary {
 
 export interface ReviewFinding {
     id: string;
-    dimension: ReviewDimension;
+    dimension: AssessmentDimension;
     severity: FindingSeverity;
     title: string;
     affected: string;
     recommendation: string;
     workspaceIds: string[];
+}
+
+export interface CapacityItemDetail {
+    id: string;
+    name: string;
+    type: string;
+    workspaceId: string;
+    workspaceName: string;
+}
+
+export interface CapacityDetail {
+    id: string;
+    name: string;
+    sku: string;
+    kind: string;
+    state: string;
+    region: string;
+    assignedWorkspaceCount: number;
+    observedWorkspaceCount: number;
+    observedItemCount: number;
+    workspaceScopeLimited: boolean;
+    items: CapacityItemDetail[];
+}
+
+export interface TenantSettingChange {
+    id: string;
+    eventTime: string;
+    actor: string;
+    operation: string;
+    settingName: string;
+    oldValue: string;
+    newValue: string;
+    details: string;
+    auditWindowDays: number;
 }
 
 export interface WorkspaceRisk {
@@ -164,6 +198,8 @@ export interface ReviewData {
     workspaceRisks: WorkspaceRisk[];
     estate: TenantEstate;
     daxMeasures: DaxMeasureRisk[];
+    capacities: CapacityDetail[];
+    tenantSettingChanges: TenantSettingChange[];
     source: "preview" | "live";
 }
 
@@ -359,6 +395,15 @@ export const previewReviewData: ReviewData = {
         { capacityId: "cap-prod", capacityName: "Stockholm Production F64", workspaceId: "finance", workspaceName: "Sample Workspace 01", modelId: "finance-sm", modelName: "Sample Model 01", tableName: "Measures", measureName: "Potentially Expensive Sales", riskLevel: "high", riskScore: 80, expressionLength: 105, expressionPreview: "SUMX(FILTER(SalesFact, SalesFact[Amount] > 0), SUMX(CROSSJOIN(Products, Stores), SalesFact[Amount]))", signalCodes: "nested_iterators, crossjoin, whole_table_filter" },
         { capacityId: "cap-prod", capacityName: "Stockholm Production F64", workspaceId: "customer", workspaceName: "Sample Workspace 02", modelId: "customer-sm", modelName: "Sample Model 02", tableName: "Measures", measureName: "Customer Revenue", riskLevel: "medium", riskScore: 28, expressionLength: 78, expressionPreview: "SUMX(FILTER(SalesFact, SalesFact[CustomerId] <> BLANK()), SalesFact[Amount])", signalCodes: "iterator, whole_table_filter" },
         { capacityId: "cap-shared", capacityName: "Nordic Shared F32", workspaceId: "executive", workspaceName: "Sample Workspace 03", modelId: "executive-sm", modelName: "Sample Model 03", tableName: "Measures", measureName: "Total Revenue", riskLevel: "none", riskScore: 0, expressionLength: 22, expressionPreview: "SUM(SalesFact[Amount])", signalCodes: "" },
+    ],
+    capacities: [
+        { id: "cap-prod", name: "Stockholm Production F64", sku: "F64", kind: "Fabric", state: "Active", region: "North Europe", assignedWorkspaceCount: 2, observedWorkspaceCount: 2, observedItemCount: 8, workspaceScopeLimited: false, items: [
+            { id: "finance-sm", name: "Sample Model 01", type: "SemanticModel", workspaceId: "finance", workspaceName: "Sample Workspace 01" },
+            { id: "customer-sm", name: "Sample Model 02", type: "SemanticModel", workspaceId: "customer", workspaceName: "Sample Workspace 02" },
+        ] },
+    ],
+    tenantSettingChanges: [
+        { id: "event-1", eventTime: "2026-06-10T09:42:00Z", actor: "sample.admin@example.com", operation: "UpdatedAdminFeatureSwitch", settingName: "Block ResourceKey authentication", oldValue: "Disabled", newValue: "Enabled", details: "Sample security-hardening change", auditWindowDays: 7 },
     ],
     source: "preview",
 };

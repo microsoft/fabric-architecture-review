@@ -73,6 +73,46 @@ def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
     return []
 
 
+def _workspace_items(workspace: Dict[str, Any]) -> List[Dict[str, Any]]:
+    excluded = {"folders", "users", "workbooks", "dashboardTiles", "widgets",
+                "dataSourceInstances", "datasourceUsages"}
+    items = []
+    seen = set()
+    for item_type, values in workspace.items():
+        if item_type in excluded or not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            item_id = value.get("id") or value.get("objectId")
+            if not item_id or str(item_id) in seen:
+                continue
+            seen.add(str(item_id))
+            items.append({
+                "id": item_id,
+                "name": value.get("name") or value.get("displayName") or item_id,
+                "type": item_type,
+            })
+    return items
+
+
+def _capacity_workspace_details(capacity: Dict[str, Any], workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    capacity_id = str(capacity.get("id") or "").lower()
+    details = []
+    for workspace in workspaces:
+        if str(workspace.get("capacityId") or "").lower() != capacity_id:
+            continue
+        items = _workspace_items(workspace)
+        details.append({
+            "id": workspace.get("id") or workspace.get("objectId"),
+            "name": workspace.get("name"),
+            "itemCount": len(items),
+            "items": items[:50],
+            "itemsTruncated": len(items) > 50,
+        })
+    return details
+
+
 def _capacity_environment(
     capacity: Dict[str, Any], derived_environments: set[str], override: Dict[str, Any] | None = None,
 ) -> str:
@@ -234,6 +274,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                                      "attestation is stale."),
                           "subscriptionsScanned": azure_auto.get("subscriptionsScanned"),
                           "currentlyPaused": len(paused),
+                          "nonProductionCapacities": [c.get("displayName") for c in nonprod_capacities],
                           "capacitiesAtScan": cap_states},
                 recommendation=("Either grant the signed-in user Reader on the subscription that hosts "
                                 "the automation account / Logic App and re-run, or unset "
@@ -249,6 +290,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                                      "so this finding records only the attestation plus the current "
                                      "capacity state at scan time."),
                           "currentlyPaused": len(paused),
+                          "nonProductionCapacities": [c.get("displayName") for c in nonprod_capacities],
                           "capacitiesAtScan": cap_states},
                 recommendation=("Run `python -m collectors.azure_capacity_automation` (or include it in "
                                 "scripts/powershell/01_collect.ps1) to auto-detect the runbooks / Logic Apps that "
@@ -266,6 +308,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                                      "CAPACITY_AUTO_PAUSE_CONFIGURED=true in .env to enable the Azure "
                                      "ARM auto-detection collector."),
                           "currentlyPaused": len(paused),
+                          "nonProductionCapacities": [c.get("displayName") for c in nonprod_capacities],
                           "capacitiesAtScan": cap_states},
                 recommendation=("If a runbook / Logic App pauses these capacities, set "
                                 "CAPACITY_AUTO_PAUSE_CONFIGURED=true and re-run; the collector will "
@@ -301,17 +344,39 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     if rule:
         if not capacities:
             findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
+        elif (caps_raw or {}).get("workspaceScopeLimited") or any(
+                c.get("workspaceScopeLimited") for c in capacities):
+            findings.append(make_finding(
+                rule, dimension="cost", status="missing_evidence",
+                title="Large-capacity workspace utilization needs a tenant-wide workspace scan",
+                evidence={
+                    "reason": "WORKSPACE_IDS limited the workspace-to-capacity mapping.",
+                    "capacityCount": len(capacities),
+                    "requiredScope": "tenant-wide",
+                },
+                recommendation=("Run the workspace collectors without WORKSPACE_IDS before using workspace "
+                                "counts to right-size a capacity."),
+            ))
         else:
             under = [c for c in capacities
                      if LARGE_SKU_PATTERN.match(c.get("sku") or "")
                      and c.get("assignedWorkspaceCount", 0) < SMALL_WORKSPACE_THRESHOLD]
             status = "pass" if not under else "fail"
+            capacity_details = []
+            for capacity in under:
+                workspace_details = _capacity_workspace_details(capacity, workspaces)
+                capacity_details.append({
+                    "id": capacity.get("id"),
+                    "name": capacity.get("displayName"),
+                    "sku": capacity.get("sku"),
+                    "workspaceCount": capacity.get("assignedWorkspaceCount"),
+                    "itemCount": sum(w["itemCount"] for w in workspace_details),
+                    "workspaces": workspace_details,
+                })
             findings.append(make_finding(
                 rule, dimension="cost", status=status,
                 title=f"Large capacities (F64+) hosting fewer than {SMALL_WORKSPACE_THRESHOLD} workspaces",
-                evidence={"count": len(under),
-                          "capacities": [{"name": c.get("displayName"), "sku": c.get("sku"),
-                                          "workspaces": c.get("assignedWorkspaceCount")} for c in under]},
+                evidence={"count": len(under), "capacities": capacity_details},
                 recommendation="Right-size: either consolidate workspaces onto this capacity or downgrade the SKU."
             ))
 

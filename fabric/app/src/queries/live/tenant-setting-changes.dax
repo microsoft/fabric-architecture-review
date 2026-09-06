@@ -1,0 +1,22 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+DEFINE
+    VAR LatestRun = MAXX(FILTER('gold_run_summary', 'gold_run_summary'[is_latest] = TRUE()), 'gold_run_summary'[run_id])
+EVALUATE
+TOPN(
+    1000,
+    SELECTCOLUMNS(
+        FILTER('gold_tenant_setting_changes', 'gold_tenant_setting_changes'[run_id] = LatestRun),
+        "event_id", 'gold_tenant_setting_changes'[event_id],
+        "event_time", 'gold_tenant_setting_changes'[event_time],
+        "actor", 'gold_tenant_setting_changes'[actor],
+        "operation", 'gold_tenant_setting_changes'[operation],
+        "setting_name", 'gold_tenant_setting_changes'[setting_name],
+        "old_value", 'gold_tenant_setting_changes'[old_value],
+        "new_value", 'gold_tenant_setting_changes'[new_value],
+        "change_details", 'gold_tenant_setting_changes'[change_details],
+        "audit_window_days", 'gold_tenant_setting_changes'[audit_window_days]
+    ),
+    [event_time], DESC
+)
