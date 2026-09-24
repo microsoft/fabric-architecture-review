@@ -20,6 +20,10 @@ if [[ -f .env ]]; then
     set +a
 fi
 
+# Keep skipped snapshots fresh without installing Fabric-only dependencies.
+export VERTIPAQ_STATS_SKIP=true
+export BEST_PRACTICES_SKIP=true
+
 OUT_DIR="${OUTPUT_DIR:-output}"
 RAW_DIR="$OUT_DIR/raw"
 mkdir -p "$RAW_DIR"
@@ -50,8 +54,8 @@ invoke_collector "collectors.semantic_models"           "Semantic models + refre
 invoke_collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
 invoke_collector "collectors.dax_analysis"               "Static DAX metadata normalization (no query execution)"
 invoke_collector "collectors.dataflows"                  "Dataflow Gen2 inventory and static Power Query evidence"
-invoke_collector "collectors.vertipaq_stats"            "VertiPaq Analyzer stats per semantic model (Fabric-only; size, cardinality, encoding via semantic-link-labs)"
-invoke_collector "collectors.best_practices"            "Best Practice Analyzer + Direct Lake fallback + Delta + capacity readiness (Fabric-only; semantic-link-labs)"
+invoke_collector "collectors.vertipaq_stats"            "VertiPaq Analyzer (skipped locally; Fabric-only)"
+invoke_collector "collectors.best_practices"            "Semantic Link BPA and health analysis (skipped locally; Fabric-only)"
 invoke_collector "collectors.lakehouse_warehouse"       "Lakehouses + Warehouses + table metadata"
 invoke_collector "collectors.pipelines_notebooks"       "Pipelines + Notebooks + recent job runs"
 invoke_collector "collectors.pipeline_definitions"      "Pipeline + Notebook definitions (getDefinition)"

@@ -36,6 +36,10 @@ All notable changes to this project are documented in this file.
 
 ### Reliability and deployment
 
+- Local PowerShell/Bash collection enforces the existing skip flags for
+  Fabric-only VertiPaq and Semantic Link BPA/health analysis, without importing
+  or installing their SDK. Skipped snapshots replace stale evidence. Fabric
+  notebooks and shared collector code are unchanged.
 - Improved long-running collection, workspace-membership evidence and review-history recovery. Missing evidence is distinguished from a successful empty result.
 - Setup reuses compatible owner models, upgrades recognized older contracts in place, and accepts equivalent report bindings without recreating artifacts. Unrecognized contract or binding changes still stop deployment.
 - Setup organizes FAR-owned items into Reporting, Pipelines, Ontology, Agents and Notebooks folders without recreating them. Only the Lakehouse and imported setup notebook remain at the root; 06 joins the other deployed notebooks in Notebooks, including after standalone reruns.

@@ -75,6 +75,15 @@ For an unattended identity or Conditional Access restrictions, use the
 
 ## 4. Run in order
 
+The local PowerShell/Bash launchers enforce `VERTIPAQ_STATS_SKIP=true` and
+`BEST_PRACTICES_SKIP=true` after loading `.env`, even when that file sets them
+to false. These collectors write explicit skipped snapshots without importing
+or installing `semantic-link-labs`, replacing old evidence so it cannot be
+mistaken for results from this run. When invoking either Python module directly,
+set the corresponding skip flag in the process environment yourself.
+Fabric's `01_Collect` notebook and shared collector code are unchanged; use the
+[Fabric deployment](../fabric/DEPLOYMENT.md) for VertiPaq and BPA/health evidence.
+
 **Windows PowerShell** — stop if a stage reports failure:
 
 ```powershell

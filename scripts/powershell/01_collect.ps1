@@ -14,6 +14,10 @@ try {
         }
     }
 
+    # Keep skipped snapshots fresh without installing Fabric-only dependencies.
+    $env:VERTIPAQ_STATS_SKIP = "true"
+    $env:BEST_PRACTICES_SKIP = "true"
+
     $outDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output" }
     $rawDir = Join-Path $outDir "raw"
     New-Item -ItemType Directory -Force -Path $rawDir | Out-Null
@@ -41,8 +45,8 @@ try {
     Invoke-Collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
     Invoke-Collector "collectors.dax_analysis"       "Static DAX metadata normalization (no query execution)"
     Invoke-Collector "collectors.dataflows"          "Dataflow Gen2 inventory and static Power Query evidence"
-    Invoke-Collector "collectors.vertipaq_stats"       "VertiPaq Analyzer stats per semantic model (Fabric-only; size, cardinality, encoding via semantic-link-labs)"
-    Invoke-Collector "collectors.best_practices"       "Best Practice Analyzer + Direct Lake fallback + Delta + capacity readiness (Fabric-only; semantic-link-labs)"
+    Invoke-Collector "collectors.vertipaq_stats"       "VertiPaq Analyzer (skipped locally; Fabric-only)"
+    Invoke-Collector "collectors.best_practices"       "Semantic Link BPA and health analysis (skipped locally; Fabric-only)"
     Invoke-Collector "collectors.lakehouse_warehouse"  "Lakehouses + Warehouses + table metadata"
     Invoke-Collector "collectors.pipelines_notebooks"  "Pipelines + Notebooks + recent job runs"
     Invoke-Collector "collectors.pipeline_definitions" "Pipeline + Notebook definitions (getDefinition)"
