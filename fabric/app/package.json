@@ -4,7 +4,7 @@
   "license": "MIT",
   "author": "Microsoft",
   "private": true,
-  "version": "2026.9.1",
+  "version": "2026.9.2",
   "type": "module",
   "scripts": {
     "generate:fabric": "node ./node_modules/@microsoft/fabric-app-data-cli/dist/index.js generate -o src/fabric.generated.ts",
@@ -16,9 +16,10 @@
     "build:fabric": "npm run generate:fabric && tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "pretest": "npm run generate:fabric",
     "test": "vitest run",
+    "pretest:watch": "npm run generate:fabric",
     "test:watch": "vitest",
-    "test:fabric": "node scripts/open-fabric-portal.mjs",
     "agent:ask": "node scripts/query-data-agent.mjs"
   },
   "dependencies": {
@@ -39,6 +40,11 @@
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.0",
     "three": "^0.185.1"
+  },
+  "overrides": {
+    "@opentelemetry/core@^2.0.0": "2.11.0",
+    "@opentelemetry/propagator-jaeger@^2.0.0": "2.11.0",
+    "protobufjs@>=8.0.0 <8.6.6": "8.8.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",

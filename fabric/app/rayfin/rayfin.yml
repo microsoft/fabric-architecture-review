@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 id: fabric-architecture-review
 name: FAR
 version: 1.0.0

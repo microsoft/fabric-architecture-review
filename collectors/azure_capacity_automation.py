@@ -41,7 +41,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from dotenv import load_dotenv
 
-from collectors._http import get_json, request
+from collectors._http import Headers, HttpError, get_json, paginate_value, request
+from collectors._common import record_collection_failure
 from collectors.auth import ARM_SCOPE, get_default_provider
 
 ARM = "https://management.azure.com"
@@ -59,61 +60,51 @@ def _truthy(value: Optional[str]) -> bool:
     return (value or "").strip().lower() in ("1", "true", "yes", "y", "on", "auto", "detect")
 
 
-def _arm_paginate(url: str, headers: Dict[str, str]) -> Iterable[Dict[str, Any]]:
+def _arm_paginate(url: str, headers: Headers) -> Iterable[Dict[str, Any]]:
     """ARM pagination uses ``nextLink`` (not ``@odata.nextLink``)."""
-    next_url: Optional[str] = url
-    while next_url:
-        r = request("GET", next_url, headers)
-        if r.status_code in (401, 403, 404):
-            return
-        if r.status_code != 200 or not r.content:
-            return
-        payload = r.json()
-        for item in payload.get("value") or []:
-            yield item
-        next_url = payload.get("nextLink")
+    return paginate_value(url, headers)
 
 
-def _list_subscriptions(headers: Dict[str, str]) -> List[Dict[str, Any]]:
+def _list_subscriptions(headers: Headers) -> List[Dict[str, Any]]:
     return list(_arm_paginate(f"{ARM}/subscriptions?api-version=2022-12-01", headers))
 
 
-def _list_fabric_capacities(headers: Dict[str, str], sub_id: str) -> List[Dict[str, Any]]:
+def _list_fabric_capacities(headers: Headers, sub_id: str) -> List[Dict[str, Any]]:
     url = f"{ARM}/subscriptions/{sub_id}/providers/Microsoft.Fabric/capacities?api-version=2023-11-01"
     return list(_arm_paginate(url, headers))
 
 
-def _list_automation_accounts(headers: Dict[str, str], sub_id: str) -> List[Dict[str, Any]]:
+def _list_automation_accounts(headers: Headers, sub_id: str) -> List[Dict[str, Any]]:
     url = (f"{ARM}/subscriptions/{sub_id}/providers/Microsoft.Automation/"
            "automationAccounts?api-version=2023-11-01")
     return list(_arm_paginate(url, headers))
 
 
-def _list_logic_workflows(headers: Dict[str, str], sub_id: str) -> List[Dict[str, Any]]:
+def _list_logic_workflows(headers: Headers, sub_id: str) -> List[Dict[str, Any]]:
     url = (f"{ARM}/subscriptions/{sub_id}/providers/Microsoft.Logic/"
            "workflows?api-version=2019-05-01")
     return list(_arm_paginate(url, headers))
 
 
-def _list_runbooks(headers: Dict[str, str], aa_id: str) -> List[Dict[str, Any]]:
+def _list_runbooks(headers: Headers, aa_id: str) -> List[Dict[str, Any]]:
     url = f"{ARM}{aa_id}/runbooks?api-version=2023-11-01"
     return list(_arm_paginate(url, headers))
 
 
-def _runbook_content(headers: Dict[str, str], runbook_id: str) -> str:
+def _runbook_content(headers: Headers, runbook_id: str) -> str:
     url = f"{ARM}{runbook_id}/content?api-version=2023-11-01"
     r = request("GET", url, headers, timeout=60)
-    if r.status_code != 200 or not r.content:
-        return ""
+    if r.status_code != 200:
+        raise HttpError(f"GET {url} returned HTTP {r.status_code}", status_code=r.status_code)
     return r.text[:RUNBOOK_FETCH_BYTE_CAP]
 
 
-def _runbook_schedules(headers: Dict[str, str], aa_id: str) -> List[Dict[str, Any]]:
+def _runbook_schedules(headers: Headers, aa_id: str) -> List[Dict[str, Any]]:
     url = f"{ARM}{aa_id}/jobSchedules?api-version=2023-11-01"
     return list(_arm_paginate(url, headers))
 
 
-def _schedule(headers: Dict[str, str], aa_id: str, name: str) -> Optional[Dict[str, Any]]:
+def _schedule(headers: Headers, aa_id: str, name: str) -> Optional[Dict[str, Any]]:
     url = f"{ARM}{aa_id}/schedules/{name}?api-version=2023-11-01"
     payload = get_json(url, headers, allow=(200, 401, 403, 404))
     return payload
@@ -134,7 +125,7 @@ def _matches_capacity(text: str, capacity_ids: List[str], capacity_names: List[s
 
 
 def _scan_subscription(
-    headers: Dict[str, str], sub_id: str, sub_name: str
+    headers: Headers, sub_id: str, sub_name: str
 ) -> Dict[str, Any]:
     print(f"  [{sub_name or sub_id}] listing Fabric capacities...")
     caps = _list_fabric_capacities(headers, sub_id)
@@ -164,26 +155,16 @@ def _scan_subscription(
         aa_id = aa.get("id") or ""
         aa_name = aa.get("name") or "(unknown)"
         aa_rg = aa_id.split("/resourceGroups/")[1].split("/")[0] if "/resourceGroups/" in aa_id else None
-        try:
-            runbooks = _list_runbooks(headers, aa_id)
-        except Exception as exc:
-            print(f"      ! list runbooks failed for {aa_name}: {exc}")
-            runbooks = []
+        runbooks = _list_runbooks(headers, aa_id)
         if not runbooks:
             continue
         runbooks = runbooks[:RUNBOOKS_PER_AA_CAP]
         # Pre-fetch all schedules linked to this AA once (cheap, bounded).
-        try:
-            job_schedules = _runbook_schedules(headers, aa_id)
-        except Exception:
-            job_schedules = []
+        job_schedules = _runbook_schedules(headers, aa_id)
         for rb in runbooks:
             rb_name = rb.get("name") or "(unknown)"
             rb_id = rb.get("id") or ""
-            try:
-                content = _runbook_content(headers, rb_id)
-            except Exception:
-                content = ""
+            content = _runbook_content(headers, rb_id)
             if not content:
                 continue
             # Cheap pre-filter: avoid full match on every runbook unless one
@@ -272,6 +253,7 @@ def _scan_subscription(
     }
 
 
+@record_collection_failure("azure_capacity_automation.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     load_dotenv()
     target_dir = Path(output_dir)
@@ -290,7 +272,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
     provider = get_default_provider()
     try:
-        headers = provider.headers(scope=ARM_SCOPE)
+        provider.headers(scope=ARM_SCOPE)
     except Exception as exc:  # noqa: BLE001 - surface any token failure as a clean skip
         out = {
             "skipped": True,
@@ -310,6 +292,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         )
         return target
 
+    headers = lambda: provider.headers(scope=ARM_SCOPE)
     print("Azure capacity automation: listing subscriptions...")
     subs = _list_subscriptions(headers)
     explicit = (os.environ.get("AZURE_SUBSCRIPTION_ID") or "").strip()
@@ -320,13 +303,17 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     per_sub: List[Dict[str, Any]] = []
     all_hits: List[Dict[str, Any]] = []
     all_candidates: List[Dict[str, Any]] = []
+    collection_errors: List[Dict[str, Any]] = []
     for s in subs:
         sub_id = s.get("subscriptionId")
         sub_name = s.get("displayName") or sub_id
         try:
             result = _scan_subscription(headers, sub_id, sub_name)
-        except Exception as exc:
+        except HttpError as exc:
             print(f"  ! subscription {sub_name} failed: {exc}")
+            collection_errors.append({
+                "subscriptionId": sub_id, "statusCode": exc.status_code, "message": str(exc),
+            })
             continue
         per_sub.append(result)
         for hit in result.get("pauseAutomations") or []:
@@ -340,6 +327,8 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
     out = {
         "skipped": False,
+        "collectionComplete": not collection_errors,
+        "collectionErrors": collection_errors,
         "subscriptionsScanned": [{"id": s.get("subscriptionId"),
                                    "name": s.get("displayName")} for s in subs],
         "perSubscription": per_sub,

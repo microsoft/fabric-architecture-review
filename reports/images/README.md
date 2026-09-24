@@ -1,14 +1,15 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 # Cover logo (optional)
 
-The cover logo is **optional and not shipped** — there is no default logo, so the PDF
-builds with no logo unless you provide one. It does **not** need to be any particular
-brand.
+PDF reports have no cover logo unless you provide a PNG. No particular brand is required.
 
 To add one, either:
 
-- drop a PNG named `logo.png` in this folder, or
-- point the `REPORT_LOGO` environment variable (or the `--logo` flag) at any PNG path.
+- place a PNG named `logo.png` in this folder, or
+- set `REPORT_LOGO` to its path, or pass `--logo <path>` to the
+  [PDF generator](../_generate_pdf.py).
 
-The PDF generator (`reports/_generate_pdf.py`) embeds the PNG as a base64 inline image
-just above the first `<h1>` of the rendered report. If no logo is configured, the PDF
-still builds — just without a cover logo.
+`--logo` takes precedence over `REPORT_LOGO`, then the file in this folder.
+The logo appears above the report title. If a configured file is missing, the
+generator warns and builds the PDF without a logo.

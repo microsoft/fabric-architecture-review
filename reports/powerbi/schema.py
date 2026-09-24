@@ -301,6 +301,7 @@ GOLD_TABLES: List[Table] = [
             _c("run_timestamp", "dateTime"),
             _c("model_id"),
             _c("model_name"),
+            _c("workspace_id"),
             _c("workspace_name"),
             _c("table_name"),
             _c("row_count", "int64"),
@@ -311,7 +312,8 @@ GOLD_TABLES: List[Table] = [
             _c("column_count", "int64"),
             _c("pct_db", "double"),
         ],
-        "VertiPaq per-table footprint for each semantic model.",
+        "VertiPaq per-table footprint for each semantic model. workspace_id is set "
+        "only for unambiguous collector workspace/model-ID provenance, never a name fallback.",
     ),
     Table(
         "gold_model_columns",
@@ -395,12 +397,15 @@ GOLD_TABLES: List[Table] = [
             _c("rule_description"),
             _c("severity"),
             _c("dimension"),
+            _c("workspace_id"),
+            _c("notebook_id"),
             _c("notebook_name"),
             _c("workspace_name"),
             _c("cells"),
             _c("notebook_url"),
         ],
-        "Per-notebook code-smell matches (NBCODE rules).",
+        "Per-notebook code-smell matches (NBCODE rules). Explicit workspace/notebook "
+        "IDs come only from analyzer evidence; legacy name-only evidence has blank IDs.",
     ),
     Table(
         "gold_graph_nodes",
@@ -652,6 +657,60 @@ GOLD_TABLES: List[Table] = [
     ),
 ]
 
+
+_EVIDENCE_REVIEW = [
+    _c("run_id"), _c("run_timestamp", "dateTime"), _c("review_item_key"),
+    _c("workspace_id"), _c("workspace_name"),
+]
+
+GOLD_TABLES.extend([
+    Table("gold_execution_coverage", [
+        *_EVIDENCE_REVIEW, _c("item_id"), _c("item_name"), _c("item_type"),
+        _c("collection_status"), _c("observed_execution_count", "int64"),
+        _c("oldest_start_time", "dateTime"), _c("newest_start_time", "dateTime"),
+        _c("history_scope"), _c("notice"), _c("source"),
+    ], "One collection-coverage observation per item and FAR review. Recent retained API "
+       "history is not guaranteed to cover an entire weekly review interval."),
+    Table("gold_item_executions", [
+        *_EVIDENCE_REVIEW, _c("execution_key"), _c("execution_id"),
+        _c("item_id"), _c("item_name"), _c("item_type"), _c("execution_type"),
+        _c("status"), _c("start_time", "dateTime"), _c("end_time", "dateTime"),
+        _c("duration_ms", "int64"), _c("source"),
+    ], "One observed native refresh or job execution per item and FAR review. The same "
+       "execution_key can recur across reviews; use its latest observation for historical "
+       "status totals. Duration is milliseconds, not CU, cost or a static score."),
+    Table("gold_dataflows", [
+        *_EVIDENCE_REVIEW, _c("dataflow_id"), _c("dataflow_name"),
+        _c("definition_status"), _c("query_count", "int64"),
+        _c("flagged_query_count", "int64"), _c("notice"),
+    ], "Dataflow Gen2 inventory and static definition coverage per review. Unsupported or "
+       "unavailable definitions are evidence gaps, not clean dataflows."),
+    Table("gold_dataflow_queries", [
+        *_EVIDENCE_REVIEW, _c("dataflow_id"), _c("dataflow_name"),
+        _c("query_name"), _c("signal_codes"), _c("signal_count", "int64"),
+        _c("recommendation"), _c("notice"),
+    ], "Metadata-only Power Query M signals per Dataflow Gen2 query and review. No M source, "
+       "connection literals or customer rows. Signals do not prove folding or runtime impact."),
+    Table("gold_dax_object_coverage", [
+        *_EVIDENCE_REVIEW, _c("model_id"), _c("model_name"),
+        _c("definition_status"), _c("object_count", "int64"),
+        _c("flagged_object_count", "int64"), _c("notice"),
+    ], "Non-measure DAX definition coverage per semantic model and review. Measures remain "
+       "in gold_dax_models/gold_dax_measures; report visual calculations are not collected."),
+    Table("gold_dax_objects", [
+        *_EVIDENCE_REVIEW, _c("model_id"), _c("model_name"),
+        _c("table_name"), _c("object_type"), _c("object_name"),
+        _c("risk_level"), _c("risk_rank", "int64"), _c("risk_score", "int64"),
+        _c("expression_length", "int64"), _c("signal_codes"), _c("signal_details_json"),
+    ], "Typed calculated columns, calculated tables and calculation items per review. "
+       "Static syntax signals only; no expressions and no measured runtime or CU impact."),
+])
+
+EVIDENCE_RELATIONSHIPS = {
+    "gold_item_executions": "gold_execution_coverage",
+    "gold_dataflow_queries": "gold_dataflows",
+    "gold_dax_objects": "gold_dax_object_coverage",
+}
 
 GOLD_TABLES_BY_NAME: Dict[str, Table] = {t.name: t for t in GOLD_TABLES}
 

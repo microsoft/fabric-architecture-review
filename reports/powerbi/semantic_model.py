@@ -21,7 +21,7 @@ import json
 import uuid
 from typing import Any, Dict, List
 
-from reports.powerbi.schema import GOLD_TABLES, tmdl_type
+from reports.powerbi.schema import EVIDENCE_RELATIONSHIPS, GOLD_TABLES, tmdl_type
 
 _NS = uuid.UUID("6f3b1c2a-0d4e-4a5b-9c7d-1e2f3a4b5c6d")
 
@@ -63,6 +63,29 @@ _WEB_URL_COLUMNS = {"microsoft_learn_url", "notebook_url"}
 _COLUMN_DESCRIPTIONS: Dict[str, str] = {
     "run_id": "Unique id of the review run this row belongs to; the join key to gold_run_summary (the run dimension).",
     "run_timestamp": "UTC timestamp when the review run executed. Use for trend-over-time analysis.",
+    "review_item_key": "Per-review workspace/item identity. Joins native evidence to its coverage record; never join by display name.",
+    "execution_key": "Stable execution identity across FAR snapshots. Repeated observations are not additional executions.",
+    "execution_id": "Native refresh or job execution identifier returned by its source API.",
+    "execution_type": "Native refresh or job category, not a DAX object type.",
+    "start_time": "Observed execution start time in UTC; blank if unavailable or invalid.",
+    "end_time": "Observed execution end time in UTC; blank for active or unavailable completions.",
+    "duration_ms": "Observed execution duration in milliseconds; blank when it cannot be established. Not CU or a DAX score.",
+    "history_scope": "Collection scope and retention limitation. Recent retained API snapshots do not guarantee complete weekly history.",
+    "collection_status": "Availability of native execution evidence for this item; always inspect with history_scope and notice.",
+    "observed_execution_count": "Execution records observed for this item in this FAR snapshot, not a complete lifetime count.",
+    "oldest_start_time": "Oldest observed execution start time in this collection snapshot.",
+    "newest_start_time": "Newest observed execution start time in this collection snapshot.",
+    "dataflow_id": "Fabric Dataflow Gen2 identifier; use with workspace_id to disambiguate names.",
+    "dataflow_name": "Dataflow Gen2 display name.",
+    "query_name": "Power Query query name; no M expression or source literal is exposed.",
+    "query_count": "Number of queries parsed from an available Dataflow Gen2 definition.",
+    "flagged_query_count": "Queries containing static M review signals; not measured folding failures.",
+    "signal_count": "Number of distinct static signal types observed in this query.",
+    "object_type": "Object category reported by this evidence source.",
+    "object_name": "Metadata object name; interpret with its evidence source and object type.",
+    "object_count": "Number of non-measure DAX objects extracted from a model definition.",
+    "flagged_object_count": "Non-measure DAX objects with medium or high static syntax risk; not observed runtime failures.",
+    "notice": "Evidence limitation or collection notice; missing evidence must not be interpreted as a pass.",
     "client_name": "Name of the reviewed customer / tenant for this engagement.",
     "engagement_name": "Name of the architecture-review engagement.",
     "reviewer_name": "Person who ran the review.",
@@ -105,8 +128,8 @@ _COLUMN_DESCRIPTIONS: Dict[str, str] = {
     "workspace_id": "Fabric workspace identifier.",
     "workspace_name": "Fabric workspace display name.",
     "on_capacity": "True when the workspace is assigned to a dedicated capacity.",
-    "item_count": "Number of Fabric items (models, reports, notebooks, pipelines, lakehouses) in the workspace.",
-    "admin_count": "Number of workspace admins. 1 = single owner / orphan risk (governance rule GOV-001).",
+    "item_count": "Number of observed Fabric items in the workspace. Blank means inventory unavailable, not zero items.",
+    "admin_count": "Number of workspace admins. Blank means membership unavailable, not zero admins. 1 = single owner / orphan risk (governance rule GOV-001).",
     "last_activity": "Most recent activity-log event for the workspace; blank if there was none in the review window.",
     "is_inactive": "True when the workspace had no activity in the review window - an archival / close candidate (GOV-006).",
     "model_id": "Semantic model identifier.",
@@ -150,6 +173,12 @@ _COLUMN_DESCRIPTIONS_BY_TABLE: Dict[tuple, str] = {
     ("gold_model_columns", "encoding"): "VertiPaq column encoding: VALUE (numeric) or HASH (dictionary).",
     ("gold_model_columns", "data_type"): "Column data type in the semantic model.",
     ("gold_dax_measures", "risk_score"): "Metadata-only DAX static-risk score 0-100, summed from explainable syntax signals; not measured duration, CU, or cost.",
+    ("gold_item_executions", "status"): "Normalized native execution status. Failed, cancelled, active and unknown are distinct; not a FAR finding outcome.",
+    ("gold_dataflows", "definition_status"): "Availability and parsing coverage of the Dataflow Gen2 definition. Missing, unsupported or partial evidence is not clean.",
+    ("gold_dax_object_coverage", "definition_status"): "Availability and parsing coverage for non-measure DAX objects. Does not include visual calculations.",
+    ("gold_dax_objects", "object_type"): "calculated_column, calculated_table or calculation_item; never a measure or visual calculation.",
+    ("gold_dax_objects", "object_name"): "DAX object's metadata name, disambiguated by workspace/model/table and object_type.",
+    ("gold_dax_objects", "risk_score"): "Metadata-only non-measure DAX static-risk score; not measured duration, CU or cost.",
     ("gold_release", "status"): "Deployed-version status line, e.g. 'FAR v2026.06.0 - up to date'.",
     ("gold_release", "update_note"): "Upgrade guidance shown only when a newer release exists.",
 }
@@ -523,6 +552,46 @@ def _severity_matrix_measures() -> List[Dict[str, Any]]:
     return out
 
 
+def _native_evidence_measures(table_name: str) -> List[Dict[str, Any]]:
+    definitions = {
+        "gold_item_executions": [
+            ("Observed Execution IDs", "DISTINCTCOUNT(gold_item_executions[execution_key])", "0",
+             "Distinct observed native execution identities in the current filter context, not latest-observation status totals. "
+             "Historical status totals require selecting the latest observation per execution_key before status/time filters. "
+             "Not complete source history."),
+            ("Execution Observations", "COUNTROWS(gold_item_executions)", "0",
+             "Snapshot observations. The same execution can appear in more than one FAR review."),
+            ("Failed Executions in Review",
+             'IF(HASONEVALUE(gold_run_summary[run_id]), CALCULATE(DISTINCTCOUNT(gold_item_executions[execution_key]), KEEPFILTERS(gold_item_executions[status] = "failed")))',
+             "0", "Failed execution identities in a single selected review. Blank across multiple reviews to avoid counting outdated statuses."),
+            ("Max Observed Execution Seconds", "DIVIDE(MAX(gold_item_executions[duration_ms]), 1000)", "0.0",
+             "Maximum observed native wall-clock duration in seconds. Not DAX query time, CU or estimated savings."),
+        ],
+        "gold_dataflows": [
+            ("Dataflow Definition Observations", "COUNTROWS(gold_dataflows)", "0",
+             "Dataflow Gen2 inventory/coverage records in the selected FAR review context."),
+        ],
+        "gold_dataflow_queries": [
+            ("Dataflow Query Observations", "COUNTROWS(gold_dataflow_queries)", "0",
+             "Parsed query observations in context; repeated reviews may observe the same query again."),
+            ("Flagged Dataflow Queries",
+             "CALCULATE(COUNTROWS(gold_dataflow_queries), KEEPFILTERS(gold_dataflow_queries[signal_count] > 0))",
+             "0", "Query observations containing conservative static M review signals, not measured runtime faults."),
+        ],
+        "gold_dax_objects": [
+            ("DAX Object Observations", "COUNTROWS(gold_dax_objects)", "0",
+             "Non-measure DAX object observations. Existing DAX Measures metrics remain measure-only."),
+            ("Flagged DAX Objects",
+             'CALCULATE(COUNTROWS(gold_dax_objects), KEEPFILTERS(gold_dax_objects[risk_level] IN {"medium", "high"}))',
+             "0", "Non-measure DAX observations with medium/high static risk, not proven performance failures."),
+        ],
+    }
+    return [{
+        "name": name, "expression": expression, "formatString": format_string,
+        "description": description, "lineageTag": _lineage(table_name, "measure", name),
+    } for name, expression, format_string, description in definitions.get(table_name, [])]
+
+
 def _table(table) -> Dict[str, Any]:
     t: Dict[str, Any] = {
         "name": table.name,
@@ -565,13 +634,16 @@ def _table(table) -> Dict[str, Any]:
         t["measures"] = _agent_eval_measures()
     if table.name in (PARTITION_TABLE, RELATIONSHIP_TABLE, HIERARCHY_TABLE):
         t["measures"] = _internals_measures(table.name)
+    native_measures = _native_evidence_measures(table.name)
+    if native_measures:
+        t["measures"] = native_measures
     return t
 
 
 def _relationships() -> List[Dict[str, Any]]:
     rels = []
     for table in GOLD_TABLES:
-        if table.name in (RUN_TABLE, "gold_cost_impact_items"):
+        if table.name in (RUN_TABLE, "gold_cost_impact_items") or table.name in EVIDENCE_RELATIONSHIPS:
             continue
         if not any(c.name == "run_id" for c in table.columns):
             continue
@@ -591,6 +663,13 @@ def _relationships() -> List[Dict[str, Any]]:
         "toColumn": "impact_key",
         "crossFilteringBehavior": "oneDirection",
     })
+    for child, parent in EVIDENCE_RELATIONSHIPS.items():
+        rels.append({
+            "name": _lineage("rel", child, "coverage"),
+            "fromTable": child, "fromColumn": "review_item_key",
+            "toTable": parent, "toColumn": "review_item_key",
+            "crossFilteringBehavior": "oneDirection",
+        })
     return rels
 
 

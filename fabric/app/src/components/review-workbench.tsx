@@ -39,6 +39,7 @@ import {
     X,
 } from "lucide-react";
 import { AgentPanel } from "@/components/agent-panel";
+import { NativeEvidenceView } from "@/components/native-evidence";
 import type { EstateReviewArea, EstateReviewContext } from "@/components/estate-map";
 import { LensBarPlot, OverviewPlots, type LensBarDatum } from "@/components/review-plots";
 import { ReviewDataProvider, useReviewData } from "@/hooks/review-data.context";
@@ -58,7 +59,7 @@ function EstateMapFallback({ compact = false }: { compact?: boolean }) {
     return <div className={cn("campus-explorer grid place-items-center bg-muted text-200 text-muted-foreground", compact && "campus-explorer-compact")}>Loading estate topology…</div>;
 }
 
-type ViewId = "overview" | "findings" | EstateReviewArea | "estate" | "dax" | "tenant-settings";
+type ViewId = "overview" | "findings" | EstateReviewArea | "estate" | "dax" | "tenant-settings" | "native-evidence";
 
 const navItems = [
     { id: "overview" as const, label: "Overview", icon: LayoutDashboard },
@@ -68,6 +69,7 @@ const navItems = [
     { id: "tenant-settings" as const, label: "Tenant settings", icon: Settings2 },
     { id: "models" as const, label: "Semantic model optimization", icon: Database },
     { id: "dax" as const, label: "DAX Analyzer", icon: Code2 },
+    { id: "native-evidence" as const, label: "Native evidence", icon: Activity },
     { id: "efficiency" as const, label: "Performance + cost", icon: Gauge },
     { id: "architecture" as const, label: "Architecture", icon: GitFork },
     { id: "notebooks" as const, label: "Notebooks", icon: BookOpenCheck },
@@ -81,6 +83,7 @@ const viewTitles: Record<ViewId, string> = {
     "tenant-settings": "Tenant settings",
     models: "Semantic model optimization",
     dax: "DAX Analyzer",
+    "native-evidence": "Native evidence",
     efficiency: "Performance and cost",
     architecture: "Architecture",
     notebooks: "Notebook engineering",
@@ -91,6 +94,7 @@ const severityClass: Record<FindingSeverity, string> = {
     high: "bg-high-soft text-high-strong",
     medium: "bg-warning-soft text-warning-strong",
     low: "bg-info-soft text-info-strong",
+    info: "bg-info-soft text-info-strong",
 };
 
 const metricDefinitions: Record<string, string> = {
@@ -181,7 +185,7 @@ function Sidebar({ currentView, onNavigate }: { currentView: ViewId; onNavigate:
                     </div>
                 </div>
             </nav>
-            <div className="border-t border-border p-400 text-100 text-muted-foreground">Release 2026.09.1 · {source === "live" ? "Live" : "Preview"}</div>
+            <div className="border-t border-border p-400 text-100 text-muted-foreground">Release 2026.09.2 · {source === "live" ? "Live" : "Preview"}</div>
         </aside>
     );
 }
@@ -309,8 +313,20 @@ function findingsForWorkspace(findings: ReviewFinding[], workspaceId: string) {
     return workspaceId === "all" ? findings : findings.filter((finding) => finding.workspaceIds.includes(workspaceId));
 }
 
-function FindingRows({ findings }: { findings: ReviewFinding[] }) {
-    return <div className="divide-y divide-border">{findings.map((finding) => <article className="grid gap-300 px-400 py-400 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" key={finding.id}><div><span className={cn("inline-flex rounded-md px-200 py-100 font-monospace text-100 font-semibold", severityClass[finding.severity])}>{finding.id}</span><h4 className="mt-200 text-300 font-semibold">{finding.title}</h4><p className="mt-100 text-100 text-muted-foreground">{finding.affected}</p></div><p className="text-200 leading-300 text-muted-foreground">{finding.recommendation}</p></article>)}</div>;
+function FindingRows({ findings, workspaceId }: { findings: ReviewFinding[]; workspaceId?: string }) {
+    return <div className="divide-y divide-border">{findings.map((finding) => <article className="grid gap-300 px-400 py-400 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" key={finding.id}>
+        <div><span className={cn("inline-flex rounded-md px-200 py-100 font-monospace text-100 font-semibold", severityClass[finding.severity])}>{finding.id}</span><h4 className="mt-200 text-300 font-semibold">{finding.title}</h4><p className="mt-100 text-100 text-muted-foreground">{finding.affected}</p></div>
+        <div><p className="text-200 leading-300 text-muted-foreground">{finding.recommendation}</p>
+            {finding.pipelineEvidence?.status === "error" && <p role="alert" className="mt-200 text-200 text-warning-strong">Structural item evidence unavailable: {finding.pipelineEvidence.message}</p>}
+            {finding.pipelineEvidence?.status === "ready" && <div className="mt-300 text-100">
+                <p className="font-semibold">Static pipeline structure, not observed execution reliability</p>
+                {finding.pipelineEvidence.items.filter((item) => item.signals.length && (!workspaceId || item.workspaceId === workspaceId)).map((item) => <div className="mt-200 break-words" key={`${item.workspaceId}-${item.itemId}`}>
+                    <p className="font-semibold">{item.itemName}</p><p>{item.signals.join(" · ")} · Coverage: {item.coverage}</p>
+                    <p>Workspace: {item.workspaceId} · Item: {item.itemId}</p>
+                </div>)}
+            </div>}
+        </div>
+    </article>)}</div>;
 }
 
 function WorkspacePanel({ onOpenWorkspace }: { onOpenWorkspace: (workspaceId: string) => void }) {
@@ -376,7 +392,7 @@ function FindingsView({ initialWorkspaceId }: { initialWorkspaceId?: string }) {
         .filter((room) => workspaceId === "all" || room.id === workspaceId)
         .map((room) => ({ room, findings: findings.filter((finding) => finding.workspaceIds.includes(room.id)) }))
         .filter((group) => group.findings.length > 0);
-    const unassigned = workspaceId === "all" ? findings.filter((finding) => finding.workspaceIds.length === 0) : [];
+    const unassigned = workspaceId === "all" ? findings.filter((finding) => !finding.workspaceIds.some((id) => estate.rooms.some((room) => room.id === id))) : [];
     return (
         <div className="p-400 md:p-600">
             <div className="mb-500 flex flex-col gap-300 md:flex-row md:items-end md:justify-between">
@@ -387,8 +403,8 @@ function FindingsView({ initialWorkspaceId }: { initialWorkspaceId?: string }) {
                 <WorkspaceSelect rooms={estate.rooms} value={workspaceId} onChange={setWorkspaceId} />
             </div>
             <div className="space-y-400">
-                {workspaceGroups.map(({ room, findings: workspaceFindings }) => <section className="overflow-hidden rounded-xl border border-border bg-card" key={room.id}><div className="flex items-center justify-between border-b border-border bg-secondary px-400 py-300"><div><h3 className="text-300 font-semibold">{room.name}</h3><p className="text-100 text-muted-foreground">{room.domain}</p></div><span className="font-numeric text-200 font-semibold">{workspaceFindings.length} flags</span></div><FindingRows findings={workspaceFindings} /></section>)}
-                {unassigned.length > 0 && <section className="overflow-hidden rounded-xl border border-border bg-card"><div className="border-b border-border bg-secondary px-400 py-300"><h3 className="text-300 font-semibold">Tenant or capacity scope</h3></div><FindingRows findings={unassigned} /></section>}
+                {workspaceGroups.map(({ room, findings: workspaceFindings }) => <section className="overflow-hidden rounded-xl border border-border bg-card" key={room.id}><div className="flex items-center justify-between border-b border-border bg-secondary px-400 py-300"><div><h3 className="text-300 font-semibold">{room.name}</h3><p className="text-100 text-muted-foreground">{room.domain}</p></div><span className="font-numeric text-200 font-semibold">{workspaceFindings.length} flags</span></div><FindingRows findings={workspaceFindings} workspaceId={room.id} /></section>)}
+                {unassigned.length > 0 && <section className="overflow-hidden rounded-xl border border-border bg-card"><div className="border-b border-border bg-secondary px-400 py-300"><h3 className="text-300 font-semibold">Tenant, capacity or unresolved workspace scope</h3></div><FindingRows findings={unassigned} /></section>}
                 {workspaceGroups.length === 0 && unassigned.length === 0 && <p className="border border-border bg-card p-500 text-200 text-muted-foreground">No findings are linked to this workspace.</p>}
             </div>
         </div>
@@ -818,6 +834,7 @@ function ReviewWorkbenchContent() {
                         {currentView === "tenant-settings" && <TenantSettingsView />}
                         {currentView === "models" && <SemanticModelOptimizationView initialContext={reviewContext ?? undefined} />}
                         {currentView === "dax" && <DaxAnalyzerView />}
+                        {currentView === "native-evidence" && <NativeEvidenceView />}
                         {currentView === "efficiency" && <EfficiencyView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "architecture" && <ArchitectureView initialWorkspaceId={reviewContext?.workspaceId} />}
                         {currentView === "notebooks" && <NotebooksView initialWorkspaceId={reviewContext?.workspaceId} />}

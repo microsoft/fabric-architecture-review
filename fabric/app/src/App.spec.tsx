@@ -8,6 +8,9 @@
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import App from "@/App";
+import { ReviewWorkbench } from "@/components/review-workbench";
+import { previewReviewData } from "@/lib/review-data";
+import { readPipelineEvidence } from "@/lib/pipeline-evidence";
 
 describe("App", () => {
     it("renders without throwing", () => {
@@ -30,6 +33,31 @@ describe("App", () => {
         fireEvent.click(screen.getByRole("button", { name: "Open DAX Analyzer" }));
 
         expect(screen.getByRole("heading", { name: "Review DAX risk patterns" })).toBeInTheDocument();
+    });
+
+    it("opens the native evidence lenses from primary navigation", () => {
+        render(<App />);
+        fireEvent.click(screen.getByRole("button", { name: "Native evidence" }));
+        expect(screen.getByRole("heading", { name: "Inspect observations, signals and gaps" })).toBeInTheDocument();
+        expect(screen.getByText("Synthetic sample evidence")).toBeInTheDocument();
+    });
+
+    it("shows structural findings with concrete IDs and keeps pipeline details in their workspace", () => {
+        const data = { ...previewReviewData, findings: [{
+            id: "ARCH-016", dimension: "Architecture" as const, severity: "medium" as const,
+            title: "Pipeline dependency integrity", affected: "Two pipelines", recommendation: "Repair static dependencies.",
+            workspaceIds: ["finance", "customer"],
+            pipelineEvidence: readPipelineEvidence(JSON.stringify({ items: [
+                { workspace_id: "finance", item_id: "pipeline-finance", item_name: "Finance pipeline", signal_codes: ["dependency_cycle"], coverage_status: "complete" },
+                { workspace_id: "customer", item_id: "pipeline-customer", item_name: "Customer pipeline", signal_codes: ["missing_dependency"], coverage_status: "partial" },
+            ] })),
+        }] };
+        render(<ReviewWorkbench data={data} />);
+        fireEvent.click(screen.getByRole("button", { name: "Findings" }));
+        fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "finance" } });
+        expect(screen.getByText("Workspace: finance · Item: pipeline-finance")).toBeInTheDocument();
+        expect(screen.getByText("Static pipeline structure, not observed execution reliability")).toBeInTheDocument();
+        expect(screen.queryByText("Customer pipeline")).not.toBeInTheDocument();
     });
 
     it("provides keyboard-accessible definitions for overview evidence", () => {

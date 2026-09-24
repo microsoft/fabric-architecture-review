@@ -16,12 +16,20 @@ JSON only. No live data access.
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import excluded_workspace_ids, filter_review_payload
+
+import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
-from reports.powerbi.schema import GOLD_TABLES_BY_NAME, SEVERITY_RANK
+from collectors._common import collection_incomplete
+from reports.powerbi.schema import EVIDENCE_RELATIONSHIPS, GOLD_TABLES_BY_NAME, SEVERITY_RANK
+from reports.execution_history import build_execution_evidence
+from reports.dataflow_evidence import build_dataflow_evidence
+from reports.dax_objects import build_dax_object_evidence
 from analyzers.applicability import classify_workspaces, load_workspace_overrides
 from reports.version import build_release_record
 
@@ -256,7 +264,7 @@ def _load(raw_dir: Path, name: str) -> Optional[Dict[str, Any]]:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
+        return filter_review_payload(json.loads(p.read_text(encoding="utf-8-sig")), raw_dir)
     except Exception:
         return None
 
@@ -268,7 +276,14 @@ def _coerce_row(table_name: str, row: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for col in table.columns:
         val = row.get(col.name)
-        if col.kind == "int64":
+        if val is None and (
+            (table_name == "gold_workspaces" and col.name in {"admin_count", "item_count"})
+            or (table_name == "gold_workspace_risk" and col.name in _WORKSPACE_ITEM_COUNTS)
+            or (table_name == "gold_capacities" and col.name == "assigned_workspace_count")
+            or (table_name == "gold_item_executions" and col.name == "duration_ms")
+        ):
+            out[col.name] = None
+        elif col.kind == "int64":
             out[col.name] = int(val) if val is not None else 0
         elif col.kind == "double":
             out[col.name] = float(val) if val is not None else 0.0
@@ -279,6 +294,35 @@ def _coerce_row(table_name: str, row: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[col.name] = "" if val is None else str(val)
     return out
+
+
+_WORKSPACE_ITEM_COUNTS = {
+    "semantic_model_count": ("SemanticModel", "datasets"),
+    "report_count": ("Report", "reports"),
+    "notebook_count": ("Notebook", "Notebook"),
+    "pipeline_count": ("DataPipeline", "DataPipeline"),
+    "lakehouse_count": ("Lakehouse", "Lakehouse"),
+    "item_count": ("", ""),
+}
+
+
+def _workspace_item_counts(ws: dict, scanned: dict | None) -> dict[str, int | None]:
+    items = scanned.get("items") if scanned is not None else ws.get("items")
+    if isinstance(items, list):
+        return {
+            key: len(items) if key == "item_count" else sum(
+                str(item.get("type") or "").lower() == kind.lower() for item in items
+            )
+            for key, (kind, _) in _WORKSPACE_ITEM_COUNTS.items()
+        }
+    if scanned is None:
+        return dict.fromkeys(_WORKSPACE_ITEM_COUNTS)
+    counts = {
+        key: len(scanned.get(scanner_key) or [])
+        for key, (_, scanner_key) in _WORKSPACE_ITEM_COUNTS.items() if key != "item_count"
+    }
+    counts["item_count"] = sum(counts.values()) + sum(1 for _ in _extra_ws_items(scanned))
+    return counts
 
 
 def _vp_get(rec: Dict[str, Any], *candidates: str) -> Any:
@@ -292,6 +336,17 @@ def _vp_get(rec: Dict[str, Any], *candidates: str) -> Any:
         if key in rec and rec[key] is not None:
             return rec[key]
     return None
+
+
+def _provenance_guid(value: Any) -> Optional[str]:
+    """Normalize only real nonempty GUIDs; names never establish provenance."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = UUID(value.strip())
+    except ValueError:
+        return None
+    return str(parsed) if parsed.int else None
 
 
 def _vp_int(rec: Dict[str, Any], *candidates: str) -> int:
@@ -561,6 +616,7 @@ def build_gold(
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Build every gold table as a list of column-aligned row dicts."""
     raw = Path(raw_dir)
+    findings = filter_review_payload({"findings": findings}, raw)["findings"]
     meta = {
         "run_id": run_id,
         "run_timestamp": run_timestamp,
@@ -836,15 +892,39 @@ def build_gold(
         for w in src if _is_personal_workspace(w)
     }
     _personal_names.discard("")
+    _personal_ids = {
+        str(w.get("id") or w.get("objectId") or "").strip().lower()
+        for src in (wsi.get("workspaces") or [], scanner.get("workspaces") or [])
+        for w in src if _is_personal_workspace(w) and (w.get("id") or w.get("objectId"))
+    }
+    _excluded_ids = _personal_ids | excluded_workspace_ids(raw)
     wsi["workspaces"] = [w for w in (wsi.get("workspaces") or []) if not _is_personal_workspace(w)]
     scanner["workspaces"] = [w for w in (scanner.get("workspaces") or []) if not _is_personal_workspace(w)]
-    item_counts: Dict[str, int] = {}
-    for ws in scanner.get("workspaces") or []:
-        wid = ws.get("id") or ws.get("objectId")
-        if wid:
-            item_counts[str(wid).lower()] = len(ws.get("items") or []) or sum(
-                len(ws.get(k) or []) for k in ("reports", "datasets", "dashboards", "dataflows", "lakehouses")
-            )
+    # Identity comes from either same-run inventory, never from an older run or a name match.
+    merged_workspaces: Dict[str, Dict[str, Any]] = {}
+    complete_scanner: Dict[str, Dict[str, Any]] = {}
+    for source in (scanner, wsi):
+        for ws in source["workspaces"]:
+            wid = ws.get("id") or ws.get("objectId")
+            if not wid:
+                continue
+            widl = str(wid).lower()
+            observed = dict(ws, id=wid)
+            if collection_incomplete(source):
+                for component in ("users", "items"):
+                    if observed.get(f"{component}CollectionStatus") != "collected":
+                        observed[component] = None
+            if source is scanner and not collection_incomplete(source):
+                complete_scanner[widl] = ws
+            merged_workspaces[widl] = {**merged_workspaces.get(widl, {}), **observed}
+    wsi["workspaces"] = list(merged_workspaces.values())
+    item_counts = {
+        wid: _workspace_item_counts(ws, complete_scanner.get(wid))
+        for wid, ws in merged_workspaces.items()
+    }
+    if collection_incomplete(wsi) or collection_incomplete(scanner):
+        print("WARNING: Workspace inventory is incomplete; Gold retains observed same-run identities. "
+              "Unavailable admin/item counts remain null.")
     # Most-recent activity-log event per workspace (ISO-8601 UTC strings sort
     # chronologically), so we can flag workspaces with no activity in the window.
     _acts = _load(raw, "activity_logs.json") or {}
@@ -864,17 +944,23 @@ def build_gold(
         wid = ws.get("id")
         _widl = str(wid).lower() if wid else ""
         _admins = sum(
-            1 for u in (ws.get("users") or [])
+            1 for u in ws["users"]
             if (u.get("groupUserAccessRight") or "") == "Admin"
-        )
+        ) if isinstance(ws.get("users"), list) else None
         profile = workspace_profiles.get(_widl) or {}
+        if item_counts[_widl]["item_count"] is None and profile.get("classification") != "explicit":
+            profile = {
+                **profile, "archetype": "unknown", "classification": "unknown",
+                "reason": "Item inventory unavailable; workspace composition is unknown.",
+                "itemTypeCounts": {},
+            }
         tables["gold_workspaces"].append(_coerce_row("gold_workspaces", {
             **meta,
             "workspace_id": wid,
             "workspace_name": ws.get("name"),
             "capacity_id": ws.get("capacityId"),
             "on_capacity": ws.get("isOnDedicatedCapacity"),
-            "item_count": item_counts.get(_widl, 0),
+            "item_count": item_counts[_widl]["item_count"],
             "admin_count": _admins,
             "last_activity": last_activity_by_wid.get(_widl),
             "is_inactive": bool(_widl) and _widl not in last_activity_by_wid,
@@ -895,6 +981,7 @@ def build_gold(
     # Index VertiPaq results by model_id (preferred) and lowercased name.
     vp_by_id: Dict[str, Dict[str, Any]] = {}
     vp_by_name: Dict[str, Dict[str, Any]] = {}
+    vp_id_counts: Dict[str, int] = {}
     if vp.get("available"):
         for m in vp.get("models") or []:
             mid = str(m.get("model_id") or "")
@@ -903,6 +990,9 @@ def build_gold(
                 vp_by_id[mid] = m
             if mname:
                 vp_by_name.setdefault(mname, m)
+            provenance_id = _provenance_guid(m.get("model_id"))
+            if provenance_id:
+                vp_id_counts[provenance_id] = vp_id_counts.get(provenance_id, 0) + 1
 
     for d in sm.get("datasets") or []:
         model_id = d.get("id")
@@ -914,6 +1004,16 @@ def build_gold(
         if (workspace_name or "").strip().lower() in _personal_names:
             continue  # skip models that live in a personal workspace
         vpm = vp_by_id.get(str(model_id or "")) or vp_by_name.get(str(model_name or "").strip().lower())
+        provenance_mid = _provenance_guid(model_id)
+        provenance_wid = _provenance_guid(ws_id)
+        stats_workspace_id = (
+            provenance_wid
+            if provenance_mid and provenance_wid
+            and _provenance_guid((vpm or {}).get("model_id")) == provenance_mid
+            and _provenance_guid((vpm or {}).get("workspace_id")) == provenance_wid
+            and vp_id_counts.get(provenance_mid) == 1
+            else None
+        )
 
         vp_tables = (vpm or {}).get("tables") or []
         vp_columns = (vpm or {}).get("columns") or []
@@ -951,6 +1051,7 @@ def build_gold(
                 **meta,
                 "model_id": model_id,
                 "model_name": model_name,
+                "workspace_id": stats_workspace_id,
                 "workspace_name": workspace_name,
                 "table_name": tname,
                 "row_count": _vp_int(t, "row_count", "rows", "cardinality"),
@@ -1143,6 +1244,8 @@ def build_gold(
                 **meta, "rule_id": rid, "rule_description": desc,
                 "severity": (f.get("severity") or "medium").lower(),
                 "dimension": f.get("dimension"),
+                "workspace_id": ex.get("workspace_id"),
+                "notebook_id": ex.get("notebook_id"),
                 "notebook_name": nb_name,
                 "workspace_name": ws_name,
                 "cells": ", ".join(str(x) for x in cells),
@@ -1189,16 +1292,28 @@ def build_gold(
         if wid:
             scan_ws[str(wid).lower()] = ws
 
-    # Attribute failing findings to workspaces by name.
+    def finding_workspace_ids(finding: Dict[str, Any]) -> set[str]:
+        if finding.get("rule_id") == "ARCH-016":
+            return {
+                str(item.get("workspace_id") or "").strip().lower()
+                for item in (finding.get("evidence") or {}).get("items", [])
+                if isinstance(item, dict) and item.get("signal_codes")
+                and str(item.get("workspace_id") or "").strip().lower() in ws_meta
+            }
+        return {
+            name_to_wid[name]
+            for name in _finding_workspace_names(finding.get("evidence") or {})
+            if name in name_to_wid
+        }
+
+    # Native dependency findings carry authoritative workspace IDs; legacy
+    # findings retain their existing name-based evidence contract.
     ws_issue: Dict[str, Dict[str, int]] = {}
     for f in findings:
         if (f.get("status") or "").lower() != "fail":
             continue
         sev = (f.get("severity") or "medium").lower()
-        for nm in _finding_workspace_names(f.get("evidence") or {}):
-            widl = name_to_wid.get(nm)
-            if not widl:
-                continue
+        for widl in finding_workspace_ids(f):
             agg = ws_issue.setdefault(widl, {"issue": 0, "critical": 0, "high": 0})
             agg["issue"] += 1
             if sev == "critical":
@@ -1216,10 +1331,7 @@ def build_gold(
             continue
         sev = (f.get("severity") or "medium").lower()
         st = (f.get("status") or "info").lower()
-        for nm in _finding_workspace_names(f.get("evidence") or {}):
-            widl = name_to_wid.get(nm)
-            if not widl:
-                continue
+        for widl in sorted(finding_workspace_ids(f)):
             m = ws_meta.get(widl, {})
             wid = m.get("id") or ""
             if not wid or (rid, widl) in _ft_seen:
@@ -1242,16 +1354,13 @@ def build_gold(
     for widl in sorted(set(ws_meta) | set(scan_ws)):
         m = ws_meta.get(widl, {})
         s = scan_ws.get(widl, {})
-        sm_c = len(s.get("datasets") or [])
-        rp_c = len(s.get("reports") or [])
-        nb_c = len(s.get("Notebook") or [])
-        pl_c = len(s.get("DataPipeline") or [])
-        lh_c = len(s.get("Lakehouse") or [])
-        item_c = sm_c + rp_c + nb_c + pl_c + lh_c + sum(1 for _ in _extra_ws_items(s))
+        counts = item_counts[widl]
         agg = ws_issue.get(widl, {"issue": 0, "critical": 0, "high": 0})
         others = max(0, agg["issue"] - agg["critical"] - agg["high"])
         risk = min(100.0, 25 * agg["critical"] + 12 * agg["high"] + 4 * others)
-        status = _status_for(risk, "risk")
+        status = _status_for(
+            None if counts["item_count"] is None and not agg["issue"] else risk, "risk",
+        )
         cap_id = m.get("capacity_id") or s.get("capacityId") or ""
         tables["gold_workspace_risk"].append(_coerce_row("gold_workspace_risk", {
             **meta,
@@ -1260,12 +1369,7 @@ def build_gold(
             "capacity_id": cap_id,
             "capacity_name": m.get("capacity_name") or cap_name_by_id.get(str(cap_id).lower(), ""),
             "owner": m.get("owner") or "",
-            "item_count": item_c,
-            "semantic_model_count": sm_c,
-            "report_count": rp_c,
-            "notebook_count": nb_c,
-            "pipeline_count": pl_c,
-            "lakehouse_count": lh_c,
+            **counts,
             "issue_count": agg["issue"],
             "critical_count": agg["critical"],
             "high_count": agg["high"],
@@ -1428,7 +1532,7 @@ def build_gold(
                   workspace_id=r["workspace_id"], workspace_name=r["workspace_name"],
                   capacity_id=r["capacity_id"], capacity_name=r["capacity_name"],
                   owner=r["owner"], issue=r["issue_count"], critical=r["critical_count"],
-                  risk=r["risk_score"], importance=r["item_count"] + 1, status=r["status"],
+                  risk=r["risk_score"], importance=(r["item_count"] or 0) + 1, status=r["status"],
                   kpi_label="Issues", kpi_value=r["issue_count"])
         if r["capacity_id"]:
             _add_edge(r["capacity_id"], r["capacity_name"], "Capacity",
@@ -1547,7 +1651,40 @@ def build_gold(
                 "report_id": e["target_id"], "report_name": e["target_name"],
             }))
 
-    return tables
+    for builder in (build_execution_evidence, build_dataflow_evidence, build_dax_object_evidence):
+        evidence = builder(raw, run_id, run_timestamp)
+        for table_name, rows in evidence.items():
+            parent = EVIDENCE_RELATIONSHIPS.get(table_name, table_name)
+            id_column = {
+                "gold_execution_coverage": "item_id",
+                "gold_dataflows": "dataflow_id",
+                "gold_dax_object_coverage": "model_id",
+            }[parent]
+            for row in rows:
+                workspace_id = str(row.get("workspace_id") or "").strip().lower()
+                if workspace_id in _excluded_ids:
+                    continue
+                identity = [parent, run_id, workspace_id,
+                            str(row.get(id_column) or "").strip().lower()]
+                if parent == "gold_execution_coverage":
+                    identity.append(str(row.get("item_type") or "").strip().lower())
+                review_item_key = hashlib.sha256(
+                    json.dumps(identity, separators=(",", ":")).encode("utf-8"),
+                ).hexdigest()
+                tables[table_name].append(_coerce_row(table_name, {
+                    **row, "run_id": run_id, "run_timestamp": run_timestamp,
+                    "workspace_name": row.get("workspace_name") or ws_name_by_id.get(workspace_id) or "",
+                    "review_item_key": review_item_key,
+                }))
+    for child, parent in EVIDENCE_RELATIONSHIPS.items():
+        keys = [row["review_item_key"] for row in tables[parent]]
+        parent_keys = set(keys)
+        if len(keys) != len(parent_keys):
+            raise ValueError(f"Duplicate item coverage in {parent}; cannot build unambiguous evidence joins.")
+        if any(row["review_item_key"] not in parent_keys for row in tables[child]):
+            raise ValueError(f"Evidence in {child} is missing its {parent} coverage record.")
+
+    return filter_review_payload(tables, raw)
 
 
 def build_gold_from_dir(

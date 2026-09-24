@@ -1,3 +1,5 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 <!-- BEGIN MICROSOFT SECURITY.MD V0.0.9 BLOCK -->
 
 ## Security
@@ -45,3 +47,9 @@ Microsoft follows the principle of [Coordinated Vulnerability Disclosure](https:
 This accelerator is **metadata-only** by design - it must never read customer business data.
 Reports that demonstrate a path by which the tool could read, exfiltrate, or persist customer
 data (see [docs/data-safety.md](docs/data-safety.md)) are treated as high severity.
+
+Review metadata can also be sensitive. Report any path that exposes another
+workspace's owner projections or bypasses the
+[Workspace Owner audience boundary](docs/workspace-owner-report.md), including
+unintended access to colocated central governance artifacts. Do not include real
+tenant data or entitlement snapshots in public issue reports.

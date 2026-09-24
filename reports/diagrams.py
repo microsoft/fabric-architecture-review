@@ -21,6 +21,8 @@ No new API calls happen here and no customer data is read.
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload, is_admin_workspace
+
 import json
 from pathlib import Path
 from typing import Any, Dict, List
@@ -46,7 +48,7 @@ def _load(raw_dir: Path, name: str) -> Any | None:
     if not p.exists():
         return None
     try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
+        return filter_review_payload(json.loads(p.read_text(encoding="utf-8-sig")), raw_dir)
     except json.JSONDecodeError:
         return None
 
@@ -79,7 +81,7 @@ def _is_personal_workspace(ws: Dict[str, Any]) -> bool:
 
 
 def _filter_workspaces(workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [w for w in workspaces if not _is_personal_workspace(w)]
+    return [w for w in workspaces if not _is_personal_workspace(w) and not is_admin_workspace(w)]
 
 
 # Fabric Scanner API returns Power BI legacy items under lowercase plural keys
@@ -181,7 +183,9 @@ def _capacity_workspace_topology(raw_dir: Path) -> str:
     Each block holds at most 8 workspaces so it fits on a single PDF page.
     Capacities with more workspaces get multiple consecutive blocks.
     """
-    inv = _load(raw_dir, "workspace_inventory.json") or _load(raw_dir, "scanner.json")
+    inv = _load(raw_dir, "workspace_inventory.json")
+    if not inv or not (inv.get("workspaces") or inv.get("value")):
+        inv = _load(raw_dir, "scanner.json")
     if inv is None:
         return _skip(
             "Capacity \u2192 Workspace topology",

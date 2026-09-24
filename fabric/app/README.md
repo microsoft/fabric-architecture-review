@@ -1,13 +1,33 @@
 <!--
 Copyright (c) Microsoft Corporation. All rights reserved.
-Licensed under the MIT License. See LICENSE file in the project root for full license information.
+Licensed under the MIT License. See LICENSE.TXT in the project root for full license information.
 -->
 
 # Fabric Architecture Review app
 
-The Fabric Architecture Review (FAR) app is a Fabric-hosted React workbench for exploring the latest architecture-review run. It presents the review score, prioritized findings, workspace estate, governance posture, semantic-model optimization, a dedicated metadata-only DAX Analyzer, performance and cost signals, architecture inventory, notebook code smells, and a conversational Fabric Data Agent.
+The Fabric Architecture Review (FAR) app is a Fabric-hosted workbench for exploring
+the latest review: scores, prioritized findings, workspace inventory, DAX risks,
+execution history, performance and cost signals, and Data Agent chat.
 
 The app consumes review metadata and aggregate engineering statistics. It does not query customer business rows, notebook source, or notebook output.
+
+**Central reviewers only:** owner RLS does not secure this app, its governance
+model or its central Data Agent. App filters are navigation, not authorization.
+Do not rebind `reviewModel` to the owner model or include this app in an
+owner-only audience. For owner access, use the separate
+[Workspace Owner report](../../docs/workspace-owner-report.md) and
+[Workspace Owner Agent](../../docs/workspace-owner-agent.md).
+
+## Choose your path
+
+| Goal | Start here | Success |
+| --- | --- | --- |
+| Try the UI without a tenant | [Run locally](#run-locally) | Browser opens anonymous sample data with `?preview=1` |
+| Connect a live review | [Prerequisites](#prerequisites), then [semantic model](#configure-the-semantic-model) and [chat configuration](#configure-rayfin-and-data-agent-chat) | The intended identity can query the model and published agent |
+| Publish the app in Fabric | [Build and test](#build-and-test), then [Deploy](#deploy-to-fabric) | Fabric-hosted app shows the intended review and authorized chat |
+
+Do not deploy or grant permissions just to try the preview. Keep existing live
+configuration files when switching between tasks.
 
 ## Current architecture
 
@@ -26,29 +46,51 @@ flowchart LR
 - The application shell is a static React/Vite site hosted by an existing Fabric AppBackend through Rayfin.
 - Live lens data is queried from the `reviewModel` semantic-model binding through Fabric App Data.
 - The **DAX Analyzer** lens filters capacity first and semantic model second, then shows explainable static expression risks. It never executes DAX or presents its scores as measured duration, CU, or cost.
+- **Native evidence** covers execution history, Dataflow Gen2 syntax/coverage, and calculated-DAX objects. Pipeline structural findings (ARCH-016) identify affected workspaces and items.
 - Data Agent chat runs directly from the browser using a delegated Microsoft Entra token and MCP Streamable HTTP.
 - The semantic model, Data Agent, and app may be in different Fabric workspaces. Configure each item with its actual parent workspace ID.
-- Rayfin Functions and Azure Functions are disabled and are not part of this implementation.
+
+### Native evidence
+
+The page scopes evidence by review, capacity, workspace and item IDs. Historical
+capacity assignments come from the corresponding review, not today's inventory.
+
+| Lens | Governance tables | Interpretation |
+| --- | --- | --- |
+| Observed executions | `gold_execution_coverage`, `gold_item_executions` | Refresh/job observations, UTC times and duration in milliseconds when available. Repeated observations are deduplicated before status filtering; this is not a complete execution log. |
+| Dataflow Gen2 | `gold_dataflows`, `gold_dataflow_queries` | Metadata-only M syntax signals, never folding/runtime proof. Empty artifact IDs represent inventory gaps, not dataflows. |
+| Calculated DAX objects | `gold_dax_object_coverage`, `gold_dax_objects` | Typed calculated columns/tables/items and static risks, without expressions. DAX-001/002 remain measure-only. |
+
+Successful empty collections, partial collection, unavailable evidence and query
+failures are distinct. Coverage remains visible under execution-status filters.
+Queries have a 5,000-row safety limit; use the governance model for larger results.
+Live failures never substitute preview data. See [native evidence](../../docs/native-evidence.md)
+for coverage and interpretation limits.
+
+**Chat does not inherit page filters.** Include the workspace/item IDs and review
+or time window in your question. Native-evidence questions without an explicit
+scope default to each workspace's latest review, which can differ from the
+single run shown on the page.
 
 ## Prerequisites
 
-> **The app visualizes an existing review — run the review first.** The live data, governance
-> semantic model, and Data Agent below are produced by running the FAR review at least once. Deploy
-> and run the pipeline (and the `05_Agent` notebook) from the [in-Fabric guide](../README.md), or use
-> the local PowerShell workflow in the [main README](../../README.md). To only see the UI, skip
-> straight to [Run locally](#run-locally) with `?preview=1` — that uses anonymous sample data and
-> needs none of the prerequisites below.
+For local preview, use **Node.js 22.13 or later in the 22.x series**, npm 10 and
+the two example configuration files in [Run locally](#run-locally).
+`npm ci` installs both Rayfin and Fabric App Data CLIs; no global install is needed.
+The development and build commands generate environment settings and model bindings.
+The test commands also generate model bindings from `fabric.yaml` before Vitest starts.
 
-- Node.js 22 and npm.
-- Run `npm ci` once before any other command. This installs the bundled **Rayfin CLI** (`@microsoft/rayfin-cli`) and **Fabric App Data CLI** (`@microsoft/fabric-app-data-cli`) as dev dependencies. They back every `npx rayfin` / `npx fabric-app-data` command and the automatic `predev` / `prebuild` hooks, so **no separate or global install of Rayfin is required** — `npm ci` is the only prerequisite install.
-- A `rayfin/.env` file (copy `rayfin/.env.example`). `rayfin env` runs automatically before `npm run dev` and `npm run build`, and fails if this file is missing.
-- Azure CLI (`az login`) for local Fabric validation, `rayfin login`, and the command-line Data Agent probe.
-- A completed FAR pipeline run with populated gold tables.
-- A governance semantic model generated by FAR.
-- A published Fabric Data Agent on supported paid Fabric capacity.
-- Contributor or Admin access to the Fabric app workspace.
-- Read access to the Data Agent and every source attached to it.
-- Fabric Apps enabled for the deployer in the Fabric tenant.
+For a live app, also have:
+
+- A completed [in-Fabric deployment and review](../DEPLOYMENT.md), with populated
+  Gold tables and the governance semantic model. Local collection alone is insufficient.
+- A published central Data Agent, deployed by **05_Agent** after Gold, on a
+  [supported capacity with the required tenant settings](../REFERENCE.md#-ask-the-data-agent-conversational-qa).
+- Azure CLI signed in to the intended tenant for deployment and command-line checks.
+- Contributor or Admin access to the app workspace for the **deployer**, and
+  Fabric Apps enabled for that identity.
+- Access to the governance model, published Data Agent and its attached sources
+  for each intended reviewer.
 
 ## Microsoft Entra configuration
 
@@ -60,14 +102,15 @@ Create a single-tenant **Single-page application** registration for Data Agent c
 4. After deployment, add `https://<generated-host>.webapp.fabricapps.net/auth-callback.html` as a SPA redirect URI.
 5. Do not create or expose a client secret. The browser uses authorization code with PKCE.
 
-The app uses a dedicated callback page and a same-origin popup relay because it runs inside a cross-origin Fabric iframe. Both pages are built as Vite entry points.
+For local chat, use `localhost:5173` to match the registered callback. The
+`127.0.0.1` address below is for anonymous preview.
 
 ## Configure the semantic model
 
 ```powershell
-cd fabric/app
+cd fabric\app
 npm ci
-Copy-Item fabric.example.yaml fabric.yaml
+if (-not (Test-Path fabric.yaml)) { Copy-Item fabric.example.yaml fabric.yaml }
 az login --tenant <tenant-id>
 npx fabric-app-data add semanticModel reviewModel --from-url "<semantic-model-url>"
 npx fabric-app-data generate -o src/fabric.generated.ts
@@ -78,10 +121,10 @@ npx fabric-app-data query reviewModel --query "EVALUATE ROW(`"connected`", 1)"
 
 ## Configure Rayfin and Data Agent chat
 
-Copy the public example and replace the UUID-shaped values:
+Create the configuration if missing, then replace the example identifiers:
 
 ```powershell
-Copy-Item rayfin/.env.example rayfin/.env
+if (-not (Test-Path rayfin\.env)) { Copy-Item rayfin\.env.example rayfin\.env }
 ```
 
 ```dotenv
@@ -99,15 +142,23 @@ These are public identifiers. Never place client secrets, bearer tokens, connect
 npx rayfin env --framework vite
 ```
 
-You do not need to install Rayfin separately: `npm ci` already installed `@microsoft/rayfin-cli`, so `npx rayfin` resolves the local copy. `npm run dev` and `npm run build` run `rayfin env` automatically through their `predev` / `prebuild` hooks, so make sure `npm ci` has run and `rayfin/.env` exists first. Deployment commands (`rayfin login`, `rayfin up`) additionally require an authenticated Azure CLI session (`az login`).
+Deployment commands (`rayfin login`, `rayfin up`) require an authenticated Azure CLI session (`az login`).
 
 ## Run locally
 
+From `fabric/app`, install dependencies and create **both** placeholder
+configuration files if missing. Keep existing live configuration unchanged:
+
 ```powershell
+npm ci
+if (-not (Test-Path fabric.yaml)) { Copy-Item fabric.example.yaml fabric.yaml }
+if (-not (Test-Path rayfin\.env)) { Copy-Item rayfin\.env.example rayfin\.env }
 npm run dev -- --host 127.0.0.1
 ```
 
 - Open `http://127.0.0.1:5173/?preview=1` for anonymous synthetic UI data.
+- `fabric.yaml` is needed by the predev generator even for preview; the example
+  supplies placeholder bindings, not live data access.
 - Live semantic-model acceptance must be performed through the Fabric AppBackend item.
 - Production builds never fall back to preview fixtures.
 
@@ -122,29 +173,35 @@ npm run agent:ask -- `
     --question "What should we fix first?"
 ```
 
-The embedded app and the command-line probe call the same published MCP tool. Answers can still vary between independent chat sessions. If the Fabric Data Agent item and app appear to use different data, verify:
+The probe tests the published endpoint using the Azure CLI identity; it does
+not validate browser sign-in or the Fabric-hosted app. The browser adds
+review-grounding instructions, while the probe sends your question directly,
+so identical answers are not expected. If their data appears to differ, verify:
 
-1. The app uses the MCP URL copied from the published agent's **Settings > Model Context Protocol** page.
+1. The endpoint built from the configured IDs matches the published agent's
+   **Settings > Model Context Protocol** URL.
 2. The configured workspace is the parent workspace of that Data Agent item.
 3. The latest FAR pipeline run populated `gold_run_summary`, `gold_findings`, and `gold_notebook_smells`.
 4. The agent was republished after source or instruction changes.
 5. The signed-in user can read the agent and all attached sources.
 
-The app does not rewrite prompts or summarize MCP output; it displays the text blocks returned by the published tool.
+The app displays the returned text without a separate summarization step.
 
 ## Build and test
 
 ```powershell
+npm ci
+if (-not (Test-Path fabric.yaml)) { Copy-Item fabric.example.yaml fabric.yaml }
+if (-not (Test-Path rayfin/.env)) { Copy-Item rayfin/.env.example rayfin/.env }
 npm test
 npm run lint
 npm run build:fabric
-npm audit --omit=dev --audit-level=high
 ```
 
-The production build performs a full TypeScript project check before Vite bundles
-`index.html`, `auth-callback.html`, `popup-relay.html`, and generated third-party notices.
-The root CI workflow also audits Python runtime dependencies and parses the Bash and
-PowerShell orchestration scripts.
+The build generates model bindings, checks TypeScript and bundles the app,
+sign-in pages and third-party notices. These local checks do **not** establish
+live access or deployment acceptance. For dependency audits and contributor
+validation, follow the [contributor checks](../../CONTRIBUTING.md#required-validation).
 
 ## Deploy to Fabric
 
@@ -162,6 +219,10 @@ For subsequent releases to the configured existing AppBackend, deploy static con
 npx rayfin up staticapp deploy --verbose
 ```
 
-Open the AppBackend item from the Fabric portal for acceptance testing. Do not enable `services.functions`; the supported runtime is static hosting plus direct delegated Data Agent MCP access.
+Open the AppBackend item from the Fabric portal as an intended reviewer. Verify
+that it shows the expected review and that chat sign-in and source access work.
+Local preview and unit tests do not replace this live acceptance.
+Do not enable `services.functions`; the supported runtime is static hosting
+plus direct delegated Data Agent MCP access.
 
 See the repository [data-safety contract](../../docs/data-safety.md), [contribution guide](../../CONTRIBUTING.md), and [security policy](../../SECURITY.md).

@@ -33,9 +33,10 @@ from tests._analyzers import (
 # Expected per-analyzer finding counts (frozen from the sample fixture).
 EXPECTED_COUNTS: Dict[str, int] = {
     "findings_tenant_settings": 7,
-    "findings_architecture": 13,
+    "findings_architecture": 14,
     "findings_performance": 13,
     "findings_dax": 2,
+    "findings_dataflows": 2,
     "findings_storage_mode": 4,
     "findings_governance": 9,
     "findings_operational_excellence": 3,
@@ -44,7 +45,7 @@ EXPECTED_COUNTS: Dict[str, int] = {
     "findings_notebook_code": 6,
     "findings_best_practices": 7,
 }
-EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())  # 80
+EXPECTED_TOTAL = sum(EXPECTED_COUNTS.values())
 
 
 def _load_golden(basename: str) -> List[Dict[str, Any]]:

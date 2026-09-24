@@ -137,13 +137,11 @@
     "rule_id": "ARCH-007",
     "dimension": "architecture",
     "severity": "info",
-    "status": "info",
+    "status": "pass",
     "title": "Empty workspaces (no items)",
     "evidence": {
-      "emptyCount": 1,
-      "examples": [
-        "My workspace"
-      ]
+      "emptyCount": 0,
+      "examples": []
     },
     "recommendation": "Archive or repurpose empty workspaces to keep the tenant inventory clean.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/governance-overview"
@@ -152,13 +150,11 @@
     "rule_id": "ARCH-008",
     "dimension": "architecture",
     "severity": "medium",
-    "status": "fail",
+    "status": "pass",
     "title": "Personal (My workspace) workspaces in use",
     "evidence": {
-      "personalCount": 1,
-      "examples": [
-        "My workspace"
-      ]
+      "personalCount": 0,
+      "examples": []
     },
     "recommendation": "Migrate any production content out of personal workspaces into shared, capacity-backed workspaces.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/get-started/workspaces"
@@ -280,5 +276,27 @@
     },
     "recommendation": "Either no pipelines orchestrate notebooks yet, or the getDefinition calls failed (check pipeline_definitions.json 'errors'). Re-run the pipeline_definitions collector to confirm.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-factory/notebook-activity"
+  },
+  {
+    "rule_id": "ARCH-016",
+    "dimension": "architecture",
+    "severity": "medium",
+    "status": "unknown",
+    "title": "Pipeline activity dependency graph integrity",
+    "evidence": {
+      "source": "pipeline_definitions.json",
+      "assessment_kind": "static_structure",
+      "coverage_status": "unknown",
+      "pipeline_count": 0,
+      "assessed_pipeline_count": 0,
+      "affected_count": 0,
+      "signal_codes": [],
+      "reason_codes": [
+        "collection_completeness_unverified"
+      ],
+      "items": []
+    },
+    "recommendation": "Repair duplicate activity names and invalid same-scope dependency references or cycles in the collected pipeline definition. Recollect missing or denied definitions and resolve dynamic references before treating structural coverage as complete. This is static structural validation, not measured execution reliability or performance.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/data-factory/activity-dependencies"
   }
 ]

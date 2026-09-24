@@ -7,7 +7,10 @@ Endpoints:
   GET https://api.powerbi.com/v1.0/myorg/admin/capacities             (all)
   GET https://api.powerbi.com/v1.0/myorg/capacities                   (assigned to me)
   GET https://api.powerbi.com/v1.0/myorg/capacities/{id}/refreshables (per capacity)
-  GET https://api.powerbi.com/v1.0/myorg/admin/capacities/{id}/Workloads
+  GET https://api.powerbi.com/v1.0/myorg/capacities/{id}/Workloads (legacy)
+
+Workload configuration is not relevant for Gen2 capacities; an unavailable
+workload endpoint does not invalidate capacity inventory or other probes.
 
 Workspace-to-capacity mapping is derived from scanner.json /
 workspace_inventory.json when available, so we can report capacity utilization
@@ -30,89 +33,100 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
-from collectors._common import get_scope_workspace_ids
-from collectors._http import collect_value, get_json
+from collectors._common import get_scope_workspace_ids, load_workspace_inventory, record_collection_failure
+from collectors._http import Headers, HttpError, collect_value
 from collectors.auth import POWERBI_SCOPE, get_default_provider
+from collectors.workspace_scope import is_excluded_capacity, filter_review_payload
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
 
 
-def _list_capacities(headers: Dict[str, str]) -> List[Dict[str, Any]]:
-    admin = collect_value(f"{PBI}/admin/capacities", headers)
-    if admin:
-        return admin
-    return collect_value(f"{PBI}/capacities", headers)
+def _list_capacities(headers: Headers) -> List[Dict[str, Any]]:
+    try:
+        return collect_value(f"{PBI}/admin/capacities", headers)
+    except HttpError as exc:
+        if exc.status_code not in (401, 403):
+            raise
+        return collect_value(f"{PBI}/capacities", headers)
 
 
-def _refreshables(headers: Dict[str, str], capacity_id: str) -> List[Dict[str, Any]]:
+def _refreshables(headers: Headers, capacity_id: str) -> List[Dict[str, Any]]:
     url = f"{PBI}/capacities/{capacity_id}/refreshables"
-    payload = get_json(url, headers, params={"$top": 1000})
-    if not payload:
-        return []
-    return payload.get("value") or []
+    return collect_value(url, headers, params={"$top": 1000})
 
 
-def _workloads(headers: Dict[str, str], capacity_id: str) -> List[Dict[str, Any]]:
-    url = f"{PBI}/admin/capacities/{capacity_id}/Workloads"
-    payload = get_json(url, headers)
-    if not payload:
-        return []
-    return payload.get("value") or payload.get("workloads") or []
+def _workloads(headers: Headers, capacity_id: str) -> List[Dict[str, Any]]:
+    return collect_value(f"{PBI}/capacities/{capacity_id}/Workloads", headers)
 
 
 def _workspaces_by_capacity(raw_dir: Path) -> Dict[str, List[Dict[str, str]]]:
     out: Dict[str, List[Dict[str, str]]] = {}
-    for fname in ("scanner.json", "workspace_inventory.json"):
-        p = raw_dir / fname
-        if not p.exists():
+    for ws in load_workspace_inventory(raw_dir):
+        cap = ws.get("capacityId") or ""
+        if not cap:
             continue
-        data = json.loads(p.read_text(encoding="utf-8-sig"))
-        for ws in data.get("workspaces") or []:
-            cap = ws.get("capacityId") or ""
-            if not cap:
-                continue
-            out.setdefault(cap.lower(), []).append({"id": ws.get("id"), "name": ws.get("name")})
-        if out:
-            break
+        out.setdefault(cap.lower(), []).append({"id": ws.get("id"), "name": ws.get("name")})
     return out
 
 
+@record_collection_failure("capacity_metrics.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     provider = get_default_provider()
-    headers = provider.headers(scope=POWERBI_SCOPE)
+    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
 
     print("Capacity metrics: listing capacities...")
     capacities = _list_capacities(headers)
+    excluded = [cap for cap in capacities if is_excluded_capacity(cap)]
+    capacities = [cap for cap in capacities if not is_excluded_capacity(cap)]
     print(f"  {len(capacities)} capacity(ies) visible.")
 
-    workspaces_by_cap = _workspaces_by_capacity(Path(output_dir))
+    errors: List[Dict[str, Any]] = []
+    try:
+        workspaces_by_cap = _workspaces_by_capacity(Path(output_dir))
+    except HttpError as exc:
+        workspaces_by_cap = None
+        errors.append({"component": "workspace_mapping", "statusCode": exc.status_code, "message": str(exc)})
+        print(f"Capacity metrics incomplete: workspace mapping: {exc}")
     workspace_scope_limited = bool(get_scope_workspace_ids())
 
     enriched: List[Dict[str, Any]] = []
+    capacity_list_complete = True
     for i, cap in enumerate(capacities, 1):
         cid = cap.get("id") or cap.get("capacityId")
         if not cid:
+            capacity_list_complete = False
+            errors.append({"component": "capacity_identity", "message": "Capacity listing returned a row without an ID."})
+            print("Capacity metrics incomplete: listing returned a row without an ID.")
             continue
-        refs = _refreshables(headers, cid)
-        wls = _workloads(headers, cid)
-        ws_list = workspaces_by_cap.get(cid.lower(), [])
-        enriched.append(
-            {
-                "id": cid,
-                "displayName": cap.get("displayName") or cap.get("name"),
-                "sku": cap.get("sku"),
-                "state": cap.get("state"),
-                "region": cap.get("region"),
-                "admins": cap.get("admins"),
-                "tenantKeyId": cap.get("tenantKeyId"),
-                "refreshableCount": len(refs),
-                "refreshables": refs,
-                "workloads": wls,
-                "assignedWorkspaceCount": len(ws_list),
-                "assignedWorkspaces": ws_list,
-                "workspaceScopeLimited": workspace_scope_limited,
-            }
-        )
+        ws_list = workspaces_by_cap.get(cid.lower(), []) if workspaces_by_cap is not None else None
+        row: Dict[str, Any] = {
+            "id": cid,
+            "displayName": cap.get("displayName") or cap.get("name"),
+            "sku": cap.get("sku"),
+            "state": cap.get("state"),
+            "region": cap.get("region"),
+            "admins": cap.get("admins"),
+            "tenantKeyId": cap.get("tenantKeyId"),
+            "assignedWorkspaceCount": len(ws_list) if ws_list is not None else None,
+            "assignedWorkspaces": ws_list,
+            "workspaceScopeLimited": workspace_scope_limited,
+        }
+        for component, probe in (("refreshables", _refreshables), ("workloads", _workloads)):
+            try:
+                row[component] = filter_review_payload(
+                    {component: probe(headers, cid)}, Path(output_dir),
+                )[component]
+                row[f"{component}CollectionStatus"] = "collected"
+            except HttpError as exc:
+                row[component] = None
+                row[f"{component}CollectionStatus"] = "unavailable"
+                errors.append({
+                    "capacityId": cid, "component": component,
+                    "statusCode": exc.status_code, "message": str(exc),
+                })
+                print(f"Capacity metrics incomplete: {cid} {component}: {exc}")
+        row["refreshableCount"] = len(row["refreshables"]) if row["refreshables"] is not None else None
+        enriched.append(row)
         if i % 10 == 0:
             print(f"  ... {i}/{len(capacities)}")
 
@@ -131,6 +145,11 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             {
                 "summary": summary,
                 "capacities": enriched,
+                "excludedCapacities": excluded,
+                "capacityListComplete": capacity_list_complete,
+                "workspaceMappingComplete": workspaces_by_cap is not None,
+                "collectionComplete": not errors,
+                "collectionErrors": errors,
                 "deepMetricsAvailable": False,
                 "workspaceScopeLimited": workspace_scope_limited,
             },

@@ -84,7 +84,7 @@ async function main() {
     const transport = new StreamableHTTPClientTransport(endpoint, {
         requestInit: { headers: { Authorization: `Bearer ${token}` } },
     });
-    const client = new Client({ name: "fabric-architecture-review-cli", version: "1.0.0" });
+    const client = new Client({ name: "fabric-architecture-review-cli", version: "2026.9.2" });
 
     try {
         await client.connect(transport);

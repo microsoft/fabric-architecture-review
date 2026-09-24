@@ -25,6 +25,8 @@ business row values, and nothing is persisted beyond sizes and counts.
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload
+
 import argparse
 import json
 import os
@@ -312,7 +314,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
     catalog_path = target_dir / "semantic_models.json"
     try:
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
+        catalog = filter_review_payload(json.loads(catalog_path.read_text(encoding="utf-8-sig")), catalog_path.parent)
     except Exception:
         catalog = {}
     datasets: List[Dict[str, Any]] = catalog.get("datasets") or []
@@ -349,6 +351,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             models_out.append({
                 "model_id": model_id,
                 "model_name": model_name,
+                "workspace_id": ws_id,
                 "workspace_name": ws_name,
                 "storage_mode": ds.get("targetStorageMode"),
                 **frames,

@@ -38,7 +38,7 @@ def test_collect_refreshes_headers_for_each_model(tmp_path, monkeypatch):
         definitions,
         "_get_definition",
         lambda headers, workspace_id, model_id: (
-            seen_headers.append(headers["Authorization"]) or {"definition": {"parts": []}},
+            seen_headers.append(headers()["Authorization"]) or {"definition": {"parts": []}},
             None,
         ),
     )
@@ -69,14 +69,16 @@ def test_collect_resumes_successful_models_from_matching_checkpoint(tmp_path, mo
     provider = _Provider()
     requested = []
 
+    def get_definition(headers, workspace_id, model_id):
+        headers()
+        requested.append(model_id)
+        return {"definition": {"parts": []}}, None
+
     monkeypatch.setattr(definitions, "get_default_provider", lambda: provider)
     monkeypatch.setattr(
         definitions,
         "_get_definition",
-        lambda headers, workspace_id, model_id: (
-            requested.append(model_id) or {"definition": {"parts": []}},
-            None,
-        ),
+        get_definition,
     )
     monkeypatch.setattr(definitions, "CHECKPOINT_INTERVAL", 1)
     monkeypatch.setattr(definitions, "MODEL_DELAY_SECONDS", 0)

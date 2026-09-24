@@ -28,7 +28,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers._common import (
+    collection_coverage_incomplete, load_raw, load_rules, make_finding,
+    missing_raw_finding, threshold, write_findings,
+)
 
 STALE_DAYS = threshold("performance", "stale_model_days", 30, env="PERF_STALE_DAYS", cast=int)
 LONG_REFRESH_HOURS = threshold("performance", "long_refresh_hours", 2.0, env="PERF_LONG_REFRESH_HOURS", cast=float)
@@ -480,13 +483,19 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
 
     sm = load_raw(raw_dir / "semantic_models.json")
     if not sm:
-        for rid in ("PERF-003", "PERF-004", "PERF-005", "PERF-006", "PERF-007"):
+        for rid in ("PERF-003", "PERF-004", "PERF-005", "PERF-006", "PERF-007",
+                    "PERF-010", "PERF-014", "PERF-015"):
             if rid in rules:
                 findings.append(missing_raw_finding(rules[rid], "performance", "semantic_models.json"))
         return findings
 
     datasets = sm.get("datasets") or []
     refreshes = sm.get("refreshes") or {}
+    missing_refresh_ids = [
+        ds.get("id") for ds in datasets
+        if not isinstance(refreshes.get(ds.get("id")), list)
+        or ds.get("id") in (sm.get("refreshErrors") or {})
+    ]
     now = datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=STALE_DAYS)
 
@@ -499,7 +508,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
 
     for ds in datasets:
         dsid = ds.get("id")
-        if not dsid:
+        if not dsid or dsid in missing_refresh_ids:
             continue
         size_mb = _model_size_mb(ds)
         if size_mb is not None:
@@ -510,6 +519,8 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             if size_mb >= MODEL_SIZE_WARN_MB:
                 oversized_models.append(row)
         history = refreshes.get(dsid) or []
+        if dsid in missing_refresh_ids:
+            continue
         successes = [h for h in history if (h.get("status") or "").lower() == "completed"]
         fails = [h for h in history if (h.get("status") or "").lower() in ("failed", "disabled")]
         last = history[0] if history else None
@@ -649,7 +660,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         consecutive: List[Dict[str, Any]] = []
         for ds in datasets:
             dsid = ds.get("id")
-            if not dsid:
+            if not dsid or dsid in missing_refresh_ids:
                 continue
             history = refreshes.get(dsid) or []
             # history is sorted most-recent-first by the collector.
@@ -798,6 +809,15 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                                 "or interactive-query slowdowns.")
             ))
 
+    if missing_refresh_ids:
+        for finding in findings:
+            if finding["rule_id"] in {"PERF-004", "PERF-006", "PERF-007",
+                                      "PERF-010", "PERF-014", "PERF-015"}:
+                finding["evidence"]["missingRefreshDatasetIds"] = missing_refresh_ids
+                finding["evidence"]["refreshErrors"] = sm.get("refreshErrors") or {}
+                if finding["status"] != "fail":
+                    finding["status"] = "missing_evidence"
+                    finding["title"] += " (refresh evidence incomplete)"
     return findings
 
 
@@ -824,8 +844,10 @@ def _summarise_runs(history: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _analyze_jobs(raw_dir: Path, rules: Dict[str, Any]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
-    data = load_raw(raw_dir / "pipelines_notebooks.json")
-    if not data:
+    data = load_raw(raw_dir / "pipelines_notebooks.json", allow_incomplete=True)
+    if not isinstance(data, dict) or not any(
+        isinstance(data.get(key), list) for key in ("pipelines", "notebooks")
+    ):
         for rid in ("PERF-008", "PERF-009"):
             if rid in rules:
                 out.append(missing_raw_finding(rules[rid], "performance", "pipelines_notebooks.json"))
@@ -916,6 +938,20 @@ def _analyze_jobs(raw_dir: Path, rules: Dict[str, Any]) -> List[Dict[str, Any]]:
                                "test before promoting."
             ))
 
+    incomplete = collection_coverage_incomplete(data)
+    for finding in out:
+        finding["evidence"]["coverage_status"] = "partial" if incomplete else "complete"
+        finding["evidence"]["historyScope"] = "recent_retained_observations"
+        if incomplete and finding["status"] != "fail":
+            finding["status"] = "unknown"
+            finding["title"] += " (coverage incomplete)"
+            finding["evidence"]["reason"] = (
+                "Inventory or job history is unavailable for part of the scope; "
+                "available observations cannot establish run health for missing evidence."
+            )
+            finding["recommendation"] = (
+                "Resolve inventory/job-history collection gaps and rerun collection and analysis."
+            )
     return out
 
 

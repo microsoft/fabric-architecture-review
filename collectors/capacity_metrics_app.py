@@ -11,8 +11,9 @@ that XMLA normally requires.
 Flow:
   1. Locate the Metrics App dataset:
      - explicit override via ``METRICS_APP_WORKSPACE_ID`` + ``METRICS_APP_DATASET_ID``,
-     - else scan ``/v1.0/myorg/admin/datasets`` for one whose name contains
-       "Capacity Metrics".
+     - else discover eligible workspace identities and list only their datasets
+       for a name containing "Capacity Metrics".
+     Pro/shared, PPU and inactive workspace exclusions also apply to overrides.
   2. POST a small set of DAX probes to
      ``/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/executeQueries``.
   3. Persist results (and any per-query errors) to
@@ -33,35 +34,59 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from collectors._http import collect_value, request
+from collectors._http import Headers, HttpError, collect_value, collect_workspace_groups, request
+from collectors._common import record_collection_failure
 from collectors.auth import POWERBI_SCOPE, get_default_provider
+from collectors.workspace_scope import (
+    is_excluded_workspace, resolve_workspace_scope, excluded_workspace_ids,
+)
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
 DATASET_NAME_HINT = os.environ.get("METRICS_APP_DATASET_NAME_HINT", "Capacity Metrics").lower()
 
 
-def _find_dataset(headers: Dict[str, str]) -> Optional[Dict[str, str]]:
+def _find_dataset(headers: Headers, raw_dir: Path | None = None) -> Optional[Dict[str, str]]:
     ws_id = os.environ.get("METRICS_APP_WORKSPACE_ID")
     ds_id = os.environ.get("METRICS_APP_DATASET_ID")
+    try:
+        groups = collect_workspace_groups(f"{PBI}/admin/groups", headers)
+        admin = True
+    except HttpError as exc:
+        if exc.status_code not in (401, 403) or exc.error_code == "IncompleteWorkspaceListing":
+            raise
+        groups = collect_workspace_groups(f"{PBI}/groups", headers)
+        admin = False
+    groups = resolve_workspace_scope(groups, headers, raw_dir)
+    excluded = excluded_workspace_ids(raw_dir, operational=True) if raw_dir is not None else set()
+    excluded.update(str(w.get("id") or w.get("objectId") or "").lower() for w in groups
+                    if is_excluded_workspace(w, operational=True))
     if ws_id and ds_id:
+        if ws_id.lower() in excluded:
+            return None
         return {"workspaceId": ws_id, "datasetId": ds_id, "name": "(env override)", "source": "env"}
 
-    print("  Scanning admin/datasets for the Capacity Metrics App...")
-    datasets = collect_value(f"{PBI}/admin/datasets", headers)
-    for d in datasets:
-        name = (d.get("name") or "").lower()
-        if DATASET_NAME_HINT in name:
-            return {
-                "workspaceId": d.get("workspaceId") or d.get("groupId") or "",
-                "datasetId": d.get("id"),
-                "name": d.get("name"),
-                "source": "admin/datasets",
-            }
+    print("  Scanning eligible workspaces for the Capacity Metrics App...")
+    for group in groups:
+        gid = group.get("id")
+        if not gid:
+            raise HttpError("Workspace listing returned a row without an ID")
+        if gid.lower() in excluded:
+            continue
+        datasets = collect_value(f"{PBI}/{'admin/' if admin else ''}groups/{gid}/datasets", headers)
+        for d in datasets:
+            name = (d.get("name") or "").lower()
+            if DATASET_NAME_HINT in name:
+                return {
+                    "workspaceId": gid,
+                    "datasetId": d.get("id"),
+                    "name": d.get("name"),
+                    "source": "workspace/datasets",
+                }
     return None
 
 
 def _execute_dax(
-    headers: Dict[str, str], workspace_id: str, dataset_id: str, dax: str
+    headers: Headers, workspace_id: str, dataset_id: str, dax: str
 ) -> Dict[str, Any]:
     url = f"{PBI}/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
     body = {
@@ -103,6 +128,7 @@ PROBES: List[Dict[str, str]] = [
 ]
 
 
+@record_collection_failure("capacity_metrics_app.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     from dotenv import load_dotenv
     load_dotenv()
@@ -128,7 +154,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         return target
 
     provider = get_default_provider()
-    headers = provider.headers(scope=POWERBI_SCOPE)
+    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
 
     out: Dict[str, Any] = {
         "datasetLocated": False,
@@ -138,10 +164,10 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     }
 
     print("Capacity metrics app: locating dataset...")
-    ds = _find_dataset(headers)
+    ds = _find_dataset(headers, target_dir)
     if not ds:
         out["notes"].append(
-            "Capacity Metrics App dataset not found via admin/datasets. "
+            "Capacity Metrics App dataset not found in eligible workspaces. "
             "Install it from AppSource and re-run, or set METRICS_APP_WORKSPACE_ID "
             "and METRICS_APP_DATASET_ID in .env to point at it explicitly."
         )

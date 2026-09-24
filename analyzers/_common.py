@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from dotenv import load_dotenv
+from collectors.workspace_scope import filter_review_payload
 
 # Load .env once when any analyzer imports the helpers so env-driven toggles
 # (e.g. CAPACITY_METRICS_APP_INSTALLED, CAPACITY_AUTO_PAUSE_CONFIGURED) work
@@ -146,12 +147,41 @@ def threshold(group: str, key: str, default: Any, *,
         return default
 
 
-def load_raw(path: str | Path) -> Optional[Dict[str, Any]]:
+def load_raw(path: str | Path, *, allow_incomplete: bool = False) -> Optional[Dict[str, Any]]:
+    """Read evidence; integrity checks may explicitly inspect incomplete metadata."""
     p = Path(path)
     if not p.exists():
         return None
     with p.open("r", encoding="utf-8-sig") as f:
-        return json.load(f)
+        data = filter_review_payload(json.load(f), p.parent)
+    if not allow_incomplete and isinstance(data, dict) and (
+        data.get("collectionComplete") is False
+        or data.get("failedWorkspaces")
+        or (isinstance(data.get("_meta"), dict) and data["_meta"].get("complete") is False)
+    ):
+        return None
+    return data
+
+
+def collection_coverage_incomplete(data: Dict[str, Any]) -> bool:
+    """Recognize coverage gaps when a check explicitly opts into partial data."""
+    meta = data.get("_meta")
+    return bool(
+        data.get("collectionComplete") is False
+        or data.get("failedWorkspaces")
+        or data.get("collectionErrors")
+        or data.get("inventoryErrors")
+        or data.get("errors")
+        or (isinstance(meta, dict) and meta.get("complete") is False)
+    )
+
+
+def definition_coverage_incomplete(data: Dict[str, Any]) -> bool:
+    """Definition checks may use known items, but cannot pass gaps as all-clear."""
+    return collection_coverage_incomplete(data) or any(
+        not isinstance(row, dict) or row.get("error") or not row.get("parts")
+        for key in ("pipelines", "notebooks") for row in data.get(key) or []
+    )
 
 
 def make_finding(

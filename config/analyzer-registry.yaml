@@ -18,8 +18,8 @@ analyzers:
     cardinality: exactly_one_per_rule
     missing_data_policy: missing_evidence
     required_inputs: [scanner.json, workspace_inventory.json]
-    optional_inputs: [lakehouse_warehouse.json, deployment_pipelines.json, realtime_intelligence.json, semantic_models.json, semantic_model_definitions.json, pipeline_definitions.json]
-    rule_ids: [ARCH-001, ARCH-002, ARCH-003, ARCH-005, ARCH-006, ARCH-007, ARCH-008, ARCH-010, ARCH-011, ARCH-012, ARCH-013, ARCH-014, ARCH-015]
+    optional_inputs: [lakehouse_warehouse.json, deployment_pipelines.json, realtime_intelligence.json, semantic_models.json, semantic_model_definitions.json, pipeline_definitions.json, pipelines_notebooks.json]
+    rule_ids: [ARCH-001, ARCH-002, ARCH-003, ARCH-005, ARCH-006, ARCH-007, ARCH-008, ARCH-010, ARCH-011, ARCH-012, ARCH-013, ARCH-014, ARCH-015, ARCH-016]
 
   - module: analyzers.performance_review
     output: findings_performance.json
@@ -38,6 +38,15 @@ analyzers:
     required_inputs: [dax_analysis.json]
     optional_inputs: []
     rule_ids: [DAX-001, DAX-002]
+
+  - module: analyzers.dataflow_review
+    output: findings_dataflows.json
+    predicate_version: 1
+    cardinality: exactly_one_per_rule
+    missing_data_policy: missing_evidence
+    required_inputs: [dataflows.json]
+    optional_inputs: []
+    rule_ids: [DFLOW-001, DFLOW-002]
 
   - module: analyzers.semantic_model_storage_review
     output: findings_storage_mode.json

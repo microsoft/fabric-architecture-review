@@ -157,6 +157,19 @@ rules:
       dataflows are flagged for migration.
     microsoft_learn_url: https://learn.microsoft.com/fabric/data-factory/dataflows-gen2-overview
 
+  - id: ARCH-016
+    dimension: architecture
+    severity: medium
+    description: >
+      Validate pipeline activity dependency graphs from collected definitions:
+      duplicate activity names, literal dependencies missing from the same
+      activity scope, self-dependencies, and dependency cycles. Container
+      branches are separate scopes. Dynamic or unresolved dependencies and
+      missing, denied, or partial definitions remain unassessed.
+      This is static structural validation, not measured execution reliability
+      or performance.
+    microsoft_learn_url: https://learn.microsoft.com/fabric/data-factory/activity-dependencies
+
   # ==================== PERFORMANCE ====================
   - id: PERF-001
     dimension: performance
@@ -311,6 +324,22 @@ rules:
       the in-scope estate. Definition errors and unavailable metadata remain explicit
       evidence gaps rather than being interpreted as clean models.
     microsoft_learn_url: https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition
+
+  - id: DFLOW-001
+    dimension: performance
+    severity: low
+    description: >
+      Review explicit M buffering, folding barriers, and native-query boundaries.
+      Signals are informational syntax observations, not measured failures.
+    microsoft_learn_url: https://learn.microsoft.com/powerquery-m/table-buffer
+
+  - id: DFLOW-002
+    dimension: performance
+    severity: medium
+    description: >
+      Native Dataflow Gen2 inventory and supported definition analysis cover the
+      scoped estate. Unsupported definitions and parse gaps are not clean results.
+    microsoft_learn_url: https://learn.microsoft.com/rest/api/fabric/dataflow/items/get-dataflow-definition
 
   # ==================== GOVERNANCE ====================
   - id: GOV-001

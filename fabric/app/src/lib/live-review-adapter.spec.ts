@@ -55,6 +55,10 @@ describe("buildLiveReviewData", () => {
         expect(notebook?.findingIds).toEqual(["NBCODE-003"]);
         expect(notebook?.notebookProfile).toMatchObject({ smellCount: 1, affectedCells: "4, 8" });
         expect(room.items).toHaveLength(2);
+        tables.capacities = table(["capacity_id", "assigned_workspace_count"], [
+            ["unknown-mapping", null], ["empty-capacity", 0],
+        ]);
+        expect(buildLiveReviewData(tables).capacities.map((capacity) => capacity.assignedWorkspaceCount)).toEqual([null, 0]);
     });
 
     it("keeps specialist assessment dimensions distinct in the pulse", () => {
@@ -68,5 +72,32 @@ describe("buildLiveReviewData", () => {
         } as LiveReviewTables;
 
         expect(buildLiveReviewData(baseTables).dimensionScores.map((score) => score.dimension)).toEqual(["Governance", "Operational excellence", "Tenant settings", "Best practices"]);
+    });
+
+    it("pins native queries to the shell run and uses authoritative ARCH-016 IDs without changing measure scoring", () => {
+        const empty = table([], []);
+        const tables: LiveReviewTables = {
+            capacities: empty, capacityItems: empty, daxModels: empty, daxMeasures: empty, dimensionSummary: empty,
+            estateNodes: table(["node_id", "node_type", "workspace_id"], [["pipeline-id", "DataPipeline", "authoritative-ws"], ["pipeline-id", "DataPipeline", "other-ws"]]),
+            modelColumns: empty, modelTables: empty, notebookSmells: empty,
+            semanticModels: empty, tenantSettingChanges: empty,
+            workspaceRisk: table(["workspace_id"], [["authoritative-ws"], ["other-ws"]]),
+            runSummary: table(["run_id"], [["review-2026"]]),
+            findings: table(["rule_id", "dimension", "severity", "pipeline_evidence"], [
+                ["ARCH-016", "architecture", "medium", JSON.stringify({ items: [{ workspace_id: "authoritative-ws", item_id: "pipeline-id", item_name: "Pipeline", signal_codes: ["dependency_cycle"], coverage_status: "partial" }] })],
+                ["INFO-001", "performance", "info", null],
+            ]),
+            findingTargets: table(["rule_id", "workspace_id"], [["ARCH-016", "name-matched-ws"]]),
+        };
+        const result = buildLiveReviewData(tables);
+        expect(result.latestRunId).toBe("review-2026");
+        expect(result.findings[0].workspaceIds).toEqual(["authoritative-ws"]);
+        expect(result.findings[0].pipelineEvidence).toMatchObject({ status: "ready", items: [{ itemId: "pipeline-id", signals: ["dependency_cycle"] }] });
+        expect(result.findings[1].severity).toBe("info");
+        expect(result.estate.rooms[0].findingIds).toEqual(["ARCH-016"]);
+        expect(result.estate.rooms[0].items[0]).toMatchObject({ type: "pipeline", findingIds: ["ARCH-016"] });
+        expect(result.estate.rooms[1].items[0].findingIds).toEqual([]);
+        expect(result.daxSummary.measureCount).toBe(0);
+        expect(result.daxSummary.flaggedMeasureCount).toBe(0);
     });
 });

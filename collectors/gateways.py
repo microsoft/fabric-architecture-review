@@ -28,17 +28,18 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from collectors._http import collect_value, get_json
+from collectors._http import Headers, collect_value, get_json
+from collectors._common import record_collection_failure
 from collectors.auth import POWERBI_SCOPE, get_default_provider
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
 
 
-def _list_gateways(headers: Dict[str, str]) -> List[Dict[str, Any]]:
+def _list_gateways(headers: Headers) -> List[Dict[str, Any]]:
     return collect_value(f"{PBI}/gateways", headers)
 
 
-def _datasources(headers: Dict[str, str], gateway_id: str) -> List[Dict[str, Any]]:
+def _datasources(headers: Headers, gateway_id: str) -> List[Dict[str, Any]]:
     payload = get_json(
         f"{PBI}/gateways/{gateway_id}/datasources", headers,
         allow=(200, 401, 403, 404),
@@ -48,7 +49,7 @@ def _datasources(headers: Dict[str, str], gateway_id: str) -> List[Dict[str, Any
     return payload.get("value") or []
 
 
-def _members(headers: Dict[str, str], gateway_id: str) -> List[Dict[str, Any]]:
+def _members(headers: Headers, gateway_id: str) -> List[Dict[str, Any]]:
     # Cluster membership is not exposed on every gateway type; tolerate 404.
     payload = get_json(
         f"{PBI}/gateways/{gateway_id}/members", headers,
@@ -59,9 +60,10 @@ def _members(headers: Dict[str, str], gateway_id: str) -> List[Dict[str, Any]]:
     return payload.get("value") or payload.get("memberGateways") or []
 
 
+@record_collection_failure("gateways.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     provider = get_default_provider()
-    headers = provider.headers(scope=POWERBI_SCOPE)
+    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
 
     print("Gateways: listing...")
     gateways = _list_gateways(headers)

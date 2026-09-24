@@ -41,10 +41,13 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Callable, Dict, Iterable, List
 
 from collectors import _http
-from collectors._common import get_scope_workspace_ids
+from collectors._common import get_scope_workspace_ids, record_collection_failure
+from collectors.workspace_scope import (
+    excluded_workspace_identities, excluded_workspace_ids, is_excluded_workspace, resolve_workspace_scope,
+)
 from collectors.auth import POWERBI_SCOPE, get_default_provider
 
 BASE = "https://api.powerbi.com/v1.0/myorg/admin"
@@ -61,13 +64,15 @@ POLL_INTERVAL_SEC = 5
 # 16-getInfo-calls/hour throttle this gives the run enough room to ride out a
 # slow scan or a Retry-After back-off instead of timing out prematurely.
 POLL_TIMEOUT_SEC = 3600
+Headers = Dict[str, str] | Callable[[], Dict[str, str]]
 
 
-def _modified_workspaces(headers: Dict[str, str]) -> List[str]:
+def _modified_workspaces(headers: Headers) -> List[str]:
     url = f"{BASE}/workspaces/modified?excludePersonalWorkspaces=True&excludeInActiveWorkspaces=True"
-    r = _http.request("GET", url, headers, timeout=60)
-    r.raise_for_status()
-    return [w["id"] for w in r.json() if w.get("id")]
+    workspaces = _http.get_json(url, headers)
+    if not isinstance(workspaces, list) or not all(isinstance(w, dict) and w.get("id") for w in workspaces):
+        raise _http.HttpError("Scanner API returned an invalid modified-workspaces inventory")
+    return [w["id"] for w in workspaces]
 
 
 def _chunks(items: List[str], size: int) -> Iterable[List[str]]:
@@ -75,7 +80,7 @@ def _chunks(items: List[str], size: int) -> Iterable[List[str]]:
         yield items[i:i + size]
 
 
-def _start_scan(headers: Dict[str, str], workspace_ids: List[str]) -> str:
+def _start_scan(headers: Headers, workspace_ids: List[str]) -> str:
     # 429s here (the 16 getInfo calls/hour budget) are absorbed by _http.request,
     # which sleeps for the server-provided Retry-After before retrying.
     r = _http.request(
@@ -90,7 +95,7 @@ def _start_scan(headers: Dict[str, str], workspace_ids: List[str]) -> str:
     return r.json()["id"]
 
 
-def _wait_for_scan(headers: Dict[str, str], scan_id: str) -> None:
+def _wait_for_scan(headers: Headers, scan_id: str) -> None:
     deadline = time.time() + POLL_TIMEOUT_SEC
     while time.time() < deadline:
         r = _http.request("GET", f"{BASE}/workspaces/scanStatus/{scan_id}", headers, timeout=60)
@@ -104,18 +109,29 @@ def _wait_for_scan(headers: Dict[str, str], scan_id: str) -> None:
     raise TimeoutError(f"Scanner API scan {scan_id} did not complete within {POLL_TIMEOUT_SEC}s")
 
 
-def _fetch_scan_result(headers: Dict[str, str], scan_id: str) -> Dict[str, Any]:
+def _fetch_scan_result(headers: Headers, scan_id: str) -> Dict[str, Any]:
     r = _http.request("GET", f"{BASE}/workspaces/scanResult/{scan_id}", headers, timeout=120)
     r.raise_for_status()
     return r.json()
 
 
+@record_collection_failure("scanner.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     provider = get_default_provider()
-    headers = provider.headers(scope=POWERBI_SCOPE)
-    headers["Content-Type"] = "application/json"
+    def headers() -> Dict[str, str]:
+        return {**provider.headers(scope=POWERBI_SCOPE), "Content-Type": "application/json"}
 
     workspace_ids = _modified_workspaces(headers)
+    # The modified-workspaces endpoint returns IDs, not workspace types.
+    # Discover types before getInfo so system workspaces are never scanned.
+    typed_workspaces = _http.collect_workspace_groups(f"{BASE}/groups", headers) if workspace_ids else []
+    discovered_ids = {w["id"].lower() for w in typed_workspaces}
+    if any(wid.lower() not in discovered_ids for wid in workspace_ids):
+        raise _http.HttpError("Scanner workspace identities are missing from the policy inventory")
+    typed_workspaces = resolve_workspace_scope(typed_workspaces, headers, Path(output_dir))
+    excluded = excluded_workspace_identities(typed_workspaces)
+    excluded_ids = {str(w["id"]).lower() for w in excluded} | excluded_workspace_ids(Path(output_dir))
+    workspace_ids = [wid for wid in workspace_ids if wid.lower() not in excluded_ids]
     scope = get_scope_workspace_ids()
     if scope:
         before = len(workspace_ids)
@@ -127,6 +143,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         "workspaces": [],
         "datasourceInstances": [],
         "misconfiguredDatasourceInstances": [],
+        "excludedWorkspaces": excluded,
     }
     batches = list(_chunks(workspace_ids, BATCH_SIZE))
     failed_batches: List[int] = []
@@ -145,7 +162,12 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             failed_batches.append(i)
             print(f"  Batch {i}: FAILED ({exc}); skipping and continuing.")
             continue
-        combined["workspaces"].extend(result.get("workspaces") or [])
+        observed = result.get("workspaces") or []
+        combined["excludedWorkspaces"].extend(excluded_workspace_identities(observed))
+        combined["workspaces"].extend(
+            w for w in observed if not is_excluded_workspace(w)
+            and str(w.get("id") or "").lower() not in excluded_ids
+        )
         combined["datasourceInstances"].extend(result.get("datasourceInstances") or [])
         combined["misconfiguredDatasourceInstances"].extend(
             result.get("misconfiguredDatasourceInstances") or []
@@ -167,6 +189,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         "workspaces_collected": len(combined["workspaces"]),
         "complete": not failed_batches,
     }
+    combined["collectionComplete"] = not failed_batches
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)

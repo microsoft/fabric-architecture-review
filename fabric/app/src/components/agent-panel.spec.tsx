@@ -20,6 +20,16 @@ vi.mock("@/hooks/use-data-agent", () => ({
 }));
 
 describe("AgentPanel", () => {
+    it("exposes native evidence prompts and explains that chat scope is explicit", () => {
+        render(<AgentPanel />);
+        expect(screen.getByRole("button", { name: "Show refresh and job execution coverage for each workspace's latest review." })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Which Dataflow Gen2 queries have syntax signals or coverage gaps?" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Rank calculated DAX objects separately from measures." })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Show ARCH-016 structural defects with workspace and item IDs." })).toBeInTheDocument();
+        expect(screen.getByText(/Chat does not inherit page filters/)).toBeInTheDocument();
+        expect(screen.getByText(/central Data Agent, not the workspace-owner agent/)).toHaveTextContent("does not inherit owner-model row-level security (RLS)");
+    });
+
     it("keeps the composer reachable while the conversation scrolls", () => {
         render(<AgentPanel />);
 

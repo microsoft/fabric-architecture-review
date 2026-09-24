@@ -1,3 +1,5 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 <div class="cover-page">
 
 <h1 class="cover-title">Fabric Architecture Review - Sample</h1>
@@ -9,14 +11,14 @@
 <strong>Reviewer:</strong> Fabric Review Team<br/>
 <strong>Review date:</strong> 2026-01-15<br/>
 <strong>Tenant:</strong> <code>***</code><br/>
-<strong>FAR version:</strong> <code>2026.09.1</code>
+<strong>FAR version:</strong> <code>2026.09.2</code>
 </p>
 
 </div>
 
 # Executive Summary
 
-> **Sample report.** All workspace, dataset, and tenant identifiers have been masked (`***`) for public distribution. A real engagement run retains the actual per-resource IDs so every finding is directly actionable.
+> **Synthetic sample.** This trimmed central-review snapshot is not the Workspace Owner report or evidence of live access validation. Its date, findings and scores describe the sample only. Workspace, dataset and tenant identifiers are masked (`***`); real reviews retain per-resource IDs for investigation.
 
 ## Scope
 
@@ -66,9 +68,9 @@
 
 ## Methodology
 
-This review is aligned to the [Microsoft Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/) and the [Fabric implementation planning](https://learn.microsoft.com/fabric/admin/) guidance. Checks run against tenant metadata, configuration and metrics surfaced through the Power BI and Fabric Admin REST APIs.
+This review uses checks informed by the [Microsoft Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/) and [Fabric implementation planning](https://learn.microsoft.com/fabric/admin/). It evaluates metadata, configuration, source definitions and available operational metrics. Static code findings indicate investigation priorities, not measured runtime cost.
 
-**No customer data is read.** Refer to the Data Safety appendix at the end of this report.
+**No customer business rows are retrieved.** Collected metadata and source definitions can still be sensitive; see the Data Safety appendix.
 
 <div class="page-break"></div>
 
@@ -1110,7 +1112,7 @@ Address medium report BPA items (visual count, slow visuals, layout) over time.
 
 # Recommendations &amp; Roadmap
 
-Findings are prioritized by severity and the effort typically required to remediate them. Implement Critical and High items immediately, Medium items in the next review cycle, and Low / Info items opportunistically as part of ongoing operations.
+Use severity to prioritize investigation and remediation. Validate each finding against workload requirements before changing the environment; review unresolved evidence gaps separately.
 
 ## Immediate &mdash; Critical / High
 
@@ -1165,4 +1167,6 @@ Findings are prioritized by severity and the effort typically required to remedi
 
 ## Data Safety appendix
 
-This assessment runs strictly against metadata, configuration and metrics surfaced by the Microsoft Fabric / Power BI Admin REST APIs and the Fabric Scanner API. **No customer dataset rows, report visuals, lakehouse tables, notebook contents or pipeline payloads were read.** All collector outputs are stored locally in `output/raw/` and can be deleted after the engagement.
+FAR collects metadata, configuration, source definitions and operational metrics. Source evidence can include DAX, Power Query M, notebook source and pipeline definitions; notebook outputs are not retained. **Customer business rows, report visual data and business file contents are not retrieved.** Enabled monitoring and aggregate probes are limited to their documented contracts.
+
+Outputs are stored in the configured local directory or FAR Lakehouse. They can contain sensitive source, identities and access metadata. Restrict access, review exports before sharing and apply your organization's retention policy.

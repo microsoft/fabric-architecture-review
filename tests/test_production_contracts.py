@@ -64,8 +64,35 @@ def test_release_version_is_consistent_across_tracked_surfaces() -> None:
     assert package_lock["version"] == npm_version
     assert package_lock["packages"][""]["version"] == npm_version
     assert f'version: "{npm_version}"' in _text("fabric/app/src/lib/data-agent-factory.ts")
-    assert f"## {version}" in _text("CHANGELOG.md")
+    assert _text("CHANGELOG.md").splitlines().count(f"## {version}") == 1
     assert f"<code>{version}</code>" in _text("samples/report.md")
+
+
+def test_report_describes_evidence_gaps_and_source_collection(tmp_path: Path) -> None:
+    from reports.render_report import render
+
+    findings = tmp_path / "findings.json"
+    findings.write_text(json.dumps([{
+        "rule_id": "PERF-003",
+        "dimension": "performance",
+        "severity": "info",
+        "status": "missing_evidence",
+        "title": "Model size evidence unavailable",
+        "evidence": {"reason": "Collection unavailable."},
+        "recommendation": "Restore collection and rerun the review.",
+    }]), encoding="utf-8")
+    report = tmp_path / "report.md"
+
+    render(findings, report, ROOT / "reports" / "templates", raw_dir=tmp_path / "raw")
+    text = report.read_text(encoding="utf-8")
+
+    assert "| Missing evidence | 1 |" in text
+    assert "Review assessment coverage and unresolved outcomes" in text
+    assert "the tenant is aligned" not in text
+    assert "not measured runtime cost" in text
+    assert "notebook source and pipeline definitions" in text
+    assert "notebook outputs are not retained" in text
+    assert "configured local directory or FAR Lakehouse" in text
 
 
 def test_fabric_setup_deploys_complete_ordered_pipeline() -> None:
@@ -105,6 +132,38 @@ def test_data_agent_notebook_pins_tested_preview_sdk() -> None:
     assert "%pip install -q fabric-data-agent-sdk==0.1.30a0" in code
 
 
+def test_data_agent_notebook_stops_when_dependency_install_fails() -> None:
+    import subprocess
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    notebook = json.loads(_text("fabric/notebooks/05_agent.ipynb"))
+    source = next(
+        "".join(cell["source"]) for cell in notebook["cells"]
+        if "from reports.agent.sdk_deploy import deploy_agent" in "".join(cell["source"])
+    )
+    install = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+        and "requirements.txt" in ast.unparse(node.value)
+    )
+
+    def fail_install(*args, **kwargs):
+        assert kwargs.get("check") is True
+        raise subprocess.CalledProcessError(1, args[0])
+
+    runner = Mock(side_effect=fail_install)
+    namespace = {
+        "subprocess": SimpleNamespace(run=runner),
+        "sys": SimpleNamespace(executable="python"),
+        "os": SimpleNamespace(path=SimpleNamespace(join=lambda *parts: "/".join(parts))),
+        "REPO_DIR": "synthetic-repo",
+    }
+    with pytest.raises(subprocess.CalledProcessError):
+        exec(compile(ast.Module(body=[install], type_ignores=[]), "agent-install", "exec"), namespace)
+    runner.assert_called_once()
+
+
 def test_setup_stamps_compilable_data_agent_source() -> None:
     setup_code = _notebook_code("fabric/setup.ipynb")
     function_start = setup_code.index("def load_agent_nb():")
@@ -116,6 +175,9 @@ def test_setup_stamps_compilable_data_agent_source() -> None:
         "GITHUB_REPO_URL": "https://example.invalid/repository.git",
         "GITHUB_BRANCH": "test-branch",
         "GITHUB_REF": "test-ref",
+        "DATA_AGENT_NAME": "Custom FAR Agent",
+        "SEMANTIC_MODEL_NAME": "Custom FAR model",
+        "LAKEHOUSE_NAME": "custom_far_lakehouse",
         "load_nb": lambda _relative_path: agent_notebook,
     }
 
@@ -127,11 +189,13 @@ def test_setup_stamps_compilable_data_agent_source() -> None:
     )
 
     ast.parse("".join(deploy_cell["source"]))
-    for parameter in ("GITHUB_REPO_URL", "GITHUB_BRANCH", "GITHUB_REF"):
+    for parameter in ("GITHUB_REPO_URL", "GITHUB_BRANCH", "GITHUB_REF",
+                      "DATA_AGENT_NAME", "SEMANTIC_MODEL_NAME", "LAKEHOUSE_NAME"):
         stamped_line = next(
             line for line in deploy_cell["source"] if line.lstrip().startswith(parameter + " ")
         )
         assert stamped_line.endswith("\n")
+        assert json.dumps(namespace[parameter]) in stamped_line
 
 
 def test_fabric_stage_notebooks_invoke_dax_pipeline() -> None:
@@ -140,6 +204,80 @@ def test_fabric_stage_notebooks_invoke_dax_pipeline() -> None:
 
     assert '"collectors.dax_analysis"' in collect_code
     assert '("analyzers.dax_review", "findings_dax.json")' in analyze_code
+
+
+@pytest.mark.parametrize("stage", [
+    "01_collect", "02_analyze", "03_report", "04_gold", "05_agent", "08_owner_agent",
+])
+@pytest.mark.parametrize("source_kind", ["git", "snapshot"])
+def test_stage_checkout_reloads_framework_modules_in_a_warm_session(
+    tmp_path: Path, stage: str, source_kind: str,
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    # Windows patch.dict restoration can drop empty values from the native environment.
+    subprocess_env = dict(os.environ)
+    code = _notebook_code(f"fabric/notebooks/{stage}.ipynb")
+    code = "\n".join(line for line in code.splitlines() if not line.lstrip().startswith("%"))
+    start = code.index("sys.path.insert(0, REPO_DIR)")
+    bootstrap = code[start:code.index("os.chdir(REPO_DIR)", start)]
+    git_helper = next((
+        ast.get_source_segment(code, node) for node in ast.parse(code).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_git"
+    ), "")
+    if source_kind == "git":
+        initialized = subprocess.run(
+            ["git", "init", "--quiet", str(tmp_path)], capture_output=True, text=True,
+            env=subprocess_env,
+        )
+        assert initialized.returncode == 0, initialized.stdout + initialized.stderr
+        subprocess.run([
+            "git", "-C", str(tmp_path), "-c", "user.name=FAR Test",
+            "-c", "user.email=far-test@example.invalid", "-c", "commit.gpgsign=false",
+            "-c", f"core.hooksPath={tmp_path / 'disabled-hooks'}",
+            "commit", "--quiet", "--allow-empty", "-m", "Synthetic runtime fixture",
+            "-m", "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>",
+        ], check=True, capture_output=True, env=subprocess_env)
+        revision = subprocess.run(
+            ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+            env=subprocess_env,
+        ).stdout.strip()
+    packages = ("collectors", "analyzers", "reports", "orchestration")
+    for name in packages:
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "__init__.py").write_text('VERSION = "current"\n', encoding="utf-8")
+        (directory / "probe.py").write_text('VERSION = "current"\n', encoding="utf-8")
+    script = f"""
+import importlib, os, subprocess, sys
+from types import ModuleType
+REPO_DIR = sys.argv[1]
+exec({git_helper!r})
+sys.path.insert(0, REPO_DIR)
+for name in {packages!r}:
+    importlib.import_module(name).VERSION = "stale"
+    importlib.import_module(name + ".probe").VERSION = "stale"
+external = ModuleType("sempy_labs")
+sys.modules["sempy_labs"] = external
+exec({bootstrap!r})
+for name in {packages!r}:
+    assert importlib.import_module(name).VERSION == "current", name
+    assert importlib.import_module(name + ".probe").VERSION == "current", name + ".probe"
+assert sys.modules["sempy_labs"] is external
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True, cwd=tmp_path,
+        env=subprocess_env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if not git_helper:
+        return
+    if source_kind == "git":
+        assert f"Framework revision: {revision}" in result.stdout
+    else:
+        assert "Framework revision: unavailable (source snapshot has no Git metadata)" in result.stdout
 
 
 @pytest.mark.parametrize(

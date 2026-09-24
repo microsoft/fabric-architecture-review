@@ -46,7 +46,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from collectors._http import HttpError, request
+from collectors._http import Headers, HttpError, request
+from collectors._common import load_complete_raw, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
@@ -80,7 +81,7 @@ def _decode_part(payload: str, payload_type: str) -> Optional[str]:
 
 
 def _get_definition(
-    headers: Dict[str, str],
+    headers: Headers,
     workspace_id: str,
     dataset_id: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -97,7 +98,7 @@ def _get_definition(
 
 
 def _get_definition_impl(
-    headers: Dict[str, str],
+    headers: Headers,
     workspace_id: str,
     dataset_id: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -201,18 +202,14 @@ def _write_progress(
     temporary.replace(target)
 
 
+@record_collection_failure("semantic_model_definitions.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     target = raw_dir / "semantic_model_definitions.json"
 
     src = raw_dir / "semantic_models.json"
-    if not src.exists():
-        print("Semantic model definitions: semantic_models.json not found - run that collector first.")
-        target.write_text(json.dumps({"models": []}, indent=2), encoding="utf-8")
-        return target
-
-    catalog = json.loads(src.read_text(encoding="utf-8-sig"))
+    catalog = load_complete_raw(src)
     datasets = catalog.get("datasets") or []
     fetch_all_setting = os.environ.get("SEMANTIC_MODEL_DEF_ALL")
     fetch_all = fetch_all_setting is None or _truthy(fetch_all_setting)
@@ -259,7 +256,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             continue
         if MODEL_DELAY_SECONDS:
             time.sleep(MODEL_DELAY_SECONDS)
-        headers = provider.headers(scope=FABRIC_SCOPE)
+        headers = lambda: provider.headers(scope=FABRIC_SCOPE)
         defn, err = _get_definition(headers, wsid, did)
         rec = _normalise(ds, defn, err)
         models_out.append(rec)

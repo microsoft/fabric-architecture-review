@@ -12,6 +12,7 @@ import {
 } from "@azure/msal-browser";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { nativeAgentGrounding } from "@/lib/native-agent-grounding";
 
 interface DataAgentClient {
     ask(question: string): Promise<string>;
@@ -66,15 +67,18 @@ function extractTextContent(content: unknown): string {
 
 export function groundDataAgentQuestion(question: string): string {
     const normalizedQuestion = question.trim();
+    const nativeGuidance = nativeAgentGrounding(normalizedQuestion);
     const domains = reviewEvidenceDomains
         .filter(({ pattern }) => pattern.test(normalizedQuestion))
         .map(({ label }) => label);
     const referencesGeneralReview = /\b(?:findings?|review|risk|recommendations?|severity)\b/i.test(normalizedQuestion);
-    if (domains.length === 0 && !referencesGeneralReview) return normalizedQuestion;
+    if (domains.length === 0 && !referencesGeneralReview && nativeGuidance.length === 0) return normalizedQuestion;
 
     const referencesNotebookSmells = /\bnotebooks?\b/i.test(normalizedQuestion)
         && /\b(?:code[ -]?smells?|NBCODE(?:-\d+)?)\b/i.test(normalizedQuestion);
-    const evidenceTask = referencesNotebookSmells
+    const evidenceTask = nativeGuidance.length
+        ? `Answer using recorded native evidence${domains.length ? ` and matching ${domains.join(", ")}` : ""}; follow the requested scope and time window.`
+        : referencesNotebookSmells
         ? [
             "For the latest completed architecture review, list every notebook code-smell finding.",
             "Return the rule ID, notebook name, workspace name, severity, affected cells, and state explicitly when any field is unavailable.",
@@ -84,6 +88,7 @@ export function groundDataAgentQuestion(question: string): string {
         ].join(" ");
     return [
         evidenceTask,
+        ...nativeGuidance,
         "Use only those returned rows and do not infer missing findings, values, rankings, or fields; state explicitly when evidence is unavailable or tied.",
         `Then answer: ${normalizedQuestion}`,
     ].join(" ");
@@ -181,7 +186,7 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 buildDataAgentEndpoint(this.workspaceId, this.dataAgentId),
                 { requestInit: { headers: { Authorization: `Bearer ${token}` } } },
             );
-            const client = new Client({ name: "fabric-architecture-review", version: "2026.9.1" });
+            const client = new Client({ name: "fabric-architecture-review", version: "2026.9.2" });
             try {
                 await client.connect(transport);
                 const tools = await client.listTools(undefined, { timeout: requestTimeoutMs });

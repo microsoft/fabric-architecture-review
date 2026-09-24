@@ -39,7 +39,7 @@ PAGE_W, PAGE_H = 1280, 720
 # NOTE: Fabric/Power BI caches a registered theme *by name* across deploys, so
 # editing the theme body without renaming it keeps the stale (base CY24SU10)
 # palette. Bump this suffix whenever the theme changes to force a fresh load.
-THEME_NAME = "FabricArchReviewGov_v2"
+THEME_NAME = "FabricArchReviewGov_v3"
 BRAND = "#0F6CBD"   # primary blue (headers, callouts, bars)
 BRAND_DK = "#0A4A82"
 GOOD = "#107C10"    # pass / green
@@ -121,6 +121,9 @@ ACCENT = {
     "ModelInternals": "#1E8A97",
     "Notebooks": "#B88745",
     "AgentEval": "#7A4FBF",
+    "ExecutionHistory": "#0E7C66",
+    "DataflowsGen2": "#038387",
+    "DaxObjects": "#C43D57",
 }
 
 
@@ -638,10 +641,8 @@ def _tile(page: str, key: str, target: str, title: str, subtitle: str,
     """A clickable map tile: a coloured card with a title + one-line subtitle,
     plus a transparent navigation button laid on top (``nav_tab`` > ``card_tab``
     so the button sits above the card and captures the click)."""
-    paras = [
-        _para([_run(" ", size=14)]),
-        _para([_run(" ", size=14)]),
-        _para([_run(title, size=15, bold=True, color="#FFFFFF",
+    paras = ([_para([_run(" ", size=14)])] * 2 if h >= 140 else [_para([_run(" ", size=4)])]) + [
+        _para([_run(title, size=15 if h >= 140 else 13, bold=True, color="#FFFFFF",
                     family="Segoe UI Semibold")], align="center"),
         _para([_run(subtitle, size=10, color="#EAF2FB")], align="center"),
     ]
@@ -958,7 +959,7 @@ _HOME_TILES = [
     ("BestPractices", "Best Practices", "BPA, Delta & capacity health", "#107C41"),
     ("SemanticModels", "Semantic models", "VertiPaq memory footprint", GOOD),
     ("ModelDetail", "Model detail", "Tables, columns & encoding", "#00787A"),
-    ("DaxAnalyzer", "DAX analyzer", "Static measure risk signals", ACCENT["DaxAnalyzer"]),
+    ("DaxAnalyzer", "DAX", "Static measure risk signals", ACCENT["DaxAnalyzer"]),
     ("Notebooks", "Notebooks", "Spark code anti-patterns", "#8E562E"),
     ("AgentEval", "Agent Eval", "Data-agent accuracy", "#7A4FBF"),
 ]
@@ -989,7 +990,8 @@ def _home_page() -> Dict[str, Any]:
     banner = _banner(
         page, "Fabric Architecture Review",
         "Your governance review as a map — click any region to explore its "
-        "findings. Every page opens filtered to your latest review run.",
+        "findings. Review pages open on the latest run; native execution history "
+        "retains observations across reviews.",
     )
     # The rounded brand banner is baked into the hero background (home_map.render),
     # so make the banner textbox transparent and let its title float over it —
@@ -1019,7 +1021,7 @@ def _home_page() -> Dict[str, Any]:
         ("Trends", "\U0001F4C8  Trends", ACCENT["Trends"]),
         ("OperationalExcellence", "\U0001F503  Operational excellence", ACCENT["OperationalExcellence"]),
         ("BestPractices", "\u2705  Best practices", ACCENT["BestPractices"]),
-        ("DaxAnalyzer", "DAX  DAX analyzer", ACCENT["DaxAnalyzer"]),
+        ("DaxAnalyzer", "DAX", ACCENT["DaxAnalyzer"]),
         ("AgentEval", "\U0001F916  Agent eval", ACCENT["AgentEval"]),
     ]
     qw, qh, qgap = 288, 34, 8
@@ -1029,6 +1031,10 @@ def _home_page() -> Dict[str, Any]:
             page, f"quick{j}", target, qx, _ROW_KPI_Y + j * (qh + qgap), qw, qh,
             60 + j, label=label, fill=fill, font_size=12,
         ))
+    visuals.append(_action_button(
+        page, "native_evidence", "ExecutionHistory", 16, 620, 288, 34, 79,
+        label="Native evidence & execution history", fill=ACCENT["ExecutionHistory"],
+    ))
     visuals += _version_strip(page, 80)
     return {
         "name": page, "display": "Home", "visuals": visuals,
@@ -1046,7 +1052,7 @@ def _home_tiles_page() -> Dict[str, Any]:
     visuals = [_banner(
         page, "Fabric Architecture Review",
         "Your governance review at a glance — pick an area below to explore the "
-        "findings. Every page opens filtered to your latest review run.",
+        "findings. Review pages open on the latest run; execution history spans reviews.",
     )]
     visuals += _kpi_row(page, [
         ("score", "Best Practice Score", "Score (%)"),
@@ -1063,9 +1069,14 @@ def _home_tiles_page() -> Dict[str, Any]:
     ))
     cols, gap, margin = 5, 16, 16
     tile_w = (PAGE_W - 2 * margin - (cols - 1) * gap) / cols
-    tile_h = 210
     top = _CONTENT_Y + 24
-    for i, (target, title, subtitle, color) in enumerate(_HOME_TILES):
+    tiles = [*_HOME_TILES,
+             ("ExecutionHistory", "Execution history", "Native refresh and job observations", ACCENT["ExecutionHistory"]),
+             ("DataflowsGen2", "Dataflow Gen2", "Power Query signals and coverage", ACCENT["DataflowsGen2"]),
+             ("DaxObjects", "DAX objects", "Calculated columns, tables and items", ACCENT["DaxObjects"])]
+    rows = (len(tiles) + cols - 1) // cols
+    tile_h = (PAGE_H - 68 - top - (rows - 1) * gap) / rows
+    for i, (target, title, subtitle, color) in enumerate(tiles):
         row, col = divmod(i, cols)
         x = margin + col * (tile_w + gap)
         y = top + row * (tile_h + gap)
@@ -1436,11 +1447,11 @@ def _dax_analyzer_page() -> Dict[str, Any]:
     )]
     visuals.append(_field_slicer(
         page, "capacity", entity, "capacity_name",
-        16, _ROW_KPI_Y, 280, _KPI_H, "Capacity", 1,
+        16, _ROW_KPI_Y, 224, _KPI_H, "Capacity", 1,
     ))
     visuals.append(_field_slicer(
         page, "model", entity, "model_name",
-        304, _ROW_KPI_Y, 320, _KPI_H, "Semantic model", 2,
+        248, _ROW_KPI_Y, 248, _KPI_H, "Semantic model", 2,
     ))
     for index, (key, measure, title) in enumerate([
         ("measures", "DAX Measure Count", "Measures"),
@@ -1448,10 +1459,16 @@ def _dax_analyzer_page() -> Dict[str, Any]:
         ("high", "DAX High Risk Count", "High risk"),
         ("average", "DAX Average Risk Score", "Average risk score"),
     ]):
-        visuals.append(_card(page, key, entity, measure, 640 + index * 216, _ROW_KPI_Y, title, 3 + index))
+        card = _card(page, key, entity, measure, 512 + index * 192, _ROW_KPI_Y, title, 3 + index)
+        card["position"].update({"width": 176, "height": _KPI_H})
+        visuals.append(card)
+    visuals.append(_action_button(
+        page, "other_objects", "DaxObjects", 16, 210, 248, 28, 9,
+        label="Calculated columns, tables & items", fill=ACCENT["DaxObjects"],
+    ))
     visuals.append(_stacked_hbar(
         page, "risk", entity, "model_name", "DAX Measure Count", "risk_level",
-        16, _CONTENT_Y, 440, _CONTENT_H,
+        16, 250, 440, PAGE_H - 266,
         "Measure risk distribution by semantic model", 7, measure=True,
         color=(entity, "risk_level", {"high": BAD, "medium": ORANGE, "low": LOWBLUE, "none": GOOD}),
     ))
@@ -1459,11 +1476,137 @@ def _dax_analyzer_page() -> Dict[str, Any]:
         page, "details", entity,
         ["capacity_name", "model_name", "table_name", "measure_name", "risk_level",
          "risk_score", "signal_codes", "expression_preview"], [],
-        472, _CONTENT_Y, PAGE_W - 472 - 16, _CONTENT_H,
+        472, 250, PAGE_W - 472 - 16, PAGE_H - 266,
         "Measures — explainable static signals and expression preview", 8,
     ))
     return {"name": page, "display": "DAX Analyzer", "visuals": visuals,
             "filters": [_latest_run_filter(page)]}
+
+
+def _native_navigation(page: str) -> List[Dict[str, Any]]:
+    targets = [
+        ("ExecutionHistory", "Execution history"),
+        ("DataflowsGen2", "Dataflow Gen2"),
+        ("DaxObjects", "Non-measure DAX"),
+        ("DaxAnalyzer", "DAX measures"),
+    ]
+    return [_action_button(
+        page, f"native_nav_{index}", target, 16 + index * 228, 210, 216, 28, 30 + index,
+        label=label, fill=ACCENT[target],
+    ) for index, (target, label) in enumerate(targets)]
+
+
+def _execution_history_page() -> Dict[str, Any]:
+    page, coverage, executions = "ExecutionHistory", "gold_execution_coverage", "gold_item_executions"
+    visuals = [_banner(
+        page, "Native execution history",
+        "Inspect observed semantic-model refreshes and Fabric jobs. This is retained API "
+        "evidence, not a complete activity ledger, CU attribution or individual DAX timing.",
+    )]
+    for index, (entity, column, title, x, width) in enumerate([
+        ("gold_run_summary", "run_id", "Review snapshot (optional)", 16, 260),
+        (coverage, "workspace_name", "Workspace", 288, 240),
+        (coverage, "item_type", "Item type", 540, 220),
+    ]):
+        visuals.append(_field_slicer(page, f"scope{index}", entity, column,
+                                     x, 88, width, 110, title, 1 + index))
+    for index, (measure, title) in enumerate([
+        ("Observed Execution IDs", "Distinct execution IDs"),
+        ("Max Observed Execution Seconds", "Longest observed (seconds)"),
+    ]):
+        card = _card(page, f"metric{index}", executions, measure, 776 + index * 248, 88, title, 4 + index)
+        card["position"].update({"width": 240, "height": 110})
+        visuals.append(card)
+    visuals += _native_navigation(page)
+    visuals.append(_table(page, "coverage", coverage,
+                          ["run_timestamp", "workspace_name", "item_name", "item_type", "collection_status",
+                           "observed_execution_count", "history_scope", "notice", "item_id",
+                           "workspace_id", "run_id"], [],
+                          16, 250, 1248, 136, "Collection coverage - select an item to inspect its executions", 6))
+    visuals.append(_table(page, "executions", executions,
+                          ["run_timestamp", "workspace_name", "item_name", "execution_type", "status",
+                           "start_time", "end_time", "duration_ms", "execution_id", "source",
+                           "workspace_id", "item_id", "run_id", "execution_key"], [],
+                          16, 402, 1248, 224, "Observed executions - duration in milliseconds; review timestamp identifies each observation", 7))
+    visuals.append(_info(page, "interpretation", "Read coverage before drawing conclusions",
+                         "The same execution can recur in several FAR snapshots; distinct-ID totals are not observation counts. "
+                         "For historical status totals, use the latest observation per execution. Missing history is not zero failures. "
+                         "API retention and collection gaps can leave periods unobserved; a weekly FAR schedule does not guarantee a full week of events.",
+                         16, 638, 1248, 66, 8))
+    return {"name": page, "display": "Execution history", "visuals": visuals, "filters": []}
+
+
+def _dataflow_evidence_page() -> Dict[str, Any]:
+    page, coverage, queries = "DataflowsGen2", "gold_dataflows", "gold_dataflow_queries"
+    visuals = [_banner(
+        page, "Dataflow Gen2 - Power Query evidence",
+        "Latest review snapshot. Definition coverage and conservative M signals are kept separate: "
+        "a static signal suggests investigation, not a proven folding failure or runtime cost.",
+    )]
+    for index, (column, title) in enumerate([("workspace_name", "Workspace"), ("dataflow_name", "Dataflow Gen2")]):
+        visuals.append(_field_slicer(page, f"scope{index}", coverage, column,
+                                     16 + index * 416, 88, 400, 110, title, 1 + index))
+    for index, (measure, title) in enumerate([
+        ("Dataflow Query Observations", "Parsed queries"), ("Flagged Dataflow Queries", "Queries to inspect"),
+    ]):
+        card = _card(page, f"metric{index}", queries, measure, 848 + index * 216, 88, title, 3 + index)
+        card["position"]["height"] = 110
+        visuals.append(card)
+    visuals += _native_navigation(page)
+    visuals.append(_table(page, "coverage", coverage,
+                          ["workspace_name", "dataflow_name", "definition_status", "query_count",
+                           "flagged_query_count", "notice", "dataflow_id",
+                           "workspace_id", "run_id", "run_timestamp"], [],
+                          16, 250, 1248, 136, "Definition coverage - select a dataflow to inspect its queries", 5))
+    visuals.append(_table(page, "queries", queries,
+                          ["dataflow_name", "query_name", "signal_codes", "signal_count", "recommendation", "notice",
+                           "workspace_id", "dataflow_id", "run_id", "run_timestamp"], [],
+                          16, 402, 1248, 224, "Query signals and next actions - metadata only, no M source", 6))
+    visuals.append(_info(page, "interpretation", "Validate in the authoring experience",
+                         "Use the query name to locate the step in Dataflow Gen2. Confirm folding, refresh behavior and source constraints before changing it. "
+                         "Unsupported, partial or unavailable definitions are not clean results. Legacy Dataflow inventory alone does not establish Gen2 coverage. "
+                         "No FUAM connection is required.",
+                         16, 638, 1248, 66, 7))
+    return {"name": page, "display": "Dataflow Gen2", "visuals": visuals, "filters": [_latest_run_filter(page)]}
+
+
+def _dax_objects_page() -> Dict[str, Any]:
+    page, coverage, objects = "DaxObjects", "gold_dax_object_coverage", "gold_dax_objects"
+    visuals = [_banner(
+        page, "DAX objects - beyond measures",
+        "Latest review snapshot. Calculated columns, calculated tables and calculation items "
+        "retain their object types. Static signals are not measured duration or CU savings.",
+    )]
+    for index, (entity, column, title, x, width) in enumerate([
+        (coverage, "workspace_name", "Workspace", 16, 260),
+        (coverage, "model_name", "Semantic model", 288, 272),
+        (objects, "object_type", "Object type", 572, 256),
+    ]):
+        visuals.append(_field_slicer(page, f"scope{index}", entity, column,
+                                     x, 88, width, 110, title, 1 + index))
+    for index, (measure, title) in enumerate([
+        ("DAX Object Observations", "Non-measure objects"), ("Flagged DAX Objects", "Objects to inspect"),
+    ]):
+        card = _card(page, f"metric{index}", objects, measure, 848 + index * 216, 88, title, 4 + index)
+        card["position"]["height"] = 110
+        visuals.append(card)
+    visuals += _native_navigation(page)
+    visuals.append(_table(page, "coverage", coverage,
+                          ["workspace_name", "model_name", "definition_status", "object_count",
+                           "flagged_object_count", "notice", "model_id",
+                           "workspace_id", "run_id", "run_timestamp"], [],
+                          16, 250, 1248, 136, "Model coverage - select a model; counts cover all non-measure object types", 6))
+    visuals.append(_table(page, "objects", objects,
+                          ["model_name", "table_name", "object_type", "object_name",
+                           "risk_level", "risk_score", "signal_codes", "signal_details_json",
+                           "workspace_id", "model_id", "run_id", "run_timestamp"], [],
+                          16, 402, 1248, 224, "Non-measure DAX objects - use object type and signal to choose the right investigation", 7))
+    visuals.append(_info(page, "interpretation", "Choose the right validation",
+                         "For calculated columns and tables, investigate processing time and model size. For calculation items, test representative consuming queries. "
+                         "Measure counts remain on DAX measures; report visual calculations are not collected. Missing definitions are not evidence of low risk. "
+                         "Validate any rewrite before deploying it.",
+                         16, 638, 1248, 66, 8))
+    return {"name": page, "display": "DAX objects", "visuals": visuals, "filters": [_latest_run_filter(page)]}
 
 
 def _model_detail_page() -> Dict[str, Any]:
@@ -1587,6 +1730,9 @@ def _pages() -> List[Dict[str, Any]]:
         _best_practices_page(),
         _semantic_models_page(),
         _dax_analyzer_page(),
+        _execution_history_page(),
+        _dataflow_evidence_page(),
+        _dax_objects_page(),
         _model_detail_page(),
         _model_internals_page(),
         _notebook_page(),
@@ -1601,6 +1747,32 @@ def _pages() -> List[Dict[str, Any]]:
             p["name"], "homebtn", "Home", PAGE_W - 128, 20, 96, 30, 9000,
             label="\u2302 Home", fill=BRAND_DK,
         ))
+    for p in pages:
+        detail_key = {"ExecutionHistory": "executions", "DataflowsGen2": "queries", "DaxObjects": "objects"}.get(p["name"])
+        if not detail_key:
+            continue
+        query_visuals = [v for v in p["visuals"] if "query" in v["visual"]]
+        coverage_id, detail_id = _id(p["name"], "coverage"), _id(p["name"], detail_key)
+        p["visualInteractions"] = [{
+            "source": source, "target": target["name"],
+            "type": "DataFilter" if source == coverage_id and target["visual"]["visualType"] != "slicer" else "NoFilter",
+        } for source in (coverage_id, detail_id) for target in query_visuals if target["name"] != source]
+        for visual in query_visuals:
+            if visual["visual"]["visualType"] != "tableEx":
+                continue
+            objects = visual["visual"]["objects"]
+            objects["columnHeaders"] = [{"properties": {"wordWrap": _lit("true"), "autoSizeColumnWidth": _lit("false")}}]
+            objects["values"] = [{"properties": {"wordWrap": _lit("true")}}]
+            objects["total"] = [{"properties": {"totals": _lit("false")}}]
+            widths = {"notice": 360, "recommendation": 440, "signal_details_json": 340,
+                      "signal_codes": 240, "item_name": 200, "model_name": 200, "dataflow_name": 200,
+                      "workspace_name": 180, "run_timestamp": 160, "start_time": 160, "end_time": 160,
+                      "query_name": 200, "object_name": 200, "duration_ms": 112}
+            projections = visual["visual"]["query"]["queryState"]["Values"]["projections"]
+            objects["columnWidth"] = [{
+                "properties": {"value": _lit(f"{widths.get(projection['field']['Column']['Property'], 144)}D")},
+                "selector": {"metadata": projection["queryRef"]},
+            } for projection in projections]
 
     # Premium banners: a subtle azure→brand gradient baked into each non-Home
     # page background, with a thin per-page category accent line beneath it. The
@@ -1684,7 +1856,7 @@ def _theme() -> Dict[str, Any]:
                 "columnHeaders": [{"fontColor": {"solid": {"color": "#FFFFFF"}},
                                    "backColor": {"solid": {"color": BRAND}},
                                    "fontFamily": "Segoe UI Semibold", "fontSize": 10,
-                                   "alignment": "left", "wordWrap": True}],
+                                   "alignment": "Left", "wordWrap": True}],
                 "values": [{"fontColorPrimary": {"solid": {"color": INK}},
                             "backColorPrimary": {"solid": {"color": CARD}},
                             "backColorSecondary": {"solid": {"color": "#F7F9FC"}},
@@ -1854,6 +2026,8 @@ def build_parts(semantic_model_id: str) -> List[Dict[str, str]]:
         }
         if p["filters"]:
             page_obj["filterConfig"] = {"filters": p["filters"]}
+        if p.get("visualInteractions"):
+            page_obj["visualInteractions"] = p["visualInteractions"]
         add(f"definition/pages/{p['name']}/page.json", page_obj)
         for v in p["visuals"]:
             add(f"definition/pages/{p['name']}/visuals/{v['name']}/visual.json", v)

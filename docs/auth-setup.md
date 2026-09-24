@@ -1,19 +1,33 @@
-# Auth Setup — Interactive User
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
 
-This framework authenticates **as you** (interactive user, OAuth 2.0
-authorization-code flow with PKCE). There is no service principal, no client
-secret, and nothing needs to be registered in the client tenant.
+# Auth Setup
 
-Every API call shows up in the Fabric audit log as a normal sign-in by your
-account, identical to what a Fabric administrator would see if they used the
-admin portal or the Power BI REST `Try It` console.
+By default, this framework authenticates **as you** locally (interactive user,
+OAuth 2.0 authorization-code flow with PKCE) or as the notebook's executing
+identity in Fabric. That default requires no service-principal secret or app
+registration. Optional service-principal collection is described below.
+
+The identity used for API calls follows the configured authentication mode.
+Verify scheduled execution with the intended identity, not just the deployer.
+
+## Choose the access task
+
+| You are setting up... | Do this |
+| --- | --- |
+| Local collection | Follow [Local setup](#local-setup), then run the [local review](local-review.md) |
+| Collection inside Fabric | Check [collector roles](#what-you-need-in-the-client-tenant), then follow [deployment](../fabric/DEPLOYMENT.md) |
+| Unattended collection | Use the [optional service-principal path](#standing--unattended-mode--service-principal-optional) and test its actual permissions |
+| FUAM selection or email | Check [targeted permissions](#additional-permissions-for-optional-targeted-reviews); Collect's identity settings do not configure these |
+| An owner-report reader | Follow [reader approval](workspace-owner-report.md#approve-each-new-reader), **not** the collector-admin role list |
+
+**Success:** the intended identity can complete a scoped test, with no unexplained
+access-related evidence gaps. Being able to open the report is a separate permission.
 
 ## Authentication modes
 
 The framework acquires tokens for **two separate planes**, and how each is
-obtained depends on where you run it. Both planes always use the **same
-identity** - your interactive user locally, or the notebook's executing
-identity in Fabric. There is no service principal anywhere in the framework.
+obtained depends on where you run it. The table describes the **default user /
+notebook-identity mode**, not the optional service-principal override.
 
 | Plane | Collectors it serves | Local (PowerShell) | In Fabric (notebook / pipeline) |
 |---|---|---|---|
@@ -22,11 +36,9 @@ identity in Fabric. There is no service principal anywhere in the framework.
 
 Key points:
 
-- **One identity, two planes.** The same identity serves both the Fabric/Power BI
-  plane and the Azure ARM plane. Locally that is your interactive user; in Fabric
-  it is the notebook's executing identity. The Fabric admin / scanner APIs require
-  that delegated user (local) or notebook identity (Fabric) - there is no way to
-  run the review as a bare service principal.
+- **Permissions follow the caller.** Grant the configured identity the roles
+  required by each enabled collector. Changing authentication mode does not
+  grant access or establish that every API supports that mode.
 - **Azure ARM is an opt-in add-on.** Only the opt-in `azure_capacity_automation`
   (Pause/Resume) scan touches Azure ARM. Grant the same identity Azure **Reader**
   on the capacity's subscription and it works; skip the scan
@@ -37,43 +49,34 @@ Key points:
   are reviewing*. If the Fabric capacity lives in a subscription that identity
   cannot read, run the review from inside the tenant that owns it.
 
-> **What does the notebook set up in Fabric?** Nothing permanent. It does **not**
-> create the workspace, a connection, or any role
-> assignment — those are prerequisites you configure once (below). At run time it
-> clones the repo into the session, installs dependencies, acquires tokens, runs
-> the collectors + analyzers, renders `report.md`, and writes the outputs to the
-> attached Lakehouse under `Files/fabric-arch-review/<run-stamp>/`. The only
-> lasting artifact is those output files.
+> **Deployment is distinct from authentication.** Base setup creates the FAR
+> Lakehouse, notebooks, pipeline and optional reporting artifacts. It does not
+> create the target workspace, grant roles or provision sender credentials.
+> Review runs write metadata, reports and Gold tables into the FAR Lakehouse.
+> See the [deployment walkthrough](../fabric/DEPLOYMENT.md).
 
 ## Standing / unattended mode — service principal (optional)
 
-For a permanent, scheduled governance baseline where no human is in
-the loop, run as a dedicated **read-only service principal** instead of a user.
-This is **opt-in and additive** — leave it unset and the framework stays fully
-interactive / notebook-identity. The secret is never stored in code, the setup
-notebook, or pipeline parameters: it lives **only** inside a Fabric cloud
-connection, which is write-only — once pasted, nothing (not even the notebook)
-can read it back.
+The standalone Collect stage has an opt-in `ClientSecretCredential` path.
+Provision the app registration, applicable read-only admin API tenant settings,
+and collector-specific permissions yourself; setup does not grant them.
 
-**Prerequisite (once, before setup):**
-1. Create an app registration (the SP) — note its **client ID** + tenant.
-2. Add the SP to a security group; a Fabric admin enables **"Service principals
-   can use Fabric/Power BI read-only admin APIs"** scoped to that group.
-3. Grant the SP Azure **Reader** on the capacity subscription only if you keep
-   `capacity_metrics`.
+- **Local:** provide `TENANT_ID`, `CLIENT_ID` and `CLIENT_SECRET` through your
+  approved secret-management mechanism. Never commit the secret.
+- **In Fabric:** set `TENANT_ID`, `SP_CLIENT_ID`, `SP_SECRET_KEYVAULT` (vault name
+  or URI) and `SP_SECRET_NAME` on the standalone pipeline. The executing notebook
+  identity must be permitted to retrieve that Key Vault secret. Only when all
+  three `SP_*` credential settings are nonempty does Collect select this path;
+  otherwise it uses the notebook identity.
 
-**Setup never touches the secret.** Set `SP_CLIENT_ID` (+ optional
-`SP_CONNECTION_NAME`, default `sp-fabric-arch-review`) in the setup params. Setup
-deploys everything and just prints a reminder to create the connection — it does
-not create it, because Fabric will not store a service-principal connection
-without a secret.
+The secret is retrieved into process memory/environment at runtime, not stored
+in the notebook, pipeline definition or repository. Protect the executing
+environment and do not print its environment variables.
 
-**Create the connection yourself** (once, after setup): **Manage connections and
-gateways → New → Cloud**, type = **Web v2**, base URL `https://api.fabric.microsoft.com`,
-authentication = **Service principal**, fill tenant/client/secret, name it
-`SP_CONNECTION_NAME`. To run unattended as the SP, schedule the Collect notebook
-with that service principal as its owner. Blank `SP_CLIENT_ID` = run as the
-notebook's executing identity (default).
+`SP_CLIENT_ID` alone does **not** switch identity. Creating a named cloud connection
+does not activate the collector override; configure the Key Vault settings above. Validate the
+enabled collectors with the intended identity before scheduling. This override
+does not change the identity used by FUAM selection or the Outlook sender.
 
 ## What you need in the client tenant
 
@@ -87,11 +90,13 @@ role / permission combinations:
 | `scanner_api` (admin) | Same as above |
 | `workspace_inventory` — admin view (all workspaces) | Same as above |
 | `activity_logs` (admin) | Same as above |
-| `capacity_metrics` — capacity-level Azure Monitor metrics | **Reader** on the Fabric capacity resource in Azure |
+| `capacity_metrics` — capacity, refreshable and workload inventory | Fabric/Power BI administrator for tenant-wide inventory, or Capacity Admin for assigned capacities; this collector does not query Azure Monitor |
 | `workspace_inventory` — workspace-scoped | Workspace **Member** (or higher) on each in-scope workspace |
 | `lakehouse_warehouse` — metadata only | Workspace **Member** (or higher) |
-| `semantic_models` — DMV schema | Workspace **Member** (or higher); the workspace must be on a Fabric / Premium capacity to expose the XMLA endpoint |
+| `semantic_models` — dataset metadata and refresh history | Access to the in-scope workspace and datasets |
+| `vertipaq_stats` — storage-engine metadata (Fabric only) | Read access through the semantic model's XMLA endpoint on a supported capacity |
 | `semantic_model_definitions` — TMDL/BIM via `getDefinition` | Workspace **Member** (or higher); `getDefinition` requires write access, so **Viewer** is not enough |
+| `dataflows` — Gen2 inventory and supported definitions | Item read permission for inventory and read/write permission for `getDefinition`; verify workspace role, item support and the actual execution identity |
 | `pipelines_notebooks` — run history | Workspace **Member** (or higher) |
 | `pipeline_definitions` — pipeline / notebook source via `getDefinition` | Workspace **Member** (or higher); `getDefinition` requires write access |
 | `realtime_intelligence` — RTI + mirroring inventory | Workspace **Viewer** (or higher) |
@@ -108,7 +113,7 @@ role / permission combinations:
 
 ## Tenant settings (must be enabled by the client's Fabric admin)
 
-For the XMLA / DMV based collector (`semantic_models`) to work, the Fabric
+For the XMLA / DMV based collector (`vertipaq_stats`) to work, the Fabric
 admin must enable, for either the whole org or a security group containing
 your user:
 
@@ -119,6 +124,96 @@ your user:
 
 The Scanner / Admin REST endpoints do **not** require any tenant setting
 change for a user-context call — they only require the admin role.
+
+## Additional permissions for optional targeted reviews
+
+The [targeted parent](targeted-review.md) uses the execution identity of its
+selection and Completion notebooks. The child Collect stage's service-principal
+settings do not change the selection identity or Outlook sender.
+
+| Operation | Required access |
+| --- | --- |
+| Deploy | Create/update notebooks and pipelines in the FAR workspace; write the runtime package to the attached FAR Lakehouse |
+| Execute | Read the runtime, run and monitor FAR, and write parent-run audit records |
+| Rank FUAM workspaces | Read the [documented tables](targeted-review.md#supported-fuam-source-contract) through the FUAM Lakehouse SQL analytics endpoint |
+| Prepare email | Read workspace administrator assignments through the Power BI admin group-users API after the native FAR invocation succeeds |
+| Send email | Use an authorized Office 365 Outlook connection and sender mailbox |
+| Read the report | Recipient access to the report and its data, including applicable RLS |
+
+The [Spark SQL connector](https://learn.microsoft.com/fabric/data-engineering/spark-data-warehouse-connector#authentication)
+supports interactive Microsoft Entra user authentication, not service-principal
+authentication. Validate source access with the intended scheduled identity.
+
+For user OAuth, create the Outlook connection through the parent's **Email
+workspace administrator** activity in **Settings**. The service-principal-only
+**Office 365 Email** form in Manage connections and gateways is not the user-sign-in
+route. User email connections are user-scoped, not directly shareable across
+authors; test with the account that will execute the pipeline. Other authentication
+modes and explicit senders require administrator-approved permissions and mailbox
+authorization.
+
+Follow the [email setup and scoped test](../fabric/DEPLOYMENT.md#6-optionally-configure-native-outlook-owner-email)
+before enabling notifications. FAR grants no permissions. Keep credentials in
+the connection, not notebook or pipeline parameters, and restrict monitoring
+access because outputs include owner contact details. A report filter is not
+authorization; see [data safety](data-safety.md#optional-targeted-review-orchestration).
+
+## Additional permissions for the optional Workspace Owner report
+
+For the actions to perform in Fabric, use the
+[one-time connection walkthrough](workspace-owner-report.md#connect-the-owner-model-click-by-click)
+and [new-reader approval steps](workspace-owner-report.md#approve-each-new-reader).
+The connection is configured once per owner model, not once per reader. For each
+new reader, approve Read and add them to the existing `WorkspaceOwner` role;
+07 separately maintains their workspace mapping.
+
+The [owner report](workspace-owner-report.md) uses a **separate** model. It does
+not secure the central governance model/report or Data Agent; those remain
+central-only. Enable it separately with `DEPLOY_WORKSPACE_OWNER_REPORT="true"`;
+the default is `"false"`, independent of `DEPLOY_GOLD_REPORT`.
+
+| Identity / operation | Required boundary |
+| --- | --- |
+| Owner access-sync execution identity | Admin group-users API lookup, write owner entitlement snapshots, and refresh/reframe the owner model; validate the scheduled identity separately from Collect or the email sender |
+| Model's shared cloud connection identity | Fixed identity, **SSO disabled**, with required source read permissions before any consumer sharing |
+| Owner consumer | Manually approved **item-scoped report/model Read** or a narrowly scoped owner app audience, plus manual membership in the single `WorkspaceOwner` read role; no FAR workspace membership |
+| Source workspace eligibility | Current direct `User`/`Admin` assignment with resource-tenant `graphId`, matching `USEROBJECTID()` and a nonexpired grant |
+
+The sync uses [Power BI `admin/groups/{id}/users`](https://learn.microsoft.com/en-us/rest/api/power-bi/admin/groups-get-group-users-as-admin).
+For delegated authentication, the API documents a Fabric administrator and
+`Tenant.Read.All` or `Tenant.ReadWrite.All` scope; service-principal authentication
+has different documented prerequisites. Do not copy delegated scopes into a
+service-principal configuration. Groups and service-principal **owner recipients**
+are excluded regardless of the sync caller's identity. No Microsoft Entra Graph
+group-membership permissions are required or requested.
+
+**Source workspace Admin is not a FAR workspace role.** Grant consumers **no FAR
+workspace membership at any role, including Viewer**. RLS does not restrict
+Admin, Member or Contributor roles; Viewer respects owner-model RLS but can expose
+other unrestricted central governance artifacts colocated in the same workspace.
+Use only item-scoped report/model Read or a narrowly scoped app audience containing
+owner artifacts. Do not grant raw Lakehouse/OneLake/SQL access or Build to owner
+consumers.
+Use [Direct Lake fixed-identity connection guidance](https://learn.microsoft.com/en-us/fabric/fundamentals/direct-lake-security-integration)
+and [RLS guidance](https://learn.microsoft.com/en-us/fabric/security/service-admin-row-level-security).
+Keep model connection permissions distinct from consumer permissions.
+
+Reader approval and workspace entitlements are separate. A new model's role is
+empty (default deny); Read and role membership return no rows without a current
+grant. Guests must use their **resource-tenant** object ID, not email or a
+home-tenant ID. Email only notifies recipients; it never approves access.
+
+Schedule `07_OwnerAccessSync` daily and run it successfully after the first
+owner-enabled review. Grants expire within 24 hours. Follow the
+[daily sync procedure](workspace-owner-report.md#daily-entitlement-sync) for
+execution permissions, failures and coordination with targeted reviews.
+Setup creates no schedule; disabling deployment does not revoke existing access.
+
+Before sharing, apply organizational labels and sharing policies; these are not
+inherited from Governance and do not replace RLS. Complete the
+[owner rollout checklist](workspace-owner-report.md#live-fabric-acceptance) with
+actual read-only consumers, including revocation and expiry. A successful
+deployment is not proof of isolation.
 
 ## Local setup
 
@@ -135,17 +230,19 @@ TENANT_ID=<client-tenant-id>     # the GUID of the customer's Entra tenant
 az login --tenant <client-tenant-id>
 ```
 
-When `az login` has already produced a valid token for the tenant, the
-framework picks it up silently (`AzureCliCredential`). This is the smoothest
-experience and means there's nothing visible to the client beyond a normal
-interactive sign-in event in the audit log.
+The framework uses the existing Azure CLI session through `AzureCliCredential`
+when a valid token for the tenant is available.
 
 ### 3. First run
 
 If no CLI session is available, the framework falls back to
 `InteractiveBrowserCredential`. A browser window opens, you sign in once, and
-your refresh token is cached on disk (encrypted on Windows via DPAPI when
-available, otherwise plaintext under `%LOCALAPPDATA%\.IdentityService\`).
+credentials are cached on disk using Azure Identity's persistence mechanism.
+The configuration permits unencrypted storage when platform protection is
+unavailable. Protect the operating-system account and cache directory.
+
+Token renewal is automatic. A renewal failure stops authenticated requests
+rather than reusing an expired token.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
@@ -157,18 +254,22 @@ Expected output:
 Tenant settings written to: output/raw/tenant_settings.json
 ```
 
-If you see `AADSTS50105` (`The signed in user is not assigned to a role for
-the application`) or HTTP `401 Unauthorized` from the Fabric endpoint, your
-account does not hold the Fabric Administrator role in the client tenant —
-work around it as described above.
+`AADSTS50105` indicates an application-assignment requirement; ask the tenant
+administrator to check enterprise application access. For HTTP `401` or `403`,
+check the token's tenant/audience and the identity's endpoint-specific
+permissions. These errors do not by themselves identify a missing Fabric role.
+For workspace discovery, a denied tenant-admin listing can fall back to the
+executing user's workspace-member listing. Server errors are not treated as a
+permission fallback. Failed membership collection is missing evidence, not an
+empty member list or a successful security check. Resolve the access problem
+and rerun Collect before interpreting those checks.
 
 ## Footprint in the client's audit log
 
-Every collector call appears in the **Fabric Activity Log** as your UPN, with
-the operation name matching the API endpoint (e.g. `GetTenantSettings`,
-`GetWorkspacesAsAdmin`, `GetScanResultAsAdmin`). This is by design — it is
-the same trail any admin user would leave. The client can audit exactly what
-you accessed.
+Authentication and supported API operations can appear in Microsoft Entra and
+Fabric/Power BI audit logs under the executing user or application identity.
+Available events and retention depend on the service and tenant configuration;
+do not assume every API request creates a matching Fabric activity event.
 
 ## Conditional Access caveats
 
@@ -178,15 +279,16 @@ If the client tenant enforces Conditional Access policies that require:
 - a compliant device,
 - a specific named network location,
 
-...then the interactive sign-in will fail until you meet the policy. The
-common workaround is to run the framework from a customer-issued jump host
-or a session host inside their tenant.
+...then sign-in requires an environment that meets those policies, such as an
+approved customer-issued jump host or session host.
 
 ## Cross-engagement isolation
 
-The token cache is keyed by `TENANT_ID`, so cloning the repo per engagement
-(as recommended) keeps each client's tokens isolated. To purge a cached
-session, delete the matching file under `%LOCALAPPDATA%\.IdentityService\`.
+Use a separate output folder per engagement. The browser-token cache is named
+by `TENANT_ID` and stored at operating-system user scope; separate repository
+clones do **not** create separate credential stores. Azure CLI manages its own
+sign-in cache. On shared machines, use isolated operating-system accounts and
+your organization's sign-out and credential-cleanup procedures.
 
 ## Azure (ARM) Reader for the Pause/Resume scan (local only)
 
@@ -195,8 +297,8 @@ that reads **Azure Resource Manager**. It runs **only on a local machine** —
 Fabric's notebook identity cannot mint an ARM token, so leave
 `CAPACITY_AUTO_PAUSE_CONFIGURED=false` in Fabric and it skips cleanly. Locally it
 needs an Azure identity with **Reader** on the subscription that hosts the
-capacity — your own `az login` user; there is no service principal and no Key
-Vault secret.
+capacity — normally your own `az login` user. This default user-mode path does
+not require a service principal or a Key Vault secret.
 
 ```bash
 az role assignment create --assignee <your-user-object-id> \

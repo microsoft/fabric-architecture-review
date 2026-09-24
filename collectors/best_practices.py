@@ -29,6 +29,8 @@ table sizes, encoding and BPA rule outcomes. No business row values are read.
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload
+
 import argparse
 import json
 import os
@@ -138,7 +140,9 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     _shim_fabric_rest_client()
 
     try:
-        catalog = json.loads((target_dir / "semantic_models.json").read_text(encoding="utf-8-sig"))
+        catalog = filter_review_payload(
+            json.loads((target_dir / "semantic_models.json").read_text(encoding="utf-8-sig")), target_dir,
+        )
     except Exception:
         catalog = {}
     datasets: List[Dict[str, Any]] = catalog.get("datasets") or []
@@ -164,7 +168,9 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     # Reports (for report BPA) from the scanner inventory.
     reports_out: List[Dict[str, Any]] = []
     try:
-        scanner = json.loads((target_dir / "scanner_api.json").read_text(encoding="utf-8-sig"))
+        scanner = filter_review_payload(
+            json.loads((target_dir / "scanner.json").read_text(encoding="utf-8-sig")), target_dir,
+        )
     except Exception:
         scanner = {}
     for ws in scanner.get("workspaces") or []:
@@ -190,7 +196,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     payload = {"available": True, "models": models_out, "reports": reports_out,
                "capacities": capacities, "errors": errors}
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Wrote {target} ({len(models_out)} model(s), {len(capacities)} capacity row(s), {len(errors)} error(s)).")
+    print(f"Wrote {target} ({len(models_out)} model(s), {len(reports_out)} report(s), {len(capacities)} capacity row(s), {len(errors)} error(s)).")
     return target
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)

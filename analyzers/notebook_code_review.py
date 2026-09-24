@@ -16,7 +16,7 @@ Rule coverage (see config/review-checklist.yaml):
 
 DATA SAFETY:
   - Reads notebook source already on disk (collected by pipeline_definitions).
-  - Findings reference the notebook displayName + cell index ONLY. The cell
+  - Findings reference notebook/workspace IDs, display names and cell indexes. The cell
     body is never copied into the finding, so no source code or potential
     secret value leaves this file.
 """
@@ -30,7 +30,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, write_findings
+from analyzers._common import (
+    definition_coverage_incomplete, load_raw, load_rules, make_finding,
+    missing_raw_finding, write_findings,
+)
 
 MAX_EXAMPLES = 25  # cap evidence list length to keep findings readable
 
@@ -244,7 +247,7 @@ def _collect_hits(defs: Dict[str, Any]) -> Tuple[Dict[str, List[Dict[str, Any]]]
     """Walk every notebook in ``pipeline_definitions.json`` and return
     ``(hits_by_rule, notebooks_scanned, code_cells_scanned)``.
 
-    Each hit is ``{notebook, workspace, cellIndex}`` — no source content.
+    Hits retain collector workspace/notebook IDs and cell indexes, never source.
     """
     notebooks = defs.get("notebooks") or []
     hits: Dict[str, List[Dict[str, Any]]] = {
@@ -278,6 +281,8 @@ def _collect_hits(defs: Dict[str, Any]) -> Tuple[Dict[str, List[Dict[str, Any]]]
             for rid, matched in matches.items():
                 if matched:
                     hits[rid].append({
+                        "notebook_id": nb.get("id"),
+                        "workspace_id": nb.get("workspaceId"),
                         "notebook": nb.get("displayName"),
                         "workspace": nb.get("workspaceName"),
                         "cellIndex": idx,
@@ -341,14 +346,16 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     if not nbcode_ids:
         return findings
 
-    defs = load_raw(raw_dir / "pipeline_definitions.json")
-    if not defs:
+    defs = load_raw(raw_dir / "pipeline_definitions.json", allow_incomplete=True)
+    if not isinstance(defs, dict) or not isinstance(defs.get("notebooks"), list):
         for rid in nbcode_ids:
             findings.append(missing_raw_finding(rules[rid], _RULE_TITLES[rid][0],
                                                 "pipeline_definitions.json"))
         return findings
 
     hits, nb_scanned, cells_scanned = _collect_hits(defs)
+    incomplete = definition_coverage_incomplete(defs) or nb_scanned < len(defs["notebooks"])
+    coverage = "partial" if incomplete else "complete"
 
     if nb_scanned == 0:
         # Catalog had no notebooks, OR getDefinition failed for all of them.
@@ -356,9 +363,10 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             rule = rules[rid]
             dim = _RULE_TITLES[rid][0]
             findings.append(make_finding(
-                rule, dimension=dim, status="info",
+                rule, dimension=dim, status="unknown" if incomplete else "info",
                 title="No notebook source available to scan",
                 evidence={"notebooksScanned": 0, "codeCellsScanned": 0,
+                          "coverage_status": coverage,
                           "hint": "Check pipeline_definitions.json — notebooks list "
                                   "or getDefinition errors."},
                 recommendation="Run the pipeline_definitions collector and re-run this analyzer.",
@@ -371,20 +379,29 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         rule_hits = hits.get(rid, [])
         if not rule_hits:
             findings.append(make_finding(
-                rule, dimension=dim, status="pass",
+                rule, dimension=dim, status="unknown" if incomplete else "pass",
                 title=f"No matches across {nb_scanned} notebook(s) / "
-                      f"{cells_scanned} code cell(s)",
+                      f"{cells_scanned} code cell(s)" + ("; coverage incomplete" if incomplete else ""),
                 evidence={"notebooksScanned": nb_scanned,
-                          "codeCellsScanned": cells_scanned},
-                recommendation="Heuristic check passed — no action required.",
+                          "codeCellsScanned": cells_scanned, "coverage_status": coverage},
+                recommendation=(
+                    "Resolve inventory/definition gaps and rerun collection and analysis; "
+                    "no matches in available source is not an all-clear."
+                    if incomplete else "Heuristic check passed — no action required."
+                ),
             ))
             continue
 
         # Aggregate per-notebook for cleaner reporting
-        per_nb: Dict[str, Dict[str, Any]] = {}
+        per_nb: Dict[tuple, Dict[str, Any]] = {}
         for h in rule_hits:
-            key = f"{h.get('workspace') or '?'} / {h.get('notebook') or '?'}"
+            wid, nid = h.get("workspace_id"), h.get("notebook_id")
+            has_ids = isinstance(wid, str) and bool(wid.strip()) and isinstance(nid, str) and bool(nid.strip())
+            key = (("ids", wid.strip().lower(), nid.strip().lower()) if has_ids else
+                   ("names", h.get("workspace") or "?", h.get("notebook") or "?"))
             entry = per_nb.setdefault(key, {
+                "notebook_id": nid if has_ids else None,
+                "workspace_id": wid if has_ids else None,
                 "notebook": h.get("notebook"),
                 "workspace": h.get("workspace"),
                 "cellIndexes": [],
@@ -400,6 +417,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             evidence={
                 "notebooksScanned": nb_scanned,
                 "codeCellsScanned": cells_scanned,
+                "coverage_status": coverage,
                 "matchedCellCount": len(rule_hits),
                 "matchedNotebookCount": len(per_nb),
                 "heuristic": True,

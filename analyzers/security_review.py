@@ -41,21 +41,49 @@ def _version_tuple(value: str) -> Tuple[int, ...]:
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
     scan = load_raw(raw_dir / "scanner.json")
-    if scan and scan.get("workspaces"):
-        return scan["workspaces"]
     inv = load_raw(raw_dir / "workspace_inventory.json")
-    if inv and inv.get("workspaces"):
-        return inv["workspaces"]
-    return []
+    workspaces = {}
+    for source in (scan, inv):
+        if not source or source.get("_meta", {}).get("complete") is False:
+            continue
+        for workspace in source.get("workspaces") or []:
+            key = workspace.get("id")
+            if key:
+                key = str(key).lower()
+                workspaces[key] = {**workspaces.get(key, {}), **workspace}
+    return list(workspaces.values())
 
 
 def _principal_type(user: Dict[str, Any]) -> str:
-    return (user.get("principalType") or user.get("graphId") or user.get("type") or "").lower()
+    principal = user.get("principal") or {}
+    return (user.get("principalType") or user.get("type") or principal.get("type") or "").lower()
+
+
+def _principal_identifier(user: Dict[str, Any]) -> str:
+    principal = user.get("principal") or {}
+    return (
+        user.get("identifier") or user.get("emailAddress") or user.get("userPrincipalName")
+        or (principal.get("userDetails") or {}).get("userPrincipalName")
+        or user.get("graphId") or principal.get("id")
+        or user.get("displayName") or principal.get("displayName") or ""
+    )
 
 
 def _is_external(user: Dict[str, Any]) -> bool:
-    upn = (user.get("identifier") or user.get("emailAddress") or user.get("userPrincipalName") or "").lower()
+    upn = _principal_identifier(user).lower()
     return "#ext#" in upn
+
+
+def _members_complete(workspace: Dict[str, Any], *, need_upn: bool = False) -> bool:
+    users = workspace.get("users")
+    if not isinstance(users, list):
+        return False
+    return all(
+        bool(_principal_type(user)) and (
+            not need_upn or _principal_type(user) != "user" or "@" in _principal_identifier(user)
+        )
+        for user in users
+    )
 
 
 def analyze(raw_dir: str | os.PathLike = "output/raw",
@@ -108,14 +136,16 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     if right != "admin":
                         continue
                     if _principal_type(u) == "user":
-                        user_admins.append(u.get("identifier") or u.get("displayName"))
+                        user_admins.append(_principal_identifier(u))
                 if user_admins:
                     offenders.append({"workspace": w.get("name"), "individualAdmins": user_admins})
-            status = "pass" if not offenders else "fail"
+            incomplete = sum(not _members_complete(w) for w in workspaces)
+            status = "fail" if offenders else ("missing_evidence" if incomplete else "pass")
             findings.append(make_finding(
                 rule, dimension="security", status=status,
                 title="Workspaces with individual users (not groups) as admins",
-                evidence={"offenderCount": len(offenders), "examples": offenders[:20]},
+                evidence={"offenderCount": len(offenders), "examples": offenders[:20],
+                          "workspacesMissingMembershipEvidence": incomplete},
                 recommendation="Replace individual admin assignments with Entra security groups for lifecycle management."
             ))
 
@@ -130,11 +160,13 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 principals = [u for u in (w.get("users") or []) if _principal_type(u) == "user"]
                 if len(principals) > BROAD_ACCESS_THRESHOLD:
                     broad.append({"workspace": w.get("name"), "individualPrincipalCount": len(principals)})
-            status = "pass" if not broad else "fail"
+            incomplete = sum(not _members_complete(w) for w in workspaces)
+            status = "fail" if broad else ("missing_evidence" if incomplete else "pass")
             findings.append(make_finding(
                 rule, dimension="security", status=status,
                 title=f"Workspaces with >{BROAD_ACCESS_THRESHOLD} individual principals",
-                evidence={"threshold": BROAD_ACCESS_THRESHOLD, "count": len(broad), "examples": broad[:20]},
+                evidence={"threshold": BROAD_ACCESS_THRESHOLD, "count": len(broad), "examples": broad[:20],
+                          "workspacesMissingMembershipEvidence": incomplete},
                 recommendation="Consolidate broad access into Entra security groups; remove unused direct assignments."
             ))
 
@@ -166,12 +198,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 ext_users = [u for u in (w.get("users") or []) if _is_external(u)]
                 if ext_users:
                     externals.append({"workspace": w.get("name"),
-                                      "externalUsers": [u.get("identifier") for u in ext_users][:10]})
-            status = "pass" if not externals else "fail"
+                                      "externalUsers": [_principal_identifier(u) for u in ext_users][:10]})
+            incomplete = sum(not _members_complete(w, need_upn=True) for w in workspaces)
+            status = "fail" if externals else ("missing_evidence" if incomplete else "pass")
             findings.append(make_finding(
                 rule, dimension="security", status=status,
                 title="Workspaces with external (guest) users",
-                evidence={"workspaceCount": len(externals), "examples": externals[:20]},
+                evidence={"workspaceCount": len(externals), "examples": externals[:20],
+                          "workspacesMissingMembershipEvidence": incomplete},
                 recommendation="Review external user assignments; remove when no longer required and route remaining "
                                "guests through an Entra-managed security group with expiration."
             ))

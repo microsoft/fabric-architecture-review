@@ -18,6 +18,7 @@ Rule coverage:
   ARCH-008 personal / PersonalGroup workspaces
   ARCH-014 deployment-pipeline stage staleness / out-of-sync
   ARCH-015 legacy Dataflow Gen1 -> Gen2 migration
+  ARCH-016 static pipeline activity dependency graph integrity
 
 DATA SAFETY: Metadata only.
 """
@@ -31,7 +32,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers._common import (
+    collection_coverage_incomplete, definition_coverage_incomplete, load_raw, load_rules, make_finding,
+    missing_raw_finding, threshold, write_findings,
+)
 from analyzers.applicability import (
     applicability_summary,
     classify_workspaces,
@@ -251,6 +255,314 @@ def _analyze_pipeline_param_contracts(
     return mismatches, checked, unresolved
 
 
+def _dependency_graph(content: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate literal edges within each activity array; never evaluate expressions."""
+    reasons: Set[str] = set()
+    properties = content.get("properties")
+    activities = (content["activities"] if "activities" in content else
+                  properties.get("activities") if isinstance(properties, dict) else None)
+    tree: List[Dict[str, Any]] = []
+    pending = [(activities, tree)]
+    while pending:
+        source, target = pending.pop()
+        if not isinstance(source, list):
+            reasons.add("activity_scope_unresolved")
+            continue
+        for activity in source:
+            if not isinstance(activity, dict):
+                reasons.add("activity_scope_unresolved")
+                target.append({})
+                continue
+            node = {"name": activity.get("name"), "dependsOn": activity.get("dependsOn", [])}
+            target.append(node)
+            tp = activity.get("typeProperties", {})
+            if not isinstance(tp, dict):
+                reasons.add("activity_scope_unresolved")
+                continue
+            children: Dict[str, Any] = {}
+            node["typeProperties"] = children
+            kind = str(activity.get("type") or "").lower()
+            if ((kind in {"foreach", "until"} and "activities" not in tp)
+                    or (kind == "ifcondition" and not any(
+                        key in tp for key in ("ifTrueActivities", "ifFalseActivities")))
+                    or (kind == "switch" and not any(
+                        key in tp for key in ("cases", "defaultActivities")))):
+                reasons.add("activity_scope_unresolved")
+            for key in _NESTED_ACTIVITY_KEYS:
+                if key in tp:
+                    children[key] = []
+                    pending.append((tp[key], children[key]))
+            if "cases" in tp:
+                children["cases"] = []
+                if not isinstance(tp["cases"], list):
+                    reasons.add("activity_scope_unresolved")
+                    continue
+                for case in tp["cases"]:
+                    branch: List[Dict[str, Any]] = []
+                    children["cases"].append({"activities": branch})
+                    pending.append((case.get("activities") if isinstance(case, dict) else None, branch))
+
+    walked = list(_walk_activities(tree))
+    scopes = [tree]
+    for activity in walked:
+        tp = activity.get("typeProperties") or {}
+        scopes.extend(tp[key] for key in _NESTED_ACTIVITY_KEYS if key in tp)
+        scopes.extend(case["activities"] for case in tp.get("cases", []))
+
+    affected: Set[Tuple[int, int]] = set()
+    signals: Set[str] = set()
+    unresolved = 0
+    for scope_index, scope in enumerate(scopes):
+        names: Dict[str, List[int]] = {}
+        for index, activity in enumerate(scope):
+            name = activity.get("name")
+            if isinstance(name, str) and name.strip() and not name.lstrip().startswith("@"):
+                names.setdefault(name, []).append(index)
+            else:
+                reasons.add("activity_name_unresolved")
+        names_complete = sum(len(indices) for indices in names.values()) == len(scope)
+        for indices in names.values():
+            if len(indices) > 1:
+                signals.add("duplicate_activity")
+                affected.update((scope_index, index) for index in indices)
+        edges: Dict[int, Set[int]] = {index: set() for index in range(len(scope))}
+        for index, activity in enumerate(scope):
+            dependencies = activity.get("dependsOn", [])
+            if not isinstance(dependencies, list):
+                unresolved += 1
+                continue
+            for dependency in dependencies:
+                ref = dependency.get("activity") if isinstance(dependency, dict) else None
+                if not isinstance(ref, str) or not ref.strip() or ref.lstrip().startswith("@"):
+                    unresolved += 1
+                    continue
+                targets = names.get(ref, [])
+                if not targets:
+                    if names_complete:
+                        signals.add("missing_dependency")
+                        affected.add((scope_index, index))
+                    else:
+                        unresolved += 1
+                elif len(targets) > 1:
+                    unresolved += 1
+                elif targets[0] == index:
+                    signals.add("self_dependency")
+                    affected.add((scope_index, index))
+                else:
+                    edges[index].add(targets[0])
+
+        # Iterative strongly connected components exclude downstream non-cycle nodes.
+        seen: Set[int] = set()
+        order: List[int] = []
+        reverse: Dict[int, Set[int]] = {index: set() for index in edges}
+        for source_index, targets in edges.items():
+            for target_index in targets:
+                reverse[target_index].add(source_index)
+        for start in edges:
+            stack = [(start, False)]
+            while stack:
+                current, finished = stack.pop()
+                if finished:
+                    order.append(current)
+                elif current not in seen:
+                    seen.add(current)
+                    stack.append((current, True))
+                    stack.extend((target_index, False) for target_index in sorted(edges[current], reverse=True))
+        seen.clear()
+        for start in reversed(order):
+            if start in seen:
+                continue
+            component: Set[int] = set()
+            remaining = [start]
+            seen.add(start)
+            while remaining:
+                current = remaining.pop()
+                component.add(current)
+                for target_index in reverse[current] - seen:
+                    seen.add(target_index)
+                    remaining.append(target_index)
+            if len(component) > 1:
+                signals.add("dependency_cycle")
+                affected.update((scope_index, index) for index in component)
+    if unresolved:
+        reasons.add("dependency_unresolved")
+    return {
+        "signal_codes": sorted(signals),
+        "affected_count": len(affected),
+        "activity_count": len(walked),
+        "unresolved_dependency_count": unresolved,
+        "coverage_status": "partial" if reasons and walked else "unknown" if reasons else "complete",
+        "reason_codes": sorted(reasons),
+    }
+
+
+def _dependency_collection_state(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return "missing_evidence"
+    meta = payload.get("_meta")
+    meta = meta if isinstance(meta, dict) else {}
+    if (payload.get("collectionComplete") is False or meta.get("complete") is False
+            or payload.get("failedWorkspaces") or payload.get("collectionErrors")):
+        return "partial"
+    if payload.get("collectionComplete") is True or meta.get("complete") is True:
+        return "complete"
+    return "unknown"
+
+
+def _pipeline_dependency_finding(
+    rule: Dict[str, Any], raw_dir: Path, workspaces: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    definitions = load_raw(raw_dir / "pipeline_definitions.json", allow_incomplete=True)
+    catalog = load_raw(raw_dir / "pipelines_notebooks.json", allow_incomplete=True)
+    collection_state = _dependency_collection_state(definitions)
+    catalog_state = _dependency_collection_state(catalog)
+    reasons: Set[str] = set()
+
+    def text(value: Any) -> str | None:
+        return value if isinstance(value, str) and value.strip() else None
+
+    def rows(payload: Any) -> List[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return []
+        value = payload.get("pipelines")
+        if not isinstance(value, list):
+            reasons.add("pipeline_inventory_unresolved")
+            return []
+        if any(not isinstance(row, dict) for row in value):
+            reasons.add("pipeline_inventory_unresolved")
+        return [row for row in value if isinstance(row, dict)]
+
+    pipeline_rows = rows(definitions)
+    inventory_rows = list(rows(catalog))
+    for workspace in workspaces:
+        native = [item for item in workspace.get("items", []) if isinstance(item, dict)
+                  and str(item.get("type") or item.get("itemType") or "").lower() == "datapipeline"]
+        for item in [*(workspace.get("DataPipeline") or []), *(workspace.get("pipelines") or []), *native]:
+            if isinstance(item, dict):
+                inventory_rows.append({
+                    "id": item.get("id"), "displayName": item.get("displayName") or item.get("name"),
+                    "workspaceId": workspace.get("id"), "workspaceName": workspace.get("name"),
+                })
+    known: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    by_id: Dict[str, Set[str]] = {}
+    for row in [*inventory_rows, *pipeline_rows]:
+        wid, pid = text(row.get("workspaceId")), text(row.get("id"))
+        if wid and pid:
+            key = (wid.lower(), pid.lower())
+            known.setdefault(key, row)
+            by_id.setdefault(pid.lower(), set()).add(wid.lower())
+    for row in inventory_rows:
+        pid = text(row.get("id"))
+        if not pid or (not text(row.get("workspaceId")) and len(by_id.get(pid.lower(), set())) != 1):
+            reasons.add("inventory_identity_unresolved")
+
+    items: List[Dict[str, Any]] = []
+    seen: Set[Tuple[str, str]] = set()
+    for pipeline in pipeline_rows:
+        pid = text(pipeline.get("id"))
+        wid = text(pipeline.get("workspaceId"))
+        if not wid and pid and len(by_id.get(pid.lower(), set())) == 1:
+            wid = next(iter(by_id[pid.lower()]))
+        key = (wid.lower(), pid.lower()) if wid and pid else None
+        metadata = known.get(key, {}) if key else {}
+        item: Dict[str, Any] = {
+            "workspace_id": wid,
+            "workspace_name": text(pipeline.get("workspaceName")) or text(metadata.get("workspaceName")),
+            "item_id": pid,
+            "item_name": text(pipeline.get("displayName")) or text(metadata.get("displayName")),
+            "item_type": "DataPipeline", "signal_codes": [], "affected_count": 0,
+            "coverage_status": "missing_evidence", "activity_count": 0,
+            "unresolved_dependency_count": 0, "reason_codes": [],
+        }
+        error = pipeline.get("error")
+        parts = pipeline.get("parts")
+        content = None
+        if not error and isinstance(parts, list):
+            safe_parts = [part for part in parts if isinstance(part, dict)
+                          and isinstance(part.get("path"), str)]
+            safe_parts.sort(key=lambda part: not part["path"].lower().endswith("pipeline-content.json"))
+            content = _pipeline_json_from_parts(safe_parts)
+        if content is not None:
+            item.update(_dependency_graph(content))
+        else:
+            item["reason_codes"].append(
+                "definition_denied" if error in ("http_401", "http_403") else
+                "definition_unavailable" if error else "definition_missing")
+        if _dependency_collection_state(pipeline) == "partial":
+            item["reason_codes"].append("definition_collection_partial")
+            item["coverage_status"] = "partial"
+        if not key:
+            item["reason_codes"].append("identity_unresolved")
+            if item["coverage_status"] == "complete":
+                item["coverage_status"] = "partial"
+        elif key in seen:
+            previous = next(row for row in items if (
+                str(row["workspace_id"]).lower(), str(row["item_id"]).lower()) == key)
+            previous["signal_codes"] = sorted(set(previous["signal_codes"]) | set(item["signal_codes"]))
+            for count in ("affected_count", "activity_count", "unresolved_dependency_count"):
+                previous[count] = max(previous[count], item[count])
+            previous["reason_codes"] = sorted(
+                set(previous["reason_codes"]) | set(item["reason_codes"]) | {"duplicate_definition"})
+            previous["coverage_status"] = "partial"
+            continue
+        else:
+            seen.add(key)
+        items.append(item)
+    for key, metadata in known.items():
+        if key in seen:
+            continue
+        items.append({
+            "workspace_id": text(metadata.get("workspaceId")),
+            "workspace_name": text(metadata.get("workspaceName")),
+            "item_id": text(metadata.get("id")),
+            "item_name": text(metadata.get("displayName")), "item_type": "DataPipeline",
+            "signal_codes": [], "affected_count": 0, "coverage_status": "missing_evidence",
+            "activity_count": 0, "unresolved_dependency_count": 0,
+            "reason_codes": ["definition_missing"],
+        })
+    if collection_state == "missing_evidence":
+        reasons.add("definitions_missing")
+    elif collection_state == "partial":
+        reasons.add("definition_collection_partial")
+    if catalog_state == "partial":
+        reasons.add("pipeline_inventory_partial")
+    if collection_state != "complete" and catalog_state != "complete":
+        reasons.add("collection_completeness_unverified")
+    # The collector's error total includes notebooks; only unexplained totals affect coverage.
+    if isinstance(definitions, dict) and definitions.get("errors"):
+        notebooks = definitions.get("notebooks")
+        notebook_errors = sum(bool(row.get("error")) for row in notebooks if isinstance(row, dict)) \
+            if isinstance(notebooks, list) else 0
+        explained = sum(bool(row.get("error")) for row in pipeline_rows) + notebook_errors
+        reported = definitions["errors"]
+        if not isinstance(reported, int) or reported > explained:
+            reasons.add("unresolved_collection_errors")
+    affected = sum(item["affected_count"] for item in items)
+    assessed = sum(item["coverage_status"] == "complete" for item in items)
+    complete = (not reasons and assessed == len(items))
+    coverage = ("complete" if complete else "partial" if items else
+                "missing_evidence" if collection_state == "missing_evidence" else "unknown")
+    status = ("fail" if affected else "not_applicable" if complete and not items else
+              "pass" if complete else "missing_evidence" if coverage == "missing_evidence" else "unknown")
+    return make_finding(
+        rule, dimension="architecture", status=status,
+        title="Pipeline activity dependency graph integrity",
+        evidence={
+            "source": "pipeline_definitions.json", "assessment_kind": "static_structure",
+            "coverage_status": coverage, "pipeline_count": len(items),
+            "assessed_pipeline_count": assessed, "affected_count": affected,
+            "signal_codes": sorted({signal for item in items for signal in item["signal_codes"]}),
+            "reason_codes": sorted(reasons), "items": items,
+        },
+        recommendation=(
+            "Repair duplicate activity names and invalid same-scope dependency references or cycles "
+            "in the collected pipeline definition. Recollect missing or denied definitions and resolve "
+            "dynamic references before treating structural coverage as complete. This is static "
+            "structural validation, not measured execution reliability or performance."
+        ),
+    )
+
+
 def analyze(raw_dir: str | os.PathLike = "output/raw",
             checklist_path: str | os.PathLike = "config/review-checklist.yaml") -> List[Dict[str, Any]]:
     raw_dir = Path(raw_dir)
@@ -263,18 +575,24 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # batch/skip counts; absence of the block (older runs) degrades to info.
     rule = rules.get("ARCH-013")
     if rule:
-        scan = load_raw(raw_dir / "scanner.json")
+        scan = load_raw(raw_dir / "scanner.json", allow_incomplete=True)
         meta = (scan or {}).get("_meta") if isinstance(scan, dict) else None
+        meta = meta if isinstance(meta, dict) else {}
+        incomplete = isinstance(scan, dict) and (
+            scan.get("collectionComplete") is False
+            or bool(scan.get("failedWorkspaces"))
+            or meta.get("complete") is False
+        )
         if not scan:
             findings.append(missing_raw_finding(rule, "architecture", "scanner.json"))
-        elif not isinstance(meta, dict):
+        elif not incomplete and meta.get("complete") is not True and scan.get("collectionComplete") is not True:
             findings.append(make_finding(
                 rule, dimension="architecture", status="info",
                 title="Scanner collection completeness could not be verified",
-                evidence={"note": "scanner.json has no _meta block (collected by an older scanner_api version)."},
+                evidence={"note": "scanner.json has no explicit collection-completeness assertion."},
                 recommendation="Re-run collectors.scanner_api to record collection metadata and confirm the inventory is complete.",
             ))
-        elif meta.get("complete", True):
+        elif not incomplete:
             findings.append(make_finding(
                 rule, dimension="architecture", status="pass",
                 title="Scanner inventory collected completely",
@@ -296,6 +614,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     "batchesFailed": meta.get("batches_failed"),
                     "batchesTotal": meta.get("batches_total"),
                     "failedBatchNumbers": meta.get("failed_batch_numbers"),
+                    "collectionErrors": scan.get("collectionErrors"),
                 },
                 recommendation=(
                     "Re-run collectors.scanner_api to retry the skipped batch(es) before relying on "
@@ -541,7 +860,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # --- ARCH-003 OneLake shortcuts vs duplicated lakehouse tables ---
     rule = rules.get("ARCH-003")
     if rule:
-        lh_payload = load_raw(raw_dir / "lakehouse_warehouse.json")
+        lh_payload = load_raw(raw_dir / "lakehouse_warehouse.json", allow_incomplete=True)
         if not lh_payload:
             findings.append(missing_raw_finding(rule, "architecture", "lakehouse_warehouse.json"))
         else:
@@ -569,6 +888,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                         continue
                     row = {
                         "table": name,
+                        "schema": table.get("schema"),
                         "lakehouse": lakehouse.get("displayName") or lakehouse.get("name") or lakehouse_id,
                         "workspace": lakehouse.get("workspaceName"),
                         "isShortcut": _is_shortcut_metadata(table),
@@ -585,6 +905,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             ]
 
             table_count = sum(len(v or []) for v in tables_by_lakehouse.values())
+            incomplete = collection_coverage_incomplete(lh_payload)
             if not lakehouses:
                 status = "info"
                 title = "No lakehouses discovered for shortcut assessment"
@@ -609,6 +930,12 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 title = "No duplicated lakehouse table names detected"
                 reco = ("No metadata signal suggests cross-lakehouse table duplication. When sharing data across "
                         "workspaces or medallion layers, prefer OneLake shortcuts over copying data.")
+            if incomplete and status != "fail":
+                status = "unknown"
+                title = f"Shortcut assessment incomplete: {table_count} table row(s) observed"
+                reco = ("Retained table and shortcut observations remain usable, but unavailable inventory "
+                        "cannot establish the absence of duplicated tables. Review collector warnings and "
+                        "restore metadata access or verify unsupported lakehouse metadata manually.")
             findings.append(make_finding(
                 rule, dimension="architecture", status=status,
                 title=title,
@@ -617,6 +944,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     "tableCount": table_count,
                     "shortcutSignals": shortcut_rows[:20],
                     "duplicateTableGroups": duplicated[:20],
+                    "collectionComplete": not incomplete,
                 },
                 recommendation=reco,
             ))
@@ -735,7 +1063,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
 
     rule = rules.get("ARCH-010")
     if rule:
-        rti = load_raw(raw_dir / "realtime_intelligence.json")
+        rti = load_raw(raw_dir / "realtime_intelligence.json", allow_incomplete=True)
         if not rti:
             findings.append(missing_raw_finding(rule, "architecture", "realtime_intelligence.json"))
         else:
@@ -747,8 +1075,20 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             evh_workspaces = {e.get("workspaceId") for e in eventhouses}
             rflx_workspaces = {r.get("workspaceId") for r in reflexes}
             unalerted = evh_workspaces - rflx_workspaces
-            status = "info"
-            if total == 0:
+            incomplete = collection_coverage_incomplete(rti)
+            if incomplete:
+                verified_reflex_workspaces = {
+                    row.get("workspaceId") for row in rti.get("collectionCoverage") or []
+                    if row.get("component") == "reflexes" and row.get("collectionStatus") == "collected"
+                }
+                unalerted &= verified_reflex_workspaces
+            status = "unknown" if incomplete else "info"
+            if incomplete:
+                title = f"Real-Time Intelligence inventory incomplete: {total} item(s) observed"
+                reco = ("Review collector warnings and restore inventory access for unavailable components. "
+                        "Observed counts are partial; an unavailable Reflex listing does not establish "
+                        "that operational alerts are absent.")
+            elif total == 0:
                 title = "No Real-Time Intelligence or Mirrored Database items detected"
                 reco = ("If the architecture has streaming or zero-ETL requirements, evaluate Eventhouse / "
                         "KQL Database (real-time analytics), Eventstream (ingest), Reflex / Activator "
@@ -757,13 +1097,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 title = f"Real-Time Intelligence usage profile: {total} item(s)"
                 reco = ("Inventory above. If Eventhouses exist without a Reflex / Activator the tenant is "
                         "missing the operational-alerts path - consider adding triggers on hot KQL data.")
-                if unalerted:
-                    reco = (f"{len(unalerted)} workspace(s) host Eventhouses but no Reflex / Activator; "
-                            "add triggers to convert real-time data into operational alerts. ") + reco
+            if unalerted:
+                reco = (f"{len(unalerted)} workspace(s) host Eventhouses but no Reflex / Activator; "
+                        "add triggers to convert real-time data into operational alerts. ") + reco
             findings.append(make_finding(
                 rule, dimension="architecture", status=status,
                 title=title,
                 evidence={"counts": summary,
+                          "collectionComplete": not incomplete,
                           "workspacesWithEventhouseButNoReflex": sorted(list(unalerted))[:20]},
                 recommendation=reco,
             ))
@@ -864,13 +1205,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # --- ARCH-012 Pipeline parameter contract ---
     rule = rules.get("ARCH-012")
     if rule:
-        defs = load_raw(raw_dir / "pipeline_definitions.json")
-        if not defs:
+        defs = load_raw(raw_dir / "pipeline_definitions.json", allow_incomplete=True)
+        if not isinstance(defs, dict) or not isinstance(defs.get("pipelines"), list):
             findings.append(missing_raw_finding(rule, "architecture", "pipeline_definitions.json"))
         else:
             mismatches, checked, unmatched_refs = _analyze_pipeline_param_contracts(defs)
+            incomplete = definition_coverage_incomplete(defs) or bool(unmatched_refs)
             if not checked:
-                status = "info"
+                status = "unknown" if incomplete else "info"
                 title = ("No ExecuteNotebook / TridentNotebook activities found in collected "
                          "pipeline definitions")
                 reco = ("Either no pipelines orchestrate notebooks yet, or the getDefinition "
@@ -885,6 +1227,10 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                         "but not declared in the notebook are silently ignored; names declared "
                         "in the notebook but not passed fall back to defaults - both are common "
                         "causes of runtime failures. Fix either side so the names match exactly.")
+            elif incomplete:
+                status = "unknown"
+                title = f"No parameter mismatches found in available definitions ({checked} activities encountered); coverage incomplete"
+                reco = "Resolve inventory/definition gaps and unresolved notebook references, then rerun collection and analysis."
             else:
                 status = "pass"
                 title = f"Pipeline parameter contracts match notebook widgets ({checked} activity(ies) checked)"
@@ -897,9 +1243,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     "mismatchCount": len(mismatches),
                     "mismatches": mismatches[:20],
                     "notebookReferencesNotResolved": unmatched_refs[:20],
+                    "coverage_status": "partial" if incomplete else "complete",
                 },
                 recommendation=reco,
             ))
+
+    rule = rules.get("ARCH-016")
+    if rule:
+        findings.append(_pipeline_dependency_finding(rule, raw_dir, workspaces))
 
     return findings
 

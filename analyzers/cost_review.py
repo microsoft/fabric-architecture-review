@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
+from analyzers._common import collection_coverage_incomplete, load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
 from analyzers.applicability import classify_workspaces, load_capacity_overrides, load_workspace_overrides
 
 NONPROD_PATTERN = re.compile(r"(dev|test|qa|uat|sbx|sandbox|poc|demo)", re.IGNORECASE)
@@ -134,8 +134,13 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     rules = load_rules(checklist_path)
     findings: List[Dict[str, Any]] = []
 
-    caps_raw = load_raw(raw_dir / "capacity_metrics.json")
+    caps_raw = load_raw(raw_dir / "capacity_metrics.json", allow_incomplete=True)
+    if caps_raw and collection_coverage_incomplete(caps_raw) and not caps_raw.get("capacityListComplete"):
+        caps_raw = None
     capacities = (caps_raw or {}).get("capacities") or []
+    mapping_missing = (caps_raw or {}).get("workspaceMappingComplete") is False or any(
+        c.get("assignedWorkspaceCount", 0) is None for c in capacities
+    )
     workspaces = _workspaces(raw_dir)
     workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
     workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
@@ -342,7 +347,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # --- COST-005 large capacities under-utilized by workspace count ---
     rule = rules.get("COST-005")
     if rule:
-        if not capacities:
+        if not capacities or mapping_missing:
             findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
         elif (caps_raw or {}).get("workspaceScopeLimited") or any(
                 c.get("workspaceScopeLimited") for c in capacities):
@@ -383,7 +388,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # --- COST-006 trial / embedded capacities hosting content ---
     rule = rules.get("COST-006")
     if rule:
-        if not capacities:
+        if not capacities or mapping_missing:
             findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
         else:
             interim = [c for c in capacities
@@ -430,7 +435,9 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     # --- COST-008 empty active capacities ---
     rule = rules.get("COST-008")
     if rule:
-        if not capacities:
+        if not capacities or mapping_missing or (caps_raw or {}).get("workspaceScopeLimited") or any(
+            c.get("workspaceScopeLimited") for c in capacities
+        ):
             findings.append(missing_raw_finding(rule, "cost", "capacity_metrics.json"))
         else:
             empties = [c for c in capacities if c.get("assignedWorkspaceCount", 0) == 0

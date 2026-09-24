@@ -24,31 +24,33 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from collectors._http import collect_value, get_json
+from collectors._http import Headers, collect_value, get_json
+from collectors._common import record_collection_failure
 from collectors.auth import POWERBI_SCOPE, get_default_provider
+from collectors.workspace_scope import filter_review_payload
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
 
 
-def _list_pipelines(headers: Dict[str, str]) -> List[Dict[str, Any]]:
+def _list_pipelines(headers: Headers) -> List[Dict[str, Any]]:
     return collect_value(f"{PBI}/pipelines", headers)
 
 
-def _stages(headers: Dict[str, str], pipeline_id: str) -> List[Dict[str, Any]]:
+def _stages(headers: Headers, pipeline_id: str) -> List[Dict[str, Any]]:
     payload = get_json(f"{PBI}/pipelines/{pipeline_id}/stages", headers)
     if not payload:
         return []
     return payload.get("value") or []
 
 
-def _users(headers: Dict[str, str], pipeline_id: str) -> List[Dict[str, Any]]:
+def _users(headers: Headers, pipeline_id: str) -> List[Dict[str, Any]]:
     payload = get_json(f"{PBI}/pipelines/{pipeline_id}/users", headers, allow=(200, 401, 403, 404))
     if not payload:
         return []
     return payload.get("value") or []
 
 
-def _stage_artifacts(headers: Dict[str, str], pipeline_id: str, stage_order: int) -> List[Dict[str, Any]]:
+def _stage_artifacts(headers: Headers, pipeline_id: str, stage_order: int) -> List[Dict[str, Any]]:
     """Per-stage artifact deploy state (best-effort).
 
     GET /pipelines/{id}/stages/{order}/artifacts returns one block per artifact
@@ -80,9 +82,10 @@ def _stage_artifacts(headers: Dict[str, str], pipeline_id: str, stage_order: int
 
 
 
+@record_collection_failure("deployment_pipelines.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     provider = get_default_provider()
-    headers = provider.headers(scope=POWERBI_SCOPE)
+    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
 
     print("Deployment pipelines: listing...")
     pipelines = _list_pipelines(headers)
@@ -93,7 +96,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         pid = p.get("id")
         if not pid:
             continue
-        stages = _stages(headers, pid)
+        stages = filter_review_payload({"stages": _stages(headers, pid)}, Path(output_dir))["stages"]
         users = _users(headers, pid)
         stage_artifacts: Dict[str, List[Dict[str, Any]]] = {}
         for s in stages:

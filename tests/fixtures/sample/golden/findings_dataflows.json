@@ -1,0 +1,56 @@
+[
+  {
+    "rule_id": "DFLOW-001",
+    "dimension": "performance",
+    "severity": "low",
+    "status": "missing_evidence",
+    "title": "Dataflow M static syntax review",
+    "evidence": {
+      "metadata_only": true,
+      "dataflows_inventoried": 0,
+      "dataflows_inspected": 0,
+      "coverage_gap_count": 1,
+      "queries_observed": 0,
+      "flagged_query_count": 0,
+      "items": [
+        {
+          "workspace_id": "",
+          "dataflow_id": "",
+          "definition_status": "inventory_unavailable",
+          "query_count": 0,
+          "flagged_query_count": 0
+        }
+      ],
+      "queries": []
+    },
+    "recommendation": "Review explicit syntax with the owner; validate folding and runtime behavior separately. Static signals are not proof of failure. Complete all reported evidence gaps.",
+    "microsoft_learn_url": "https://learn.microsoft.com/powerquery-m/table-buffer"
+  },
+  {
+    "rule_id": "DFLOW-002",
+    "dimension": "performance",
+    "severity": "medium",
+    "status": "missing_evidence",
+    "title": "Dataflow definition analysis coverage",
+    "evidence": {
+      "metadata_only": true,
+      "dataflows_inventoried": 0,
+      "dataflows_inspected": 0,
+      "coverage_gap_count": 1,
+      "queries_observed": 0,
+      "flagged_query_count": 0,
+      "items": [
+        {
+          "workspace_id": "",
+          "dataflow_id": "",
+          "definition_status": "inventory_unavailable",
+          "query_count": 0,
+          "flagged_query_count": 0
+        }
+      ],
+      "queries": []
+    },
+    "recommendation": "Collect native inventory and supported CI/CD definitions with appropriate read/write permissions. Resolve parse or unsupported-format gaps before concluding coverage is complete.",
+    "microsoft_learn_url": "https://learn.microsoft.com/rest/api/fabric/dataflow/items/get-dataflow-definition"
+  }
+]

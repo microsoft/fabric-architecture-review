@@ -56,9 +56,11 @@ MASK = "***"
 # One-line disclaimer injected into the committed sample so readers know the
 # masking is sample-only — real engagement reports retain per-resource IDs.
 SAMPLE_NOTE = (
-    "> **Sample report.** All workspace, dataset, and tenant identifiers have been "
-    "masked (`***`) for public distribution. A real engagement run retains the actual "
-    "per-resource IDs so every finding is directly actionable.\n"
+    "> **Synthetic sample.** This trimmed central-review snapshot is not the "
+    "Workspace Owner report or evidence of live access validation. Its date, "
+    "findings and scores describe the sample only. Workspace, dataset and tenant "
+    "identifiers are masked (`***`); real reviews retain per-resource IDs for "
+    "investigation.\n"
 )
 
 

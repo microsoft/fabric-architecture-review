@@ -1,14 +1,26 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 # Checklist Reference
 
 Each rule below is evaluated by an analyzer module. The canonical source of
 truth is [`config/review-checklist.yaml`](../config/review-checklist.yaml);
 this page is the reader-friendly index with Microsoft Learn references.
 
+**Use this when you have a rule ID.** Find its row, inspect the finding's evidence
+and recommendation, then follow [Use the results](methodology.md#use-the-results).
+This is a reference, not an installation checklist or an instruction to apply
+every recommendation to every workspace.
+
 Numeric pass/fail boundaries live in [`config/thresholds.yaml`](../config/thresholds.yaml) — the single,
 documented place to tune the review to a client's SLOs. See
 [methodology.md](methodology.md#applicability-outcomes-and-thresholds) for applicability,
-the six-state outcome contract, scoring, and override precedence. Rows marked superseded
+the six assessment outcomes, scoring, and override precedence. Rows marked superseded
 retain historical IDs but are disabled and do not emit findings.
+
+This is the **central FAR checklist**, not the optional Workspace Owner report's
+coverage. The [owner report](workspace-owner-report.md) exposes only curated
+attributable technical signals; every owner assessment remains incomplete,
+and zero findings does not mean this checklist passed.
 
 ## Architecture
 
@@ -29,6 +41,7 @@ retain historical IDs but are disabled and do not emit findings.
 | ARCH-013 | high | The Scanner API inventory is complete for this run | [Learn](https://learn.microsoft.com/rest/api/power-bi/admin/workspace-info-post-workspace-info) |
 | ARCH-014 | medium | Deployment-pipeline stages are kept in sync | [Learn](https://learn.microsoft.com/fabric/cicd/deployment-pipelines/understand-the-deployment-process) |
 | ARCH-015 | medium | Legacy Dataflow Gen1 (Power BI dataflows) are migrated to Dataflow Gen2 | [Learn](https://learn.microsoft.com/fabric/data-factory/dataflows-gen2-overview) |
+| ARCH-016 | medium | Validate same-scope pipeline activity dependencies for duplicate names, missing targets, self-dependencies and cycles; unresolved definitions remain unassessed | [Learn](https://learn.microsoft.com/fabric/data-factory/activity-dependencies) |
 
 ## Performance
 
@@ -50,6 +63,8 @@ retain historical IDs but are disabled and do not emit findings.
 | PERF-014 | low | Scheduled semantic-model refreshes in the same workspace do not pile up into overlapping windows | [Learn](https://learn.microsoft.com/power-bi/connect-data/refresh-scheduled-refresh) |
 | DAX-001 | high | Measure definitions avoid static DAX patterns that can create expensive iterators, broad intermediate tables, or complex filter evaluation; this does not claim measured runtime cost | [Learn](https://learn.microsoft.com/power-bi/guidance/dax-avoid-avoid-filter-as-filter-argument) |
 | DAX-002 | medium | Semantic-model definitions are available for metadata-only DAX analysis; definition errors remain explicit evidence gaps | [Learn](https://learn.microsoft.com/rest/api/fabric/semanticmodel/items/get-semantic-model-definition) |
+| DFLOW-001 | low | Review static buffering, explicit folding barriers and native-query boundaries; syntax signals are informational, not measured failures | [Learn](https://learn.microsoft.com/powerquery-m/table-buffer) |
+| DFLOW-002 | medium | Dataflow Gen2 inventory and supported definition inspection cover the scoped estate; unsupported definitions and parse gaps are not clean results | [Learn](https://learn.microsoft.com/rest/api/fabric/dataflow/items/get-dataflow-definition) |
 
 ## Governance
 
@@ -108,14 +123,17 @@ Scoped to *production* workspaces only — dev / test / sandbox / personal works
 | ID | Severity | Description | Reference |
 |---|---|---|---|
 | TENANT-001 | high | "Users can create Fabric items" is scoped to a specific security group, not enabled for the entire organization | [Learn](https://learn.microsoft.com/fabric/admin/fabric-switch) |
-| TENANT-002 | medium | "Service principals can use Fabric APIs" is enabled and scoped to an automation security group (required for this assessment and for CI/CD) | [Learn](https://learn.microsoft.com/fabric/admin/metadata-scanning-enable-read-only-apis) |
+| TENANT-002 | medium | "Service principals can use Fabric APIs" is enabled and scoped to an automation security group; service-principal collection has separate prerequisites from the default user-identity review | [Learn](https://learn.microsoft.com/fabric/admin/metadata-scanning-enable-read-only-apis) |
 | TENANT-003 | high | External sharing tenant settings ("Allow sharing to external users", "Invite external users to your organization") are disabled or scoped to a security group | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing) |
 | TENANT-004 | medium | Uncertified / custom visuals tenant settings are scoped | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-visuals) |
 | TENANT-005 | medium | R and Python visual / script settings are scoped or disabled | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-r-and-python-visuals) |
 
 ## Notebook code (heuristic)
 
-Heuristic regex scan over decoded notebook source. Each rule is filed under a WAF dimension (shown below); findings reference notebook name + cell index only.
+Static notebook-source checks identify patterns to investigate, not proven
+defects. Findings retain item identity and cell indexes, never matched source
+text. Owner evidence requires explicit workspace/notebook IDs matching same-run
+inventory; name-only rows are excluded.
 
 | ID | Severity | Dimension | Description | Reference |
 |---|---|---|---|---|

@@ -40,6 +40,7 @@ try {
     Invoke-Collector "collectors.semantic_models"      "Semantic models + refresh history"
     Invoke-Collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
     Invoke-Collector "collectors.dax_analysis"       "Static DAX metadata normalization (no query execution)"
+    Invoke-Collector "collectors.dataflows"          "Dataflow Gen2 inventory and static Power Query evidence"
     Invoke-Collector "collectors.vertipaq_stats"       "VertiPaq Analyzer stats per semantic model (Fabric-only; size, cardinality, encoding via semantic-link-labs)"
     Invoke-Collector "collectors.best_practices"       "Best Practice Analyzer + Direct Lake fallback + Delta + capacity readiness (Fabric-only; semantic-link-labs)"
     Invoke-Collector "collectors.lakehouse_warehouse"  "Lakehouses + Warehouses + table metadata"
@@ -55,7 +56,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Collection complete. Raw outputs in $rawDir." -ForegroundColor Green
+    Write-Host "Collection finished. Review collector warnings for unavailable evidence. Raw outputs in $rawDir."
 }
 finally {
     Pop-Location

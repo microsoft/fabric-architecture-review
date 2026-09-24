@@ -6,6 +6,7 @@
 //-----------------------------------------------------------------------
 
 import type { QueryTable } from "@microsoft/fabric-app-data";
+import { readPipelineEvidence } from "@/lib/pipeline-evidence";
 import type { AssessmentDimension, DaxMeasureRisk, EstateHealth, EstateItem, EstateItemType, FindingSeverity, ReviewData, ReviewDimension } from "@/lib/review-data";
 
 export interface LiveReviewTables {
@@ -67,7 +68,7 @@ function assessmentDimension(value: RecordValue): AssessmentDimension {
 
 function severity(value: RecordValue): FindingSeverity {
     const normalized = text(value).toLowerCase();
-    return normalized === "critical" || normalized === "high" || normalized === "medium" ? normalized : "low";
+    return normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "info" ? normalized : "low";
 }
 
 function itemType(value: RecordValue): EstateItemType | null {
@@ -75,6 +76,7 @@ function itemType(value: RecordValue): EstateItemType | null {
     // Estate-graph container nodes are not workspace items.
     if (normalized === "capacity" || normalized === "workspace" || normalized === "owner") return null;
     if (normalized === "semanticmodel") return "model";
+    if (normalized === "datapipeline") return "pipeline";
     if (normalized === "lakehouse" || normalized === "warehouse" || normalized === "report" || normalized === "notebook" || normalized === "pipeline") return normalized;
     if (normalized === "app" || normalized === "appbackend") return "app";
     return "component";
@@ -103,19 +105,29 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         if (workspaceId) workspaceIdsByRule.set(ruleId, [...(workspaceIdsByRule.get(ruleId) ?? []), workspaceId]);
     });
     const findingRows = records(tables.findings);
-    const findings = findingRows.map((row) => ({
-        id: text(row.rule_id),
-        dimension: assessmentDimension(row.dimension),
-        severity: severity(row.severity),
-        title: text(row.title),
-        affected: text(row.affected),
-        recommendation: text(row.recommendation),
-        workspaceIds: [...new Set(workspaceIdsByRule.get(text(row.rule_id)) ?? [])],
-    }));
+    const findings = findingRows.map((row) => {
+        const pipelineEvidence = text(row.rule_id) === "ARCH-016" ? readPipelineEvidence(text(row.pipeline_evidence)) : undefined;
+        return {
+            id: text(row.rule_id),
+            dimension: assessmentDimension(row.dimension),
+            severity: severity(row.severity),
+            title: text(row.title),
+            affected: text(row.affected),
+            recommendation: text(row.recommendation),
+            pipelineEvidence,
+            workspaceIds: pipelineEvidence
+                ? pipelineEvidence.status === "ready" ? [...new Set(pipelineEvidence.items.filter((item) => item.signals.length).map((item) => item.workspaceId))] : []
+                : [...new Set(workspaceIdsByRule.get(text(row.rule_id)) ?? [])],
+        };
+    });
     const targetIds = new Map<string, string[]>();
     targetRows.forEach((row) => {
+        if (text(row.rule_id) === "ARCH-016") return;
         const workspaceId = text(row.workspace_id);
         targetIds.set(workspaceId, [...(targetIds.get(workspaceId) ?? []), text(row.rule_id)]);
+    });
+    findings.filter((finding) => finding.id === "ARCH-016").forEach((finding) => {
+        finding.workspaceIds.forEach((id) => targetIds.set(id, [...(targetIds.get(id) ?? []), finding.id]));
     });
     const tableStatsByModel = new Map<string, QueryRecord[]>();
     records(tables.modelTables).forEach((row) => {
@@ -150,7 +162,9 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
             name: text(row.node_name),
             type,
             status: health(issues),
-            findingIds: type === "notebook" ? [...new Set(smells.map((smell) => text(smell.rule_id)))] : [],
+            findingIds: type === "notebook" ? [...new Set(smells.map((smell) => text(smell.rule_id)))] : findings.filter((finding) =>
+                finding.pipelineEvidence?.status === "ready" && finding.pipelineEvidence.items.some((item) =>
+                    item.workspaceId === workspaceId && item.itemId === id && item.signals.length > 0)).map((finding) => finding.id),
             ...(model ? { modelProfile: {
                 storageMode: text(model.storage_mode) || "Unknown",
                 totalSize: formatBytes(number(model.total_size)),
@@ -263,7 +277,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         kind: text(row.kind),
         state: text(row.state),
         region: text(row.region),
-        assignedWorkspaceCount: number(row.assigned_workspace_count),
+        assignedWorkspaceCount: row.assigned_workspace_count == null ? null : number(row.assigned_workspace_count),
         observedWorkspaceCount: number(row.observed_workspace_count),
         observedItemCount: number(row.observed_item_count),
         workspaceScopeLimited: boolean(row.workspace_scope_limited),
@@ -287,6 +301,7 @@ export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
         auditWindowDays: number(row.audit_window_days),
     }));
     return {
+        latestRunId: text(summary.run_id),
         metrics: [
             { label: "Best-practice score", value: score, delta: "Latest review run", trend: "steady", intent: "score" },
             { label: "Critical + high", value: String(highRisk), delta: "Live findings", trend: "steady", intent: "risk" },

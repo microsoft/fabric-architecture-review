@@ -72,6 +72,7 @@ const severitySeries: { severity: FindingSeverity; label: string; stroke: string
     { severity: "high", label: "High", stroke: "stroke-high-strong", swatch: "bg-high-strong" },
     { severity: "medium", label: "Medium", stroke: "stroke-warning", swatch: "bg-warning" },
     { severity: "low", label: "Low", stroke: "stroke-info-strong", swatch: "bg-info-strong" },
+    { severity: "info", label: "Info", stroke: "stroke-info-strong", swatch: "bg-info-strong" },
 ];
 
 function SeverityDonut({ findings }: { findings: ReviewFinding[] }) {

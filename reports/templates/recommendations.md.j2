@@ -1,6 +1,7 @@
+{# Copyright (c) Microsoft Corporation. Licensed under the MIT License. -#}
 # Recommendations &amp; Roadmap
 
-Findings are prioritized by severity and the effort typically required to remediate them. Implement Critical and High items immediately, Medium items in the next review cycle, and Low / Info items opportunistically as part of ongoing operations.
+Use severity to prioritize investigation and remediation. Validate each finding against workload requirements before changing the environment; review unresolved evidence gaps separately.
 
 ## Immediate &mdash; Critical / High
 
@@ -42,4 +43,6 @@ _None._
 
 ## Data Safety appendix
 
-This assessment runs strictly against metadata, configuration and metrics surfaced by the Microsoft Fabric / Power BI Admin REST APIs and the Fabric Scanner API. **No customer dataset rows, report visuals, lakehouse tables, notebook contents or pipeline payloads were read.** All collector outputs are stored locally in `output/raw/` and can be deleted after the engagement.
+FAR collects metadata, configuration, source definitions and operational metrics. Source evidence can include DAX, Power Query M, notebook source and pipeline definitions; notebook outputs are not retained. **Customer business rows, report visual data and business file contents are not retrieved.** Enabled monitoring and aggregate probes are limited to their documented contracts.
+
+Outputs are stored in the configured local directory or FAR Lakehouse. They can contain sensitive source, identities and access metadata. Restrict access, review exports before sharing and apply your organization's retention policy.

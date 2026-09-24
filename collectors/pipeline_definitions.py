@@ -33,6 +33,8 @@ DATA SAFETY:
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload
+
 import argparse
 import base64
 import binascii
@@ -42,7 +44,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from collectors._http import HttpError, request
+from collectors._http import Headers, HttpError, request
+from collectors._common import collection_incomplete, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
@@ -83,7 +86,7 @@ def _decode_payload(payload: str, payload_type: str, path: str) -> Optional[Any]
 
 
 def _get_definition(
-    headers: Dict[str, str],
+    headers: Headers,
     workspace_id: str,
     item_id: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -100,7 +103,7 @@ def _get_definition(
 
 
 def _get_definition_impl(
-    headers: Dict[str, str],
+    headers: Headers,
     workspace_id: str,
     item_id: str,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
@@ -187,6 +190,7 @@ def _normalise(
     return rec
 
 
+@record_collection_failure("pipeline_definitions.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -194,26 +198,29 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
     src = raw_dir / "pipelines_notebooks.json"
     if not src.exists():
-        print("Pipeline definitions: pipelines_notebooks.json not found - run that collector first.")
-        target.write_text(json.dumps({"pipelines": [], "notebooks": []}, indent=2), encoding="utf-8")
-        return target
-
-    catalog = json.loads(src.read_text(encoding="utf-8-sig"))
-    pipelines_in = catalog.get("pipelines") or []
-    notebooks_in = catalog.get("notebooks") or []
-
-    if not pipelines_in and not notebooks_in:
-        print("Pipeline definitions: no pipelines or notebooks in catalog - nothing to fetch.")
-        target.write_text(json.dumps({"pipelines": [], "notebooks": []}, indent=2), encoding="utf-8")
-        return target
-
-    provider = get_default_provider()
-    headers = provider.headers(scope=FABRIC_SCOPE)
+        raise HttpError(f"Required inventory {src.name} was not collected")
+    catalog = filter_review_payload(json.loads(src.read_text(encoding="utf-8-sig")), raw_dir)
+    if not isinstance(catalog, dict) or any(
+        not isinstance(catalog.get(key), list)
+        or any(not isinstance(row, dict) for row in catalog[key])
+        for key in ("pipelines", "notebooks")
+    ):
+        raise HttpError(f"Required inventory {src.name} has no usable pipeline/notebook catalog")
+    pipelines_in = catalog["pipelines"]
+    notebooks_in = catalog["notebooks"]
+    source_complete = not (
+        collection_incomplete(catalog) or catalog.get("inventoryErrors") or catalog.get("collectionErrors")
+    )
+    if not source_complete:
+        print("Pipeline definitions: upstream coverage is incomplete; fetching all known artifact IDs.")
 
     print(
         f"Pipeline definitions: fetching getDefinition for "
         f"{len(pipelines_in)} pipeline(s) and {len(notebooks_in)} notebook(s)..."
     )
+    if pipelines_in or notebooks_in:
+        provider = get_default_provider()
+        headers = lambda: provider.headers(scope=FABRIC_SCOPE)
 
     pipelines_out: List[Dict[str, Any]] = []
     notebooks_out: List[Dict[str, Any]] = []
@@ -222,8 +229,9 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     for i, p in enumerate(pipelines_in, 1):
         wsid, pid = p.get("workspaceId"), p.get("id")
         if not (wsid and pid):
-            continue
-        defn, err = _get_definition(headers, wsid, pid)
+            defn, err = None, "missing_item_identity"
+        else:
+            defn, err = _get_definition(headers, wsid, pid)
         rec = _normalise(p, defn, err)
         pipelines_out.append(rec)
         if err:
@@ -234,8 +242,9 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     for i, n in enumerate(notebooks_in, 1):
         wsid, nid = n.get("workspaceId"), n.get("id")
         if not (wsid and nid):
-            continue
-        defn, err = _get_definition(headers, wsid, nid)
+            defn, err = None, "missing_item_identity"
+        else:
+            defn, err = _get_definition(headers, wsid, nid)
         rec = _normalise(n, defn, err)
         notebooks_out.append(rec)
         if err:
@@ -249,6 +258,11 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
                 "pipelines": pipelines_out,
                 "notebooks": notebooks_out,
                 "errors": errors,
+                "collectionComplete": source_complete and errors == 0,
+                "sourceCollectionComplete": source_complete,
+                **{key: catalog[key] for key in (
+                    "failedWorkspaces", "inventoryErrors", "collectionErrors", "workspaceScope",
+                ) if key in catalog},
             },
             indent=2,
             ensure_ascii=False,

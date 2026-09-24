@@ -1,6 +1,30 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 # Review Methodology
 
 The Fabric Architecture Review is aligned to the [Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/) and adapts the WAF pillars to Microsoft Fabric workloads.
+
+## Use the results
+
+**Goal:** turn a finding into an evidence-backed action, not just improve a score.
+
+1. Select the intended **run and workspace**. Check evidence coverage first.
+2. For `missing_evidence` or `unknown`, resolve collection/access gaps and rerun
+   Collect before drawing a conclusion.
+3. For a failed check, open its affected items, evidence and recommendation.
+   Look up the rule ID in the [checklist](checklist-reference.md) when needed.
+4. Agree the next action, owner and validation with the workload team. FAR
+   does not automatically remediate or create a task list.
+5. Test the change for correctness and performance, then rerun the same review scope.
+
+**Example: potentially expensive DAX measures.** Open **DAX Analyzer** in the
+central report, or **Findings / Technical details** in the owner report. Select
+the workspace/model and inspect the named measures and pattern guidance.
+Benchmark relevant queries before and after changing a measure. A static flag is
+not proof of slow execution, and removing it is not proof of a performance gain.
+
+The sections below explain scoring and interpretation. For installation, use
+[Fabric deployment](../fabric/DEPLOYMENT.md) or [local review](local-review.md).
 
 ## WAF pillar mapping
 
@@ -14,10 +38,10 @@ The Fabric Architecture Review is aligned to the [Azure Well-Architected Framewo
 
 ## Phases
 
-1. **Scope & access** — Identify in-scope workspaces and capacities. The reviewer signs in as a user holding a read-only **Fabric Administrator** role for the duration of the engagement; a read-only service principal is an optional alternative for unattended/scheduled baselines. See [auth-setup.md](auth-setup.md).
-2. **Collect** — Run the collectors to gather metadata, configuration, inventory, and metrics. **No customer data is read.**
+1. **Scope & access** — Identify in-scope workspaces and capacities, then grant the executing identity the permissions required by the enabled collectors. FAR uses metadata-reading operations, but Fabric Administrator is a privileged role, not a read-only role. Optional service-principal collection requires separate configuration. See [auth-setup.md](auth-setup.md).
+2. **Collect** — Gather metadata, configuration, definitions, inventory, and metrics, not business-data rows. Definitions can contain literals or credentials; treat raw collection artifacts as sensitive.
 3. **Analyze** — Apply checklist rules from `config/review-checklist.yaml` against thresholds in `config/thresholds.yaml`. Emit findings as structured JSON.
-4. **Report** — Render findings to a client-ready PDF with executive summary, detailed findings (grouped by dimension), and a prioritized roadmap.
+4. **Report** — Render central-review Markdown with executive summary, detailed findings (grouped by dimension), and a prioritized roadmap. The local workflow can also generate a PDF; Fabric produces Markdown and materializes Gold for Power BI.
 5. **Review & handover** — Walk the client through findings; capture decisions; archive the engagement folder.
 
 The DAX Analyzer parses TMDL or `model.bim` measure definitions already returned by
@@ -26,6 +50,69 @@ as nested iterators, broad virtual tables, whole-table filters, and complex row 
 These are prioritization hints only: no DAX is executed, and a signal is never presented
 as measured duration, query-plan cost, capacity usage, or proof that a measure is slow.
 Definition failures reduce coverage through `DAX-002` instead of being treated as clean models.
+
+Calculated columns, calculated tables and calculation items are separate typed
+evidence, not additional measures or inputs to measure-only DAX scoring.
+Dataflow Gen2 signals describe static Power Query M, not DAX or measured folding
+failures. Native execution history is a bounded observation, not a complete
+ledger. See [native evidence](native-evidence.md) for coverage, deduplication
+and validation guidance.
+
+Collection failures and incomplete pagination remain explicit evidence gaps.
+They do not become empty successful inventories or passing checks. The scanner
+integrity rule `ARCH-013` reports collection failure directly. See
+[outcomes and thresholds](#applicability-outcomes-and-thresholds) before scoring.
+
+### Optional monitoring-driven scope selection
+
+For the **normal FAR pipeline**, an empty `WORKSPACE_IDS` means **no
+workspace filter**: tenant-wide where the executing identity has the required
+admin access, otherwise the workspaces its permissions expose. Scope selection
+does not grant additional access. This is distinct from the targeted parent's empty
+selection, which must skip the review.
+
+[Targeted review](targeted-review.md) adds a parent pipeline before these phases.
+It ranks the configured FUAM monitoring records by CU-seconds (default) or
+explicitly labelled **recorded throttling minutes**, then passes up to `TOP_N`
+workspace GUIDs (default five, configurable from 1-100) into the normal review. Existing FAR parameters and finding
+semantics do not change. An optional workspace allow-list constrains candidates
+before ranking; an empty selection skips rather than runs tenant-wide.
+
+High CU usage is not itself a finding. Recorded throttling minutes can be
+incomplete because stock FUAM may omit zero-CU item/operation/day groups; they are
+not a throttled-operation count or causal attribution of capacity overload.
+Source failures stop the parent; there is no direct Capacity Metrics fallback.
+The parent waits for a successful FAR review before optional owner notification.
+
+Optional email links direct-user workspace administrators to the report after a
+successful review. It does not perform remediation, export a task list or change
+finding severity. Recipients need their own report permissions; a workspace
+filter is navigation, not authorization.
+
+The governance link scopes workspace-risk visuals, not the whole central
+report. Keep central artifacts central-only; use the separately validated
+[Workspace Owner report](workspace-owner-report.md) for owner consumers.
+
+### Optional owner technical projection
+
+The owner report is a curated subset, not a reproduction of the full checklist
+or central score. All owner assessments remain **incomplete**; zero owner
+failures is not a pass. Notebook signals and model-table statistics require
+authoritative workspace/item IDs; name-only or ambiguous evidence is excluded.
+Owner review history starts at enablement
+unless retained historical runs are explicitly reprojected.
+
+Review freshness and access freshness are separate. Owner grants expire within
+24 hours and require independent daily `07_OwnerAccessSync`, even when reviews
+run weekly. A new workspace needs a successful sync before readers receive rows.
+Follow the [owner operating and live acceptance guide](workspace-owner-report.md)
+for scheduling, reader approval and security validation.
+
+Selection and email-preparation audits describe orchestration state, not review
+quality or confirmed delivery. Fabric monitoring is authoritative for child-run
+and mail-activity outcomes. For setup, validation and recovery, use the
+[deployment guide](../fabric/DEPLOYMENT.md); for recipient privacy and permissions,
+see [data safety](data-safety.md#optional-targeted-review-orchestration).
 
 ## Scoring
 
@@ -53,6 +140,17 @@ Every enabled rule resolves to one of six outcomes:
 - **unknown** — evidence exists, but it is insufficient or ambiguous for a defensible decision.
 - **missing_evidence** — a required collector artifact is unavailable, so the rule was not evaluated.
 
+An unsuccessful API call is not an empty successful result. Collectors preserve
+HTTP failures and incomplete pagination as collection errors; affected checks
+must not become `pass` because their result list is empty. A successful response
+with no rows remains valid evidence. If a membership list or user identity is
+unavailable, workspace-access checks report missing evidence rather than
+assuming there are no direct administrators or guests. Observed violations can
+still be reported as failures when other membership evidence is missing.
+
+After correcting a permission or transient API problem, rerun Collect before
+Analyze. Reanalyzing the failure artifact cannot recover the missing evidence.
+
 Only `pass` and `fail` are scored. Assessment coverage is the scored rule count divided by
 the rules that should have been evaluated; zero evaluated rules never produce a perfect score.
 
@@ -75,12 +173,10 @@ rather than being published.
 
 ## Data-safety guardrails
 
-Every collector module is annotated with a `# DATA SAFETY:` comment documenting the exact scope of what it reads. Code review of this repo must reject any change that:
+FAR reads metadata, definitions and documented monitoring aggregates, not
+customer business rows, files or notebook outputs. Definitions and audit records
+can still contain sensitive logic, literals and identities. Restrict output
+access and retention; do not publish live artifacts.
 
-- Issues `EVALUATE` or `SELECT` against tables that contain customer data,
-- Downloads OneLake file contents,
-- Reads notebook cell outputs,
-- Enables the Scanner API scopes `getArtifactUsers`, `datasetSchema`, `datasetExpressions` or `datasourceDetails`,
-- Persists raw API payloads outside `output/raw/` (which is gitignored).
-
-See [data-safety.md](data-safety.md) for the full allow / deny list.
+See [data-safety.md](data-safety.md) for allowed sources, opt-in aggregate queries
+and sharing boundaries.

@@ -1,10 +1,20 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 # Support
 
 ## How to file issues and get help
 
-This project uses [GitHub Issues](../../issues) to track bugs and feature requests. Please
-search the existing issues before filing new issues to avoid duplicates. For new issues, file
-your bug or feature request as a new Issue.
+Search [GitHub Issues](../../issues)
+before opening a bug report or feature request.
+
+Include the **version/commit, run mode (local or Fabric), failed stage,
+expected result and sanitized error text**, plus the smallest reproduction.
+Do not attach credentials, live collection payloads, owner contact lists or
+tenant-specific notebook outputs.
+
+For installation, first check the [Fabric checklist](fabric/DEPLOYMENT.md) or
+[local walkthrough](docs/local-review.md). For suspected vulnerabilities, use the
+[private security-reporting route](SECURITY.md), not a public issue.
 
 For help and questions about using this project, please open a
 [GitHub Discussion](../../discussions) or a GitHub Issue with the `question` label.

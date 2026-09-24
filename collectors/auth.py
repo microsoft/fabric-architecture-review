@@ -30,6 +30,7 @@ data endpoints.
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Dict
 
@@ -46,6 +47,8 @@ from dotenv import load_dotenv
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
 ARM_SCOPE = "https://management.azure.com/.default"
+STORAGE_SCOPE = "https://storage.azure.com/.default"
+TOKEN_REFRESH_MARGIN_SEC = 300
 
 # Microsoft-owned, pre-consented public client used by the Azure CLI.
 # Re-using it means we don't need to register a new app in the client tenant.
@@ -126,13 +129,14 @@ class TokenProvider:
                     cache_persistence_options=cache_options,
                 ),
             )
-        self._token_cache: Dict[str, str] = {}
+        self._token_cache: Dict[str, tuple[str, float]] = {}
 
     def get_token(self, scope: str = FABRIC_SCOPE) -> str:
-        if scope in self._token_cache:
-            return self._token_cache[scope]
+        cached = self._token_cache.get(scope)
+        if cached and cached[1] > time.time() + TOKEN_REFRESH_MARGIN_SEC:
+            return cached[0]
         token = self._credential.get_token(scope)
-        self._token_cache[scope] = token.token
+        self._token_cache[scope] = (token.token, token.expires_on)
         return token.token
 
     def headers(self, scope: str = FABRIC_SCOPE) -> Dict[str, str]:

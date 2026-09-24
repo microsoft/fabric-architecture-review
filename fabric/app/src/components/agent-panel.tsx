@@ -13,6 +13,10 @@ const suggestedPrompts = [
     "What should we fix first?",
     "Which workspaces need an owner?",
     "Where can we reduce capacity cost?",
+    "Show refresh and job execution coverage for each workspace's latest review.",
+    "Which Dataflow Gen2 queries have syntax signals or coverage gaps?",
+    "Rank calculated DAX objects separately from measures.",
+    "Show ARCH-016 structural defects with workspace and item IDs.",
 ];
 
 export function AgentPanel() {
@@ -63,6 +67,8 @@ export function AgentPanel() {
                     <p className="text-300 leading-300 text-agent-foreground">
                         {isConfigured ? "Ask the Data Agent for a grounded summary of the connected assessment." : "The values shown in design preview are anonymous samples. Configure the live connection before release validation."}
                     </p>
+                    <p className="mt-200 text-200 leading-300 text-agent-muted">Chat does not inherit page filters. Include workspace/item IDs and a review or time window when narrowing a question.</p>
+                    <p className="mt-200 text-200 leading-300 text-agent-muted">This chat uses the central Data Agent, not the workspace-owner agent. It does not inherit owner-model row-level security (RLS); access is governed by the configured central agent and its data sources.</p>
                 </div>
 
                 {submittedQuestion ? (

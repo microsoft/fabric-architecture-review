@@ -89,6 +89,7 @@ def analyze(raw_dir: str | Path, checklist_path: str | Path) -> List[Dict[str, A
             "definition_errors": errors,
             "measures_extracted": len(measures),
             "notes": payload.get("notes") or [],
+            **({"non_measure_coverage": payload["object_coverage"]} if "object_coverage" in payload else {}),
         },
         recommendation=(
             "Collect semantic-model definitions for all in-scope models and rerun the DAX collector."

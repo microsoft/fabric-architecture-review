@@ -1,3 +1,5 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 # Contributing
 
 Thank you for your interest in contributing to the **Fabric Architecture Review Accelerator**!
@@ -34,21 +36,26 @@ This accelerator's core promise is that **it never reads customer business data*
 metadata, configuration, inventory, and metrics. Any contribution is automatically
 rejected if it:
 
-- Issues `EVALUATE` / `SELECT` against tables that contain customer data (the only DAX
-  permitted targets the Microsoft-published Capacity Metrics App, gated behind a flag),
-- Downloads OneLake file contents,
+- Issues `EVALUATE` / `SELECT` returning customer business rows. The opt-in,
+  fixed-contract FUAM monitoring query is governed separately by the
+  [targeted-review source contract](docs/targeted-review.md#supported-fuam-source-contract),
+- Downloads customer business OneLake file contents (FAR's own artifacts and
+  runtime packages are not customer business data),
 - Reads notebook cell **outputs**,
 - Enables Scanner API scopes that return PII (`getArtifactUsers`, `datasetSchema`,
   `datasetExpressions`, `datasourceDetails`),
-- Persists raw API payloads outside the gitignored `output/raw/` folder.
+- Commits live tenant payloads, credentials, notebook execution outputs or private
+  test harnesses. Keep operational artifacts in approved local output folders or
+  the FAR Lakehouse, with appropriate access controls.
 
-Every collector module must carry a `# DATA SAFETY:` comment documenting exactly what it
-reads. See [docs/data-safety.md](docs/data-safety.md) for the full allow / deny list.
+Every collector module must include a `DATA SAFETY:` comment or docstring
+documenting what it reads. See [data safety](docs/data-safety.md) for the
+collection boundaries.
 
 ## Adding a rule, collector, or analyzer
 
-See the **[Extending the framework](README.md#-extending-the-framework)** section of the
-README for the end-to-end pattern (collector → analyzer → checklist → thresholds). Key
+See **[Extending the framework](REFERENCE.md#-extending-the-framework)** for the
+end-to-end pattern (collector → analyzer → checklist → thresholds). Key
 points:
 
 - Numeric pass/fail boundaries belong in [config/thresholds.yaml](config/thresholds.yaml),
@@ -64,24 +71,45 @@ points:
 ## Code style
 
 - Python 3.11+, standard library + the dependencies in `requirements.txt`.
+- Include the existing Microsoft copyright and MIT notice in authored source,
+  documentation and notebook headers. Keep JSON data/manifests valid; their
+  license is covered by [LICENSE.TXT](LICENSE.TXT), not comment injection.
+- Keep the [Fabric overview](fabric/README.md) brief, setup steps in the
+  [deployment guide](fabric/DEPLOYMENT.md), and detailed orchestration contracts
+  in the [targeted-review reference](docs/targeted-review.md). Link rather than
+  copying those contracts into every guide.
 - Keep collectors metadata-only. Represent supported-but-unavailable evidence explicitly
   so analyzers can emit `missing_evidence`; unexpected collector/analyzer failures must
   terminate the stage rather than publish stale or partial findings.
 
 ## Required validation
 
-Before opening a pull request, run:
+Owner-report changes must preserve the
+[curated projection, provenance and access contract](docs/workspace-owner-report.md).
+Local schema, projection and report tests cannot certify Fabric RLS, connection
+bindings or consumer isolation. Record live acceptance privately before consumer
+publication; never add tenant identifiers, access snapshots or secrets to fixtures.
+
+Use a Python virtual environment and Node.js 22 with its bundled npm 10.
+Before opening a pull request, run these commands from the repository root.
+The guarded copies prepare public build placeholders without replacing live settings:
 
 ```powershell
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m pip_audit -r requirements.txt
 cd fabric/app
 npm ci
+if (-not (Test-Path fabric.yaml)) { Copy-Item fabric.example.yaml fabric.yaml }
+if (-not (Test-Path rayfin/.env)) { Copy-Item rayfin/.env.example rayfin/.env }
 npm test -- --run
 npm run lint
 npm run build
-npm audit --omit=dev --audit-level=high
+npm audit --audit-level=high
 ```
 
 The repository CI repeats these gates on pull requests and pushes to `main` using
 GitHub-hosted runners; contributors do not need to provision a self-hosted runner.
+Dependency audits include development and deployment tooling. When changing
+dependency overrides, verify the full audit, frontend tests, production build
+and Rayfin CLI startup.

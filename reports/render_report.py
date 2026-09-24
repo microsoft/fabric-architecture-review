@@ -14,6 +14,8 @@ DATA SAFETY: This module formats already-analyzed findings only. No data access.
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload
+
 import argparse
 import json
 import os
@@ -333,7 +335,7 @@ def _scope_counts(raw_dir: Path) -> Dict[str, Any]:
     try:
         inv_path = raw_dir / "workspace_inventory.json"
         if inv_path.exists():
-            inv = json.loads(inv_path.read_text(encoding="utf-8-sig"))
+            inv = filter_review_payload(json.loads(inv_path.read_text(encoding="utf-8-sig")), raw_dir)
             wss = inv.get("workspaces") or inv.get("value") or []
             counts["workspaces"] = len(wss)
         cap_path = raw_dir / "capacity_metrics.json"
@@ -819,7 +821,7 @@ def _load_json(path: Path) -> Any | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return filter_review_payload(json.loads(path.read_text(encoding="utf-8-sig")), path.parent)
     except (json.JSONDecodeError, OSError):
         return None
 

@@ -49,6 +49,7 @@ invoke_collector "collectors.azure_capacity_automation" "Azure-side Pause/Resume
 invoke_collector "collectors.semantic_models"           "Semantic models + refresh history"
 invoke_collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
 invoke_collector "collectors.dax_analysis"               "Static DAX metadata normalization (no query execution)"
+invoke_collector "collectors.dataflows"                  "Dataflow Gen2 inventory and static Power Query evidence"
 invoke_collector "collectors.vertipaq_stats"            "VertiPaq Analyzer stats per semantic model (Fabric-only; size, cardinality, encoding via semantic-link-labs)"
 invoke_collector "collectors.best_practices"            "Best Practice Analyzer + Direct Lake fallback + Delta + capacity readiness (Fabric-only; semantic-link-labs)"
 invoke_collector "collectors.lakehouse_warehouse"       "Lakehouses + Warehouses + table metadata"
@@ -65,4 +66,4 @@ if (( ${#collector_failures[@]} > 0 )); then
 fi
 
 echo ""
-echo "Collection complete. Raw outputs in $RAW_DIR."
+echo "Collection finished. Review collector warnings for unavailable evidence. Raw outputs in $RAW_DIR."

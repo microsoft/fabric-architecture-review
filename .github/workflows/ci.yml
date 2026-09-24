@@ -52,7 +52,10 @@ jobs:
                       continue
                   compile("\n".join(lines), str(path), "exec")
       - name: Validate Bash scripts
-        run: bash -n scripts/bash/*.sh
+        run: |
+          for script in scripts/bash/*.sh; do
+            bash -n "$script" || exit 1
+          done
       - name: Validate PowerShell scripts
         shell: pwsh
         run: |
@@ -90,4 +93,4 @@ jobs:
       - run: npm test -- --run
       - run: npm run lint
       - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=high

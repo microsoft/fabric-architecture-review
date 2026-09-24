@@ -14,7 +14,8 @@ TOPN(
         "severity_rank", 'gold_findings'[severity_rank],
         "title", 'gold_findings'[title],
         "affected", 'gold_findings'[affected],
-        "recommendation", 'gold_findings'[recommendation]
+        "recommendation", 'gold_findings'[recommendation],
+        "pipeline_evidence", IF('gold_findings'[rule_id] = "ARCH-016", 'gold_findings'[evidence_json], BLANK())
     ),
     [severity_rank], ASC,
     [rule_id], ASC

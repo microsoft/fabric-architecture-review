@@ -20,6 +20,8 @@ DATA SAFETY:
 """
 from __future__ import annotations
 
+from collectors.workspace_scope import filter_review_payload
+
 import argparse
 import json
 import os
@@ -95,6 +97,7 @@ def collect(output_dir: str | os.PathLike = "output/raw", days: int | None = Non
             print(f"  {day.strftime('%Y-%m-%d')}: failed ({exc})")
 
     target_dir = Path(output_dir)
+    all_events = filter_review_payload({"events": all_events}, target_dir)["events"]
     target_dir.mkdir(parents=True, exist_ok=True)
     target = target_dir / "activity_logs.json"
     target.write_text(

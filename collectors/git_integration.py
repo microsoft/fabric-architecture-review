@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from collectors._http import request
+from collectors._common import load_workspace_inventory, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
@@ -31,22 +32,10 @@ FAB = "https://api.fabric.microsoft.com/v1"
 
 def _load_workspaces(raw_dir: Path) -> List[Tuple[str, str]]:
     """Return list of (workspace_id, workspace_name) from whatever inventory exists."""
-    scan = raw_dir / "scanner.json"
-    inv = raw_dir / "workspace_inventory.json"
-    workspaces: List[Tuple[str, str]] = []
-    if scan.exists():
-        data = json.loads(scan.read_text(encoding="utf-8-sig"))
-        for w in data.get("workspaces") or []:
-            if w.get("id"):
-                workspaces.append((w["id"], w.get("name") or ""))
-    elif inv.exists():
-        data = json.loads(inv.read_text(encoding="utf-8-sig"))
-        for w in data.get("workspaces") or []:
-            if w.get("id"):
-                workspaces.append((w["id"], w.get("name") or ""))
-    return workspaces
+    return [(w["id"], w.get("name") or "") for w in load_workspace_inventory(raw_dir) if w.get("id")]
 
 
+@record_collection_failure("git_integration.json")
 def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +47,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         return target
 
     provider = get_default_provider()
-    headers = provider.headers(scope=FABRIC_SCOPE)
+    headers = lambda: provider.headers(scope=FABRIC_SCOPE)
     print(f"Git integration: probing {len(workspaces)} workspace(s)...")
 
     results: List[Dict[str, Any]] = []

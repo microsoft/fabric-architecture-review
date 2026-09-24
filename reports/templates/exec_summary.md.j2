@@ -1,3 +1,5 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
+
 <div class="cover-page">
 
 <h1 class="cover-title">{{ engagement_name }}</h1>
@@ -51,11 +53,11 @@
 | <span class="sev sev-{{ f.severity }}">{{ f.severity | sev_badge }}</span> | **{{ f.rule_id }}** | {{ f.title }} | {% if f.evidence.reason %}{{ f.evidence.reason }}{% elif f.evidence.count is defined %}{{ f.evidence.count }} item(s) affected{% else %}&mdash;{% endif %} |
 {% endfor %}
 {% else %}
-_No failing checks &mdash; the tenant is aligned to the Fabric architecture checklist for the rules evaluated in REST-only mode._
+_No failing checks were identified in the available evidence. Review assessment coverage and unresolved outcomes before drawing conclusions._
 {% endif %}
 
 ## Methodology
 
-This review is aligned to the [Microsoft Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/) and the [Fabric implementation planning](https://learn.microsoft.com/fabric/admin/) guidance. Checks run against tenant metadata, configuration and metrics surfaced through the Power BI and Fabric Admin REST APIs.
+This review uses checks informed by the [Microsoft Azure Well-Architected Framework](https://learn.microsoft.com/azure/well-architected/) and [Fabric implementation planning](https://learn.microsoft.com/fabric/admin/). It evaluates metadata, configuration, source definitions and available operational metrics. Static code findings indicate investigation priorities, not measured runtime cost.
 
-**No customer data is read.** Refer to the Data Safety appendix at the end of this report.
+**No customer business rows are retrieved.** Collected metadata and source definitions can still be sensitive; see the Data Safety appendix.

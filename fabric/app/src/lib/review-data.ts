@@ -5,6 +5,8 @@
 // </copyright>
 //-----------------------------------------------------------------------
 
+import type { PipelineEvidence } from "@/lib/pipeline-evidence";
+
 export type ReviewDimension =
     | "Architecture"
     | "Security"
@@ -19,7 +21,7 @@ export type AssessmentDimension =
     | "Tenant settings"
     | "Best practices";
 
-export type FindingSeverity = "critical" | "high" | "medium" | "low";
+export type FindingSeverity = "critical" | "high" | "medium" | "low" | "info";
 
 export interface ReviewMetric {
     label: string;
@@ -44,6 +46,7 @@ export interface DaxSummary {
 }
 
 export interface ReviewFinding {
+    pipelineEvidence?: PipelineEvidence;
     id: string;
     dimension: AssessmentDimension;
     severity: FindingSeverity;
@@ -68,7 +71,7 @@ export interface CapacityDetail {
     kind: string;
     state: string;
     region: string;
-    assignedWorkspaceCount: number;
+    assignedWorkspaceCount: number | null;
     observedWorkspaceCount: number;
     observedItemCount: number;
     workspaceScopeLimited: boolean;
@@ -191,6 +194,7 @@ export interface TenantEstate {
 }
 
 export interface ReviewData {
+    latestRunId?: string;
     metrics: ReviewMetric[];
     dimensionScores: DimensionScore[];
     daxSummary: DaxSummary;
