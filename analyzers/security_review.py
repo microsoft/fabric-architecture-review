@@ -25,7 +25,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers._common import load_raw, load_rules, load_workspaces, make_finding, missing_raw_finding, threshold, write_findings
+from collectors.workspace_evidence import workspace_roles_complete, workspace_users
 
 BROAD_ACCESS_THRESHOLD = threshold("security", "broad_access_max_principals", 10, env="SEC_BROAD_ACCESS_THRESHOLD", cast=int)
 
@@ -40,18 +41,7 @@ def _version_tuple(value: str) -> Tuple[int, ...]:
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
-    scan = load_raw(raw_dir / "scanner.json")
-    inv = load_raw(raw_dir / "workspace_inventory.json")
-    workspaces = {}
-    for source in (scan, inv):
-        if not source or source.get("_meta", {}).get("complete") is False:
-            continue
-        for workspace in source.get("workspaces") or []:
-            key = workspace.get("id")
-            if key:
-                key = str(key).lower()
-                workspaces[key] = {**workspaces.get(key, {}), **workspace}
-    return list(workspaces.values())
+    return load_workspaces(raw_dir)
 
 
 def _principal_type(user: Dict[str, Any]) -> str:
@@ -75,8 +65,8 @@ def _is_external(user: Dict[str, Any]) -> bool:
 
 
 def _members_complete(workspace: Dict[str, Any], *, need_upn: bool = False) -> bool:
-    users = workspace.get("users")
-    if not isinstance(users, list):
+    users = workspace_users(workspace)
+    if users is None:
         return False
     return all(
         bool(_principal_type(user)) and (
@@ -131,15 +121,15 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             offenders: List[Dict[str, Any]] = []
             for w in workspaces:
                 user_admins = []
-                for u in w.get("users") or []:
+                for u in workspace_users(w) or []:
                     right = (u.get("groupUserAccessRight") or u.get("role") or "").lower()
-                    if right != "admin":
+                    if right != "admin" or u.get("_roleConflict"):
                         continue
                     if _principal_type(u) == "user":
                         user_admins.append(_principal_identifier(u))
                 if user_admins:
                     offenders.append({"workspace": w.get("name"), "individualAdmins": user_admins})
-            incomplete = sum(not _members_complete(w) for w in workspaces)
+            incomplete = sum(not _members_complete(w) or not workspace_roles_complete(w) for w in workspaces)
             status = "fail" if offenders else ("missing_evidence" if incomplete else "pass")
             findings.append(make_finding(
                 rule, dimension="security", status=status,
@@ -157,7 +147,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         else:
             broad = []
             for w in workspaces:
-                principals = [u for u in (w.get("users") or []) if _principal_type(u) == "user"]
+                principals = [u for u in (workspace_users(w) or []) if _principal_type(u) == "user"]
                 if len(principals) > BROAD_ACCESS_THRESHOLD:
                     broad.append({"workspace": w.get("name"), "individualPrincipalCount": len(principals)})
             incomplete = sum(not _members_complete(w) for w in workspaces)
@@ -195,7 +185,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         else:
             externals: List[Dict[str, Any]] = []
             for w in workspaces:
-                ext_users = [u for u in (w.get("users") or []) if _is_external(u)]
+                ext_users = [u for u in (workspace_users(w) or []) if _is_external(u)]
                 if ext_users:
                     externals.append({"workspace": w.get("name"),
                                       "externalUsers": [_principal_identifier(u) for u in ext_users][:10]})

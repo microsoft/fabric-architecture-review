@@ -25,7 +25,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from collectors._common import collection_incomplete
+from collectors._common import collection_incomplete, load_workspace_inventory
+from collectors._http import HttpError
+from collectors.workspace_evidence import (
+    merge_workspace_evidence, workspace_items, workspace_items_available,
+    workspace_roles_complete, workspace_users,
+)
 from reports.powerbi.schema import EVIDENCE_RELATIONSHIPS, GOLD_TABLES_BY_NAME, SEVERITY_RANK
 from reports.execution_history import build_execution_evidence
 from reports.dataflow_evidence import build_dataflow_evidence
@@ -44,32 +49,8 @@ DIMENSIONS = [
     "best_practices",
 ]
 
-# Scanner arrays under each workspace that are containers / non-artifacts, not
-# estate items — excluded from the estate graph and item counts.
-_NON_ITEM_WS_ARRAYS = frozenset({
-    "folders", "users", "workbooks", "dashboardTiles", "widgets",
-    "dataSourceInstances", "datasourceUsages",
-})
-# Item-type arrays already emitted with a curated node_type in the estate graph.
-_CURATED_ITEM_KEYS = frozenset({
-    "datasets", "reports", "Notebook", "DataPipeline", "Lakehouse",
-})
-# Friendly node_type labels for a few scanner keys; other keys are used verbatim.
-_NODE_TYPE_BY_KEY = {
-    "AppBackend": "App",
-    "dashboards": "Dashboard",
-    "dataflows": "Dataflow",
-    "datamarts": "Datamart",
-    "SQLAnalyticsEndpoint": "SQLEndpoint",
-}
-
-_CURATED_ITEM_TYPE_BY_KEY = {
-    "datasets": "SemanticModel",
-    "reports": "Report",
-    "Notebook": "Notebook",
-    "DataPipeline": "Pipeline",
-    "Lakehouse": "Lakehouse",
-}
+_CURATED_ITEM_TYPES = frozenset({"SemanticModel", "Report", "Notebook", "DataPipeline", "Lakehouse"})
+_NODE_TYPE_BY_ITEM = {"DataPipeline": "Pipeline", "AppBackend": "App"}
 
 _TENANT_SETTING_CHANGE_OPERATIONS = frozenset({
     "UpdatedAdminFeatureSwitch",
@@ -86,43 +67,20 @@ _TENANT_SETTING_CHANGE_OPERATIONS = frozenset({
 
 
 def _extra_ws_items(scan_ws_entry: Dict[str, Any]):
-    """Yield ``(node_type, id, name)`` for every estate item in a scanner
-    workspace entry that is not one of the curated item types. Covers AppBackend,
-    Warehouse, SQLAnalyticsEndpoint, KQLDatabase, Eventstream, MLModel, dashboards,
-    dataflows, datamarts, and any future Fabric item type — so no workspace renders
-    empty in the estate map."""
-    for key, arr in scan_ws_entry.items():
-        if (not isinstance(arr, list)
-                or key in _CURATED_ITEM_KEYS
-                or key in _NON_ITEM_WS_ARRAYS):
+    """Yield non-curated estate items using the shared item normalization."""
+    for item in workspace_items(scan_ws_entry):
+        if item["type"] in _CURATED_ITEM_TYPES or not item.get("id"):
             continue
-        node_type = _NODE_TYPE_BY_KEY.get(key, key)
-        for item in arr:
-            if not isinstance(item, dict):
-                continue
-            iid = item.get("id")
-            if not iid:
-                continue
-            yield node_type, iid, item.get("name") or item.get("displayName") or iid
+        yield (_NODE_TYPE_BY_ITEM.get(item["type"], item["type"]),
+               item["id"], item.get("name") or item["id"])
 
 
 def _workspace_items(scan_ws_entry: Dict[str, Any]):
     """Yield every observed item as ``(type, id, name)`` without duplicates."""
-    seen = set()
-    for key, item_type in _CURATED_ITEM_TYPE_BY_KEY.items():
-        for item in scan_ws_entry.get(key) or []:
-            if not isinstance(item, dict):
-                continue
-            item_id = item.get("id") or item.get("objectId")
-            if not item_id or str(item_id) in seen:
-                continue
-            seen.add(str(item_id))
-            yield item_type, item_id, item.get("name") or item.get("displayName") or item_id
-    for item_type, item_id, item_name in _extra_ws_items(scan_ws_entry):
-        if str(item_id) in seen:
-            continue
-        seen.add(str(item_id))
-        yield item_type, item_id, item_name
+    for item in workspace_items(scan_ws_entry):
+        if item.get("id"):
+            yield (_NODE_TYPE_BY_ITEM.get(item["type"], item["type"]),
+                   item["id"], item.get("name") or item["id"])
 
 
 def _modified_property(event: Dict[str, Any], *names: str) -> Any:
@@ -231,15 +189,15 @@ def _rule_descriptions() -> Dict[str, str]:
 def _notebook_index(scanner: Dict[str, Any]) -> Dict[str, tuple]:
     """Index ``(workspace_name, notebook_name) -> (workspace_id, notebook_id)``.
 
-    The scanner payload groups items under each workspace by type; notebooks are
-    under the ``Notebook`` key. A name-only fallback key is also added so a
+    Both typed Scanner buckets and flat REST items are supported.
+    A name-only fallback key is also added so a
     finding that knows the notebook but not the workspace can still resolve.
     """
     idx: Dict[str, tuple] = {}
     for ws in (scanner or {}).get("workspaces") or []:
         ws_id = ws.get("id") or ws.get("objectId")
         ws_name = (ws.get("name") or "").strip().lower()
-        for nb in ws.get("Notebook") or []:
+        for nb in workspace_items(ws, ("Notebook",)):
             nb_id = nb.get("id")
             nb_name = (nb.get("name") or "").strip().lower()
             if not nb_id:
@@ -307,22 +265,43 @@ _WORKSPACE_ITEM_COUNTS = {
 
 
 def _workspace_item_counts(ws: dict, scanned: dict | None) -> dict[str, int | None]:
-    items = scanned.get("items") if scanned is not None else ws.get("items")
-    if isinstance(items, list):
-        return {
-            key: len(items) if key == "item_count" else sum(
-                str(item.get("type") or "").lower() == kind.lower() for item in items
-            )
-            for key, (kind, _) in _WORKSPACE_ITEM_COUNTS.items()
-        }
-    if scanned is None:
+    evidence = merge_workspace_evidence([scanned] if scanned else [], [ws])
+    workspace = evidence[0] if evidence else ws
+    if not workspace_items_available({"items": None, **workspace}):
         return dict.fromkeys(_WORKSPACE_ITEM_COUNTS)
-    counts = {
-        key: len(scanned.get(scanner_key) or [])
-        for key, (_, scanner_key) in _WORKSPACE_ITEM_COUNTS.items() if key != "item_count"
+    items = workspace_items(workspace)
+    return {
+        key: len(items) if key == "item_count" else sum(item["type"] == kind for item in items)
+        for key, (kind, _) in _WORKSPACE_ITEM_COUNTS.items()
     }
-    counts["item_count"] = sum(counts.values()) + sum(1 for _ in _extra_ws_items(scanned))
-    return counts
+
+
+def _gold_workspace_inventory(raw_dir: Path) -> list[dict]:
+    """Keep partial same-run identities, but only independently collected children."""
+    observed: list[dict] = []
+    for filename in ("scanner.json", "workspace_inventory.json"):
+        source = _load(raw_dir, filename) or {}
+        rows = []
+        for ws in source.get("workspaces") or []:
+            wid = ws.get("id") or ws.get("objectId")
+            if not wid or _is_personal_workspace(ws):
+                continue
+            row = dict(ws, id=wid)
+            if collection_incomplete(source):
+                row = {key: value for key, value in row.items()
+                       if not isinstance(value, list) or key in ("items", "users")}
+                for component in ("items", "users"):
+                    if row.get(f"{component}CollectionStatus") != "collected":
+                        row[component] = None
+                        row[f"{component}CollectionStatus"] = "unavailable"
+            rows.append(row)
+        observed = merge_workspace_evidence(observed, rows)
+    try:
+        eligible = load_workspace_inventory(raw_dir)
+    except (HttpError, OSError, ValueError):
+        eligible = []
+    return [ws for ws in merge_workspace_evidence(observed, eligible)
+            if not _is_personal_workspace(ws)]
 
 
 def _vp_get(rec: Dict[str, Any], *candidates: str) -> Any:
@@ -722,7 +701,8 @@ def build_gold(
 
     # ---- gold_capacities ----------------------------------------------
     cap = _load(raw, "capacity_metrics.json") or {}
-    scanner_for_capacity = _load(raw, "scanner.json") or {}
+    shared_workspaces = _gold_workspace_inventory(raw)
+    scanner_for_capacity = {"workspaces": shared_workspaces}
     scope_limited = bool(cap.get("workspaceScopeLimited"))
     capacity_names = {}
     observed_workspaces: Dict[str, set] = {}
@@ -900,26 +880,11 @@ def build_gold(
     _excluded_ids = _personal_ids | excluded_workspace_ids(raw)
     wsi["workspaces"] = [w for w in (wsi.get("workspaces") or []) if not _is_personal_workspace(w)]
     scanner["workspaces"] = [w for w in (scanner.get("workspaces") or []) if not _is_personal_workspace(w)]
-    # Identity comes from either same-run inventory, never from an older run or a name match.
-    merged_workspaces: Dict[str, Dict[str, Any]] = {}
-    complete_scanner: Dict[str, Dict[str, Any]] = {}
-    for source in (scanner, wsi):
-        for ws in source["workspaces"]:
-            wid = ws.get("id") or ws.get("objectId")
-            if not wid:
-                continue
-            widl = str(wid).lower()
-            observed = dict(ws, id=wid)
-            if collection_incomplete(source):
-                for component in ("users", "items"):
-                    if observed.get(f"{component}CollectionStatus") != "collected":
-                        observed[component] = None
-            if source is scanner and not collection_incomplete(source):
-                complete_scanner[widl] = ws
-            merged_workspaces[widl] = {**merged_workspaces.get(widl, {}), **observed}
-    wsi["workspaces"] = list(merged_workspaces.values())
+    merged_workspaces = {str(ws["id"]).lower(): ws for ws in shared_workspaces}
+    wsi["workspaces"] = shared_workspaces
+    scanner["workspaces"] = shared_workspaces
     item_counts = {
-        wid: _workspace_item_counts(ws, complete_scanner.get(wid))
+        wid: _workspace_item_counts(ws, None)
         for wid, ws in merged_workspaces.items()
     }
     if collection_incomplete(wsi) or collection_incomplete(scanner):
@@ -944,9 +909,9 @@ def build_gold(
         wid = ws.get("id")
         _widl = str(wid).lower() if wid else ""
         _admins = sum(
-            1 for u in ws["users"]
-            if (u.get("groupUserAccessRight") or "") == "Admin"
-        ) if isinstance(ws.get("users"), list) else None
+            1 for u in workspace_users(ws) or []
+            if str(u.get("groupUserAccessRight") or u.get("role") or "").lower() == "admin"
+        ) if workspace_roles_complete(ws) else None
         profile = workspace_profiles.get(_widl) or {}
         if item_counts[_widl]["item_count"] is None and profile.get("classification") != "explicit":
             profile = {
@@ -1269,10 +1234,11 @@ def build_gold(
             continue
         widl = str(wid).lower()
         owner = ""
-        for u in ws.get("users") or []:
-            if (u.get("groupUserAccessRight") or "") == "Admin":
-                owner = u.get("displayName") or u.get("emailAddress") or ""
-                if (u.get("principalType") or "") == "User":
+        for u in (workspace_users(ws) or []) if workspace_roles_complete(ws) else []:
+            if str(u.get("groupUserAccessRight") or u.get("role") or "").lower() == "admin":
+                principal = u.get("principal") or {}
+                owner = u.get("displayName") or u.get("emailAddress") or principal.get("displayName") or ""
+                if str(u.get("principalType") or principal.get("type") or "").lower() == "user":
                     break  # prefer a named human admin over a group
         cap_id = ws.get("capacityId") or ""
         ws_meta[widl] = {
@@ -1543,19 +1509,19 @@ def build_gold(
                       kpi_label="Role", kpi_value="Admin")
             _add_edge(oid, r["owner"], "Owner",
                       r["workspace_id"], r["workspace_name"], "Workspace", "administers")
-        ds_by_id: Dict[str, str] = {}
-        for ds in s.get("datasets") or []:
+        ds_by_id: Dict[str, tuple] = {}
+        for ds in workspace_items(s, ("SemanticModel",)):
             did, dname = ds.get("id"), ds.get("name")
             if not did:
                 continue
             dname = dname or did
-            ds_by_id[str(did)] = dname
+            ds_by_id[str(did).lower()] = (did, dname)
             _add_node(did, "SemanticModel", dname, workspace_id=r["workspace_id"],
                       workspace_name=r["workspace_name"], status="grey", importance=2.0,
                       kpi_label="Workspace", kpi_value=r["workspace_name"])
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       did, dname, "SemanticModel", "contains")
-        for rp in s.get("reports") or []:
+        for rp in workspace_items(s, ("Report",)):
             rid, rname = rp.get("id"), rp.get("name")
             if not rid:
                 continue
@@ -1566,10 +1532,11 @@ def build_gold(
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       rid, rname, "Report", "contains")
             dsid = rp.get("datasetId")
-            if dsid and str(dsid) in ds_by_id:
-                _add_edge(dsid, ds_by_id[str(dsid)], "SemanticModel",
+            if dsid and str(dsid).lower() in ds_by_id:
+                model_id, model_name = ds_by_id[str(dsid).lower()]
+                _add_edge(model_id, model_name, "SemanticModel",
                           rid, rname, "Report", "feeds")
-        for nb in s.get("Notebook") or []:
+        for nb in workspace_items(s, ("Notebook",)):
             nid, nname = nb.get("id"), nb.get("name")
             if not nid:
                 continue
@@ -1579,7 +1546,7 @@ def build_gold(
                       kpi_label="Workspace", kpi_value=r["workspace_name"])
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       nid, nname, "Notebook", "contains")
-        for pl in s.get("DataPipeline") or []:
+        for pl in workspace_items(s, ("DataPipeline",)):
             pid, pname = pl.get("id"), pl.get("name")
             if not pid:
                 continue
@@ -1589,7 +1556,7 @@ def build_gold(
                       kpi_label="Workspace", kpi_value=r["workspace_name"])
             _add_edge(r["workspace_id"], r["workspace_name"], "Workspace",
                       pid, pname, "Pipeline", "contains")
-        for lh in s.get("Lakehouse") or []:
+        for lh in workspace_items(s, ("Lakehouse",)):
             lid, lname = lh.get("id"), lh.get("name")
             if not lid:
                 continue

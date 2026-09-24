@@ -30,6 +30,8 @@ table sizes, encoding and BPA rule outcomes. No business row values are read.
 from __future__ import annotations
 
 from collectors.workspace_scope import filter_review_payload
+from collectors._common import HttpError, load_workspace_inventory
+from collectors.workspace_evidence import workspace_items, workspace_items_available
 
 import argparse
 import json
@@ -165,17 +167,19 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
                 errors.append({"model_id": str(mid), "check": key, "error": str(exc)})
         models_out.append(entry)
 
-    # Reports (for report BPA) from the scanner inventory.
+    # Reports from both inventory formats, scoped and deduplicated by stable ID.
     reports_out: List[Dict[str, Any]] = []
     try:
-        scanner = filter_review_payload(
-            json.loads((target_dir / "scanner.json").read_text(encoding="utf-8-sig")), target_dir,
-        )
-    except Exception:
-        scanner = {}
-    for ws in scanner.get("workspaces") or []:
+        workspaces = load_workspace_inventory(target_dir)
+    except HttpError as exc:
+        workspaces = []
+        errors.append({"check": "report_inventory", "error": str(exc)})
+    for ws in workspaces:
         ws_name = ws.get("name") or ws.get("id")
-        for rep in ws.get("reports") or []:
+        if not workspace_items_available(ws):
+            errors.append({"check": "report_inventory", "workspace_id": str(ws.get("id")),
+                           "error": "Workspace item inventory was not collected."})
+        for rep in workspace_items(ws, ("Report",)):
             rid, rname = rep.get("id"), rep.get("name")
             if not rid:
                 continue

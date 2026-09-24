@@ -9,6 +9,7 @@
       "productionWorkspaces": 1,
       "coveredRatio": 1.0,
       "minRatio": 0.8,
+      "workspacesMissingItemEvidence": [],
       "uncoveredCount": 0,
       "examples": []
     },
@@ -25,6 +26,7 @@
       "productionWorkspaces": 1,
       "connectedRatio": 1.0,
       "minRatio": 0.8,
+      "workspacesMissingItemEvidence": [],
       "disconnectedCount": 0,
       "examples": []
     },

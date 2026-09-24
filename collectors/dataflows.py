@@ -35,8 +35,9 @@ import os
 from pathlib import Path
 
 from collectors._common import (
-    filter_workspaces_by_scope, get_scope_workspace_ids, load_complete_raw, load_workspace_inventory,
+    filter_workspaces_by_scope, get_scope_workspace_ids, load_workspace_inventory,
 )
+from collectors.workspace_evidence import workspace_items
 from collectors._http import Headers, HttpError, paginate_value
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 from collectors.pipeline_definitions import FAB, _get_definition
@@ -76,16 +77,6 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         workspaces = []
         result["collectionComplete"] = False
         print("Dataflow inventory unavailable: collect a complete workspace inventory first.")
-    # A scanner inventory may be complete but omit unsupported native Gen2
-    # items. Supplement only with explicitly typed Fabric inventory records.
-    supplemental = {}
-    if (raw_dir / "workspace_inventory.json").exists():
-        try:
-            native = load_complete_raw(raw_dir / "workspace_inventory.json")
-            supplemental = {safe_id(workspace["id"]): workspace for workspace in native.get("workspaces", [])
-                            if isinstance(workspace, dict) and safe_id(workspace.get("id"))}
-        except (HttpError, ValueError):
-            print("Supplemental native inventory unavailable; querying live Dataflow inventory.")
     provider = get_default_provider() if workspaces else None
 
     def headers() -> dict[str, str]:
@@ -106,14 +97,10 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         coverage = {"id": workspace_id, "name": name, "inventoryStatus": "available"}
         result["workspaces"].append(coverage)
         items: dict[str, dict] = {}
-        # Explicit native Fabric types only. Never consume scanner["dataflows"].
-        native_workspace = supplemental.get(workspace_id, {})
-        candidates = list(workspace.get("items") or []) + list(native_workspace.get("items") or [])
-        for kind in ("Dataflow", "DataflowGen2"):
-            candidates.extend({**item, "type": kind} for item in workspace.get(kind, []) if isinstance(item, dict))
-        for item in candidates:
-            if isinstance(item, dict) and item.get("type") in ("Dataflow", "DataflowGen2") and safe_id(item.get("id")):
-                items[safe_id(item["id"])] = item
+        # Legacy Scanner dataflows remain Gen1, never Gen2 definition candidates.
+        for item in workspace_items(workspace, ("Dataflow", "Dataflow2")):
+            if item["_dataflowGeneration"] == 2 and safe_id(item.get("id")):
+                items[safe_id(item["id"]).lower()] = item
         try:
             for item in paginate_value(f"{FAB}/workspaces/{workspace_id}/dataflows", headers):
                 item_id = safe_id(item.get("id"))
@@ -121,12 +108,13 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
                     coverage["inventoryStatus"] = "partial"
                     result["collectionComplete"] = False
                     continue
-                items[item_id] = item
+                items[item_id.lower()] = item
         except HttpError:
             coverage["inventoryStatus"] = "partial" if items else "unavailable"
             result["collectionComplete"] = False
             print("Dataflow inventory incomplete for an in-scope workspace; coverage gap retained.")
-        for item_id, item in sorted(items.items()):
+        for _, item in sorted(items.items()):
+            item_id = safe_id(item["id"])
             record = {"id": item_id, "displayName": safe_name(item.get("displayName") or item.get("name") or ""),
                       "workspaceId": workspace_id, "workspaceName": name,
                       **_definition(headers, workspace_id, item_id)}

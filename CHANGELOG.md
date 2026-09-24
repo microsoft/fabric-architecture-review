@@ -6,6 +6,21 @@ All notable changes to this project are documented in this file.
 
 ## 2026.09.2
 
+### Hotfix: consistent workspace evidence
+
+- Reconcile eligible Scanner and REST workspace inventories by immutable ID
+  instead of discarding one source when the other is populated.
+- Normalize and deduplicate legacy Scanner, native PascalCase Scanner, and flat
+  REST items across workspace rules, collectors, and reporting.
+- Preserve independently collected memberships and distinguish unavailable
+  users/items from collected empty lists. Count distinct administrator principals
+  and report conflicting role evidence as incomplete.
+- Correct production administrator, governance metadata, inventory, and ALM
+  evaluations; honor environment profiles consistently in production checks.
+  Basic REST item listings no longer imply absent labels or endorsements.
+- Add regression coverage for mixed evidence, partial child collections,
+  workspace-scope exclusions, duplicate items/principals, and report projections.
+
 ### Native evidence and actionable reviews
 
 - Native refresh/job execution observations with explicit collection coverage,

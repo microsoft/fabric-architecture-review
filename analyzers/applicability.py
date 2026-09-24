@@ -10,27 +10,17 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 import yaml
+from collectors.workspace_evidence import workspace_items, workspace_items_available
 
 _PROD = re.compile(r"(?:^|[-_.\s])(prod|production|live)(?:$|[-_.\s])", re.IGNORECASE)
 _NONPROD = re.compile(r"(?:^|[-_.\s])(dev|test|qa|uat|sbx|sandbox|poc|demo)(?:$|[-_.\s])", re.IGNORECASE)
 _PLATFORM = re.compile(r"capacity[ -]?metrics|monitoring|admin|platform[ -]?ops", re.IGNORECASE)
 
-_BUCKET_TYPES = {
-    "datasets": "SemanticModel", "SemanticModel": "SemanticModel",
-    "reports": "Report", "Report": "Report",
-    "dashboards": "Dashboard", "Dashboard": "Dashboard",
-    "dataflows": "Dataflow", "Dataflow": "Dataflow", "Dataflow2": "Dataflow2",
-    "lakehouses": "Lakehouse", "Lakehouse": "Lakehouse",
-    "warehouses": "Warehouse", "Warehouse": "Warehouse",
-    "notebooks": "Notebook", "Notebook": "Notebook",
-    "pipelines": "DataPipeline", "DataPipeline": "DataPipeline",
-    "kqlDatabases": "KQLDatabase", "KQLDatabase": "KQLDatabase",
-    "mlModels": "MLModel", "MLModel": "MLModel",
-    "mlExperiments": "MLExperiment", "MLExperiment": "MLExperiment",
-    "Eventstream": "Eventstream", "Eventhouse": "Eventhouse",
-    "MirroredDatabase": "MirroredDatabase", "Reflex": "Reflex",
-}
-_KNOWN_TYPES = {value.lower(): value for value in _BUCKET_TYPES.values()}
+_KNOWN_TYPES = {value.lower(): value for value in (
+    "SemanticModel", "Report", "Dashboard", "Dataflow", "Dataflow2",
+    "Lakehouse", "Warehouse", "Notebook", "DataPipeline", "KQLDatabase",
+    "MLModel", "MLExperiment", "Eventstream", "Eventhouse", "MirroredDatabase", "Reflex", "SQLEndpoint",
+)}
 
 
 def _load_overrides(path: str | Path | None, section: str) -> Dict[str, Dict[str, Any]]:
@@ -63,26 +53,7 @@ def load_capacity_overrides(path: str | Path | None) -> Dict[str, Dict[str, Any]
 
 def item_type_counts(workspace: Dict[str, Any]) -> Dict[str, int]:
     """Normalize Scanner and Fabric REST inventory shapes without double-counting."""
-    counts: Counter[str] = Counter()
-    seen: set[str] = set()
-    for bucket, item_type in _BUCKET_TYPES.items():
-        for index, item in enumerate(workspace.get(bucket) or []):
-            identity = str(item.get("id") or f"{bucket}:{item.get('name') or item.get('displayName') or index}").lower()
-            if identity in seen:
-                continue
-            seen.add(identity)
-            counts[item_type] += 1
-    for index, item in enumerate(workspace.get("items") or []):
-        raw_type = str(item.get("type") or item.get("itemType") or "").strip()
-        if not raw_type:
-            continue
-        item_type = _KNOWN_TYPES.get(raw_type.lower(), raw_type)
-        identity = str(item.get("id") or f"items:{item_type}:{item.get('displayName') or item.get('name') or index}").lower()
-        if identity in seen:
-            continue
-        seen.add(identity)
-        counts[item_type] += 1
-    return dict(counts)
+    return dict(Counter(item["type"] for item in workspace_items(workspace) if item["type"]))
 
 
 def _environment(name: str, explicit: Any = None) -> str:
@@ -111,6 +82,8 @@ def classify_workspace(
         reason = str(explicit.get("reason") or "Configured workspace profile override.")
     elif (workspace.get("type") or "").lower() in ("personalgroup", "personal"):
         archetype, classification, reason = "personal", "strong", "Personal workspace type."
+    elif not workspace_items_available(workspace):
+        archetype, classification, reason = "unknown", "unknown", "Item inventory was not collected."
     elif not counts:
         archetype, classification, reason = "empty", "strong", "No typed Fabric items discovered."
     elif unknown_types:
@@ -138,6 +111,8 @@ def classify_workspace(
             archetype, classification, reason = "data_science", "strong", "Machine-learning workload detected."
         elif primary == 0 and bi:
             archetype, classification, reason = "bi_serving", "strong", "Semantic-model/report workload only."
+        elif primary == 0:
+            archetype, classification, reason = "unknown", "unknown", "No primary workload type was identified."
         else:
             archetype, classification, reason = "mixed", "mixed", "Multiple primary workload families detected."
 
@@ -187,12 +162,18 @@ def production_scope(
     *, require_content: bool = True,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """Split shared workspaces into production, excluded, and unknown environment scope."""
-    scoped: Dict[str, List[Dict[str, Any]]] = {"applicable": [], "not_applicable": [], "unknown": []}
+    scoped: Dict[str, List[Dict[str, Any]]] = {
+        "applicable": [], "not_applicable": [], "unknown": [], "missing_evidence": [],
+    }
     for workspace in workspaces:
         profile = profiles[str(workspace.get("id") or "").lower()]
         archetype = profile.get("archetype")
         if archetype in ("personal", "empty"):
             scoped["not_applicable"].append(workspace)
+        elif profile.get("environment") == "nonproduction":
+            scoped["not_applicable"].append(workspace)
+        elif require_content and not workspace_items_available(workspace):
+            scoped["missing_evidence"].append(workspace)
         elif require_content and not profile.get("itemTypeCounts"):
             scoped["not_applicable"].append(workspace)
         elif profile.get("environment") == "production":

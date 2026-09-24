@@ -13,6 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 from dotenv import load_dotenv
 from collectors.workspace_scope import filter_review_payload
+from collectors._common import HttpError, load_workspace_inventory
 
 # Load .env once when any analyzer imports the helpers so env-driven toggles
 # (e.g. CAPACITY_METRICS_APP_INSTALLED, CAPACITY_AUTO_PAUSE_CONFIGURED) work
@@ -161,6 +162,14 @@ def load_raw(path: str | Path, *, allow_incomplete: bool = False) -> Optional[Di
     ):
         return None
     return data
+
+
+def load_workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
+    """Reconcile complete Scanner evidence with independently collected REST children."""
+    try:
+        return load_workspace_inventory(raw_dir)
+    except HttpError:
+        return []
 
 
 def collection_coverage_incomplete(data: Dict[str, Any]) -> bool:

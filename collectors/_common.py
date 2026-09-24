@@ -22,6 +22,7 @@ from typing import Iterable, Set
 from dotenv import load_dotenv
 from collectors._http import HttpError
 from collectors.workspace_scope import filter_review_payload, is_excluded_workspace
+from collectors.workspace_evidence import merge_workspace_evidence
 
 load_dotenv()
 
@@ -76,6 +77,7 @@ def load_complete_raw(path: Path) -> dict:
 
 def load_workspace_inventory(raw_dir: Path) -> list[dict]:
     """Load workspace identities; child users/items may be unavailable."""
+    sources = {}
     for filename in ("scanner.json", "workspace_inventory.json"):
         path = raw_dir / filename
         if not path.exists():
@@ -88,7 +90,9 @@ def load_workspace_inventory(raw_dir: Path) -> list[dict]:
         ):
             continue
         if isinstance(data.get("workspaces"), list):
-            return filter_review_payload(data, raw_dir)["workspaces"]
+            sources[filename] = filter_review_payload(data, raw_dir)["workspaces"]
+    if sources:
+        return merge_workspace_evidence(sources.get("scanner.json", []), sources.get("workspace_inventory.json", []))
     raise HttpError("A complete scanner.json or workspace_inventory.json is required")
 
 _GUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")

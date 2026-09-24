@@ -24,8 +24,9 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers._common import load_raw, load_rules, load_workspaces, make_finding, missing_raw_finding, threshold, write_findings
 from analyzers.applicability import classify_workspaces, load_workspace_overrides, production_scope
+from collectors.workspace_evidence import workspace_items
 
 DIMENSION = "operational_excellence"
 
@@ -34,23 +35,11 @@ PROD_GIT_MIN_RATIO = threshold("operational_excellence", "prod_git_min_ratio", 0
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
-    scan = load_raw(raw_dir / "scanner.json")
-    if scan and scan.get("workspaces"):
-        return scan["workspaces"]
-    inv = load_raw(raw_dir / "workspace_inventory.json")
-    if inv and inv.get("workspaces"):
-        return inv["workspaces"]
-    return []
+    return load_workspaces(raw_dir)
 
 
 def _items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
-    if isinstance(ws.get("items"), list):
-        return ws["items"]
-    bucket: List[Dict[str, Any]] = []
-    for key in ("datasets", "reports", "dashboards", "dataflows", "lakehouses",
-                "warehouses", "notebooks", "pipelines", "kqlDatabases", "mlModels"):
-        bucket.extend(ws.get(key) or [])
-    return bucket
+    return workspace_items(ws)
 
 
 def _pipeline_workspace_ids(raw_dir: Path) -> set:
@@ -97,13 +86,16 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         dp = load_raw(raw_dir / "deployment_pipelines.json")
         if dp is None:
             findings.append(missing_raw_finding(rule, DIMENSION, "deployment_pipelines.json"))
+        elif not workspaces:
+            findings.append(missing_raw_finding(rule, DIMENSION, "scanner.json or workspace_inventory.json"))
         elif not prod:
             findings.append(make_finding(
                 rule, dimension=DIMENSION,
-                status="unknown" if prod_scope["unknown"] else "not_applicable",
+                status="missing_evidence" if prod_scope["missing_evidence"] else "unknown" if prod_scope["unknown"] else "not_applicable",
                 title="Production workspaces covered by a deployment pipeline",
                 evidence={"productionWorkspaces": 0,
                           "unknownEnvironmentWorkspaces": [w.get("name") for w in prod_scope["unknown"]],
+                          "workspacesMissingItemEvidence": [w.get("name") for w in prod_scope["missing_evidence"]],
                           "note": "No classified production, non-empty workspaces to evaluate."},
                 recommendation="Adopt deployment pipelines to promote content dev -> test -> prod."
             ))
@@ -112,11 +104,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             uncovered = [w.get("name") for w in prod if (w.get("id") or "").lower() not in in_pipe]
             ratio = 1 - (len(uncovered) / len(prod))
             status = "pass" if ratio >= PROD_PIPELINE_MIN_RATIO else "fail"
+            if prod_scope["missing_evidence"]:
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension=DIMENSION, status=status,
                 title="Production workspaces covered by a deployment pipeline",
                 evidence={"productionWorkspaces": len(prod), "coveredRatio": round(ratio, 2),
                           "minRatio": PROD_PIPELINE_MIN_RATIO,
+                          "workspacesMissingItemEvidence": [w.get("name") for w in prod_scope["missing_evidence"]],
                           "uncoveredCount": len(uncovered), "examples": uncovered[:20]},
                 recommendation=("Attach every production workspace to a deployment pipeline so content is promoted "
                                 "from validated lower stages instead of edited directly in production.")
@@ -128,13 +123,16 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         git = load_raw(raw_dir / "git_integration.json")
         if git is None:
             findings.append(missing_raw_finding(rule, DIMENSION, "git_integration.json"))
+        elif not workspaces:
+            findings.append(missing_raw_finding(rule, DIMENSION, "scanner.json or workspace_inventory.json"))
         elif not prod:
             findings.append(make_finding(
                 rule, dimension=DIMENSION,
-                status="unknown" if prod_scope["unknown"] else "not_applicable",
+                status="missing_evidence" if prod_scope["missing_evidence"] else "unknown" if prod_scope["unknown"] else "not_applicable",
                 title="Production workspaces under Git source control",
                 evidence={"productionWorkspaces": 0,
                           "unknownEnvironmentWorkspaces": [w.get("name") for w in prod_scope["unknown"]],
+                          "workspacesMissingItemEvidence": [w.get("name") for w in prod_scope["missing_evidence"]],
                           "note": "No classified production, non-empty workspaces to evaluate."},
                 recommendation="Connect production workspaces to Git for versioning and rollback."
             ))
@@ -143,11 +141,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             disconnected = [w.get("name") for w in prod if (w.get("id") or "").lower() not in connected]
             ratio = 1 - (len(disconnected) / len(prod))
             status = "pass" if ratio >= PROD_GIT_MIN_RATIO else "fail"
+            if prod_scope["missing_evidence"]:
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension=DIMENSION, status=status,
                 title="Production workspaces under Git source control",
                 evidence={"productionWorkspaces": len(prod), "connectedRatio": round(ratio, 2),
                           "minRatio": PROD_GIT_MIN_RATIO,
+                          "workspacesMissingItemEvidence": [w.get("name") for w in prod_scope["missing_evidence"]],
                           "disconnectedCount": len(disconnected), "examples": disconnected[:20]},
                 recommendation=("Connect production workspaces to Git (Azure DevOps / GitHub) for version history, "
                                 "code review and rollback - the backbone of Fabric ALM.")

@@ -29,6 +29,8 @@ from __future__ import annotations
 
 from collectors.workspace_scope import filter_review_payload
 from collectors._http import HttpError
+from collectors._common import load_workspace_inventory
+from collectors.workspace_evidence import workspace_items
 
 import hashlib
 import json
@@ -131,39 +133,19 @@ def _identity(item: dict[str, Any], item_type: str) -> dict[str, Any]:
 def _inventory(raw_dir: Path) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, str | None]]:
     items: list[tuple[str, dict[str, Any]]] = []
     names: dict[str, str | None] = {}
-    for filename in ("workspace_inventory.json", "scanner.json"):
-        data, _ = _read(raw_dir / filename)
-        workspaces = data.get("workspaces")
-        if not isinstance(workspaces, list):
-            continue
-        for workspace in workspaces:
-            if not isinstance(workspace, dict):
-                continue
-            workspace_id = _identifier(workspace.get("id"))
-            if workspace_id:
-                names[workspace_id] = _name(workspace.get("name"))
-            for key, item_type in (
-                ("datasets", "SemanticModel"), ("semanticModels", "SemanticModel"),
-                ("dataPipelines", "DataPipeline"), ("pipelines", "DataPipeline"),
-                ("notebooks", "Notebook"), ("items", None),
-            ):
-                values = workspace.get(key)
-                if not isinstance(values, list):
-                    continue
-                for item in values:
-                    if not isinstance(item, dict):
-                        continue
-                    kind = item_type
-                    if kind is None and isinstance(item.get("type"), str):
-                        kind = {
-                            "SemanticModel": "SemanticModel", "Dataset": "SemanticModel",
-                            "DataPipeline": "DataPipeline", "Notebook": "Notebook",
-                        }.get(item["type"])
-                    if kind in _SOURCES:
-                        items.append((kind, {
-                            **item, "workspaceId": workspace_id,
-                            "workspaceName": workspace.get("name"),
-                        }))
+    try:
+        workspaces = load_workspace_inventory(raw_dir)
+    except (HttpError, OSError, ValueError):
+        return items, names
+    for workspace in workspaces:
+        workspace_id = _identifier(workspace.get("id"))
+        if workspace_id:
+            names[workspace_id] = _name(workspace.get("name"))
+        for item in workspace_items(workspace, _SOURCES):
+            items.append((item["type"], {
+                **item, "workspaceId": workspace_id,
+                "workspaceName": workspace.get("name"),
+            }))
     return items, names
 
 

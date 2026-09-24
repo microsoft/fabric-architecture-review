@@ -226,8 +226,16 @@ def _scanner() -> dict[str, Any]:
 def _workspace_inventory() -> dict[str, Any]:
     return {
         "workspaces": [
-            {"id": WS1, "name": "data-bronze-dev", "items": [{"name": "SalesModel"}, {"name": "Sales Overview"}]},
-            {"id": WS2, "name": "data-gold-prod", "items": [{"name": "FinanceModel"}, {"name": "DirectLakeModel"}]},
+            {"id": WS1, "name": "data-bronze-dev", "items": [
+                {"id": DS_A, "name": "SalesModel", "type": "SemanticModel"},
+                {"id": guid(101), "name": "Sales Overview", "type": "Report"},
+                {"id": LH1, "name": "bronze_lh", "type": "Lakehouse"},
+            ]},
+            {"id": WS2, "name": "data-gold-prod", "items": [
+                {"id": DS_B, "name": "FinanceModel", "type": "SemanticModel"},
+                {"id": DS_C, "name": "DirectLakeModel", "type": "SemanticModel"},
+                {"id": LH2, "name": "gold_lh", "type": "Lakehouse"},
+            ]},
             {"id": WS3, "name": "My workspace", "items": []},
         ]
     }

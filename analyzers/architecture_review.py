@@ -33,9 +33,10 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
 from analyzers._common import (
-    collection_coverage_incomplete, definition_coverage_incomplete, load_raw, load_rules, make_finding,
+    collection_coverage_incomplete, definition_coverage_incomplete, load_raw, load_rules, load_workspaces, make_finding,
     missing_raw_finding, threshold, write_findings,
 )
+from collectors.workspace_evidence import workspace_items, workspace_items_available
 from analyzers.applicability import (
     applicability_summary,
     classify_workspaces,
@@ -64,32 +65,11 @@ def _parse_dt(value: str | None) -> datetime | None:
 
 
 def _workspaces_from_scanner_or_inventory(raw_dir: Path) -> List[Dict[str, Any]]:
-    scan = load_raw(raw_dir / "scanner.json")
-    if scan and scan.get("workspaces"):
-        return scan["workspaces"]
-    inv = load_raw(raw_dir / "workspace_inventory.json")
-    if inv and inv.get("workspaces"):
-        return inv["workspaces"]
-    return []
+    return load_workspaces(raw_dir)
 
 
 def _item_count(ws: Dict[str, Any]) -> int:
-    # scanner.json returns Power BI legacy items as lowercase plural keys and
-    # Fabric-native items as PascalCase singular keys - count both.
-    keys = [
-        "datasets", "reports", "dashboards", "dataflows", "lakehouses",
-        "warehouses", "notebooks", "pipelines", "kqlDatabases", "mlModels",
-        "mlExperiments",
-        "SemanticModel", "Report", "Dashboard", "Dataflow", "Dataflow2",
-        "Lakehouse", "Warehouse", "Notebook", "DataPipeline", "KQLDatabase",
-        "MLModel", "MLExperiment", "Eventstream", "Eventhouse",
-        "MirroredDatabase", "Reflex",
-    ]
-    total = sum(len(ws.get(k) or []) for k in keys)
-    # workspace_inventory.json: items is a flat list
-    if "items" in ws and isinstance(ws["items"], list):
-        total = max(total, len(ws["items"]))
-    return total
+    return len(workspace_items(ws))
 
 
 def _is_shortcut_metadata(obj: Any) -> bool:
@@ -435,9 +415,7 @@ def _pipeline_dependency_finding(
     pipeline_rows = rows(definitions)
     inventory_rows = list(rows(catalog))
     for workspace in workspaces:
-        native = [item for item in workspace.get("items", []) if isinstance(item, dict)
-                  and str(item.get("type") or item.get("itemType") or "").lower() == "datapipeline"]
-        for item in [*(workspace.get("DataPipeline") or []), *(workspace.get("pipelines") or []), *native]:
+        for item in workspace_items(workspace, ("DataPipeline",)):
             if isinstance(item, dict):
                 inventory_rows.append({
                     "id": item.get("id"), "displayName": item.get("displayName") or item.get("name"),
@@ -626,6 +604,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     workspaces = _workspaces_from_scanner_or_inventory(raw_dir)
     workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
     workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
+    missing_items = [w.get("name") for w in workspaces if not workspace_items_available(w)]
     if not workspaces:
         for rid in ("ARCH-001", "ARCH-002", "ARCH-003", "ARCH-005", "ARCH-006", "ARCH-007", "ARCH-008"):
             if rid in rules:
@@ -662,7 +641,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             CORE_LAYERS = ("bronze", "silver", "gold")
             inside_layers_by_ws: Dict[str, set] = {}
             for w in applicable_workspaces:
-                lhs = (w.get("lakehouses") or w.get("Lakehouse") or [])
+                lhs = workspace_items(w, ("Lakehouse",))
                 names = [(lh.get("name") or lh.get("displayName") or "").lower() for lh in lhs]
                 found = {layer for layer in CORE_LAYERS if any(layer in n for n in names)}
                 if found:
@@ -770,10 +749,13 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             unresolved = [row for row in oversized if row["classification"] == "unknown"]
             status = ("fail" if mixed else "unknown" if unresolved else
                       "info" if oversized else "pass")
+            if missing_items and status == "pass":
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="architecture", status=status,
                 title=f"Workspaces exceeding monolithic threshold (>{MONOLITH_THRESHOLD} items)",
                 evidence={"threshold": MONOLITH_THRESHOLD, "oversizedCount": len(oversized),
+                          "workspacesMissingItemEvidence": missing_items,
                           "mixedWorkloadCount": len(mixed), "workspaces": oversized},
                 recommendation=("Split workspaces that combine unrelated workload families or security "
                                 "boundaries. A large but cohesive workspace is advisory, not automatically defective.")
@@ -789,9 +771,10 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                         if w.get("type") not in ("PersonalGroup",) and _item_count(w) > 0]
             if not relevant:
                 findings.append(make_finding(
-                    rule, dimension="architecture", status="pass",
+                    rule, dimension="architecture", status="missing_evidence" if missing_items else "pass",
                     title="Workspaces missing a description",
                     evidence={"evaluatedWorkspaces": 0,
+                              "workspacesMissingItemEvidence": missing_items,
                               "note": "No shared, non-empty workspaces to evaluate."},
                     recommendation="Add a short description to every workspace describing purpose, owner, and environment."
                 ))
@@ -799,10 +782,13 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 no_desc = [w.get("name") for w in relevant if not (w.get("description") or "").strip()]
                 coverage = (len(relevant) - len(no_desc)) / len(relevant)
                 status = "pass" if coverage >= DESCRIPTION_COVERAGE_MIN_RATIO else "fail"
+                if missing_items:
+                    status = "missing_evidence"
                 findings.append(make_finding(
                     rule, dimension="architecture", status=status,
                     title="Workspaces missing a description",
                     evidence={"evaluatedWorkspaces": len(relevant),
+                              "workspacesMissingItemEvidence": missing_items,
                               "missingDescriptionCount": len(no_desc),
                               "coverageRatio": round(coverage, 2),
                               "minRatio": DESCRIPTION_COVERAGE_MIN_RATIO,
@@ -813,13 +799,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         # --- ARCH-007 empty workspaces (info) ---
         rule = rules.get("ARCH-007")
         if rule:
-            empties = [w.get("name") for w in workspaces if _item_count(w) == 0
+            empties = [w.get("name") for w in workspaces if workspace_items_available(w) and _item_count(w) == 0
                        and (w.get("state", "Active") in (None, "Active"))]
             findings.append(make_finding(
                 rule, dimension="architecture",
-                status="info" if empties else "pass",
+                status="info" if empties else "missing_evidence" if missing_items else "pass",
                 title="Empty workspaces (no items)",
-                evidence={"emptyCount": len(empties), "examples": empties[:20]},
+                evidence={"emptyCount": len(empties), "examples": empties[:20],
+                          "workspacesMissingItemEvidence": missing_items},
                 recommendation="Archive or repurpose empty workspaces to keep the tenant inventory clean."
             ))
 
@@ -840,16 +827,18 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         # Fabric Gen2 dataflows arrive as PascalCase "Dataflow" / "Dataflow2".
         rule = rules.get("ARCH-015")
         if rule:
-            gen1 = [{"workspace": w.get("name"), "gen1Count": len(w.get("dataflows") or [])}
-                    for w in workspaces if (w.get("dataflows") or [])]
+            dataflows = [(w, workspace_items(w, ("Dataflow", "Dataflow2"))) for w in workspaces]
+            gen1 = [{"workspace": w.get("name"),
+                     "gen1Count": sum(item["_dataflowGeneration"] == 1 for item in items)}
+                    for w, items in dataflows if any(item["_dataflowGeneration"] == 1 for item in items)]
             gen1_total = sum(g["gen1Count"] for g in gen1)
-            gen2_total = sum(len(w.get("Dataflow") or []) + len(w.get("Dataflow2") or [])
-                             for w in workspaces)
-            status = "pass" if not gen1 else "fail"
+            gen2_total = sum(item["_dataflowGeneration"] == 2 for _, items in dataflows for item in items)
+            status = "fail" if gen1 else "missing_evidence" if missing_items else "pass"
             findings.append(make_finding(
                 rule, dimension="architecture", status=status,
                 title="Legacy Dataflow Gen1 in use (migrate to Gen2)",
                 evidence={"gen1Total": gen1_total, "gen2Total": gen2_total,
+                          "workspacesMissingItemEvidence": missing_items,
                           "workspacesWithGen1": len(gen1), "examples": gen1[:20]},
                 recommendation=("Rebuild Gen1 dataflows as Dataflow Gen2 so outputs land in "
                                 "Lakehouse/Warehouse/OneLake and gain Git + deployment-pipeline ALM, "

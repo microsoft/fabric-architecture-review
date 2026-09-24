@@ -8,9 +8,8 @@ Endpoint:
 
 Docs: https://learn.microsoft.com/rest/api/fabric/core/git/get-connection
 
-Source of workspace IDs (in this order):
-  1. output/raw/scanner.json     (preferred — full tenant view)
-  2. output/raw/workspace_inventory.json  (REST fallback)
+Workspace IDs are reconciled from eligible output/raw/scanner.json and
+output/raw/workspace_inventory.json evidence.
 
 DATA SAFETY: Returns Git provider, organization, repository, branch and
 connection state only. No item contents are read.

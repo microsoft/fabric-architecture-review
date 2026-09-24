@@ -15,6 +15,7 @@ DATA SAFETY: This module formats already-analyzed findings only. No data access.
 from __future__ import annotations
 
 from collectors.workspace_scope import filter_review_payload
+from collectors.workspace_evidence import workspace_items, workspace_items_available, workspace_users
 
 import argparse
 import json
@@ -382,7 +383,7 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
     only render when their backing raw file is present, so the section scales
     from a single workspace to a whole tenant without crashing.
     """
-    from reports.diagrams import _count_items, _filter_workspaces, _is_personal_workspace
+    from reports.diagrams import _count_items, _filter_workspaces, _is_personal_workspace, _load_workspaces
 
     heading = "# Environment Overview"
     intro = (
@@ -391,8 +392,6 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
         "Every number is metadata only; no customer data is read."
     )
 
-    scan = _load_json(raw_dir / "scanner.json") or {}
-    inv = _load_json(raw_dir / "workspace_inventory.json") or {}
     cap = _load_json(raw_dir / "capacity_metrics.json") or {}
     models = _load_json(raw_dir / "semantic_models.json") or {}
     ts = _load_json(raw_dir / "tenant_settings.json") or {}
@@ -404,11 +403,9 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
     groups: List[str] = []
 
     # --- Estate -----------------------------------------------------------
-    scan_ws = scan.get("workspaces") or []
-    inv_ws = inv.get("workspaces") or inv.get("value") or []
-    all_ws = scan_ws or inv_ws
+    all_ws = _load_workspaces(raw_dir)
     real_ws = _filter_workspaces(all_ws) if all_ws else []
-    personal = sum(1 for w in all_ws if _is_personal_workspace(w))
+    personal = sum(1 for w in all_ws or [] if _is_personal_workspace(w))
 
     capacities = cap.get("capacities") or []
     skus = sorted({(c.get("sku") or "").upper() for c in capacities if c.get("sku")})
@@ -417,14 +414,17 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
     item_kinds = ("lakehouses", "warehouses", "datasets", "reports",
                   "dataflows", "notebooks", "pipelines")
     item_totals = {k: 0 for k in item_kinds}
-    if scan_ws:
-        for w in _filter_workspaces(scan_ws):
+    items_complete = all_ws is not None and all(
+        workspace_items_available({"items": None, **w}) for w in real_ws
+    )
+    if items_complete:
+        for w in real_ws:
             for k in item_kinds:
                 item_totals[k] += _count_items(w, k)
-    total_items = sum(item_totals.values())
+    total_items = sum(len(workspace_items(w)) for w in real_ws) if items_complete else None
 
     estate_cards = []
-    if all_ws:
+    if all_ws is not None:
         estate_cards.append(_env_card(
             len(real_ws), "Workspaces",
             f"+{personal} personal" if personal else "", "info"))
@@ -432,8 +432,10 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
         estate_cards.append(_env_card(
             len(capacities), "Capacities",
             ", ".join(skus) if skus else "", "info"))
-    if scan_ws:
-        estate_cards.append(_env_card(total_items, "Fabric items", "across workspaces", "info"))
+    if all_ws is not None:
+        estate_cards.append(_env_card(
+            total_items if total_items is not None else "Unknown", "Fabric items",
+            "across workspaces" if items_complete else "item inventory incomplete", "info"))
     if datasets:
         dl = sum(1 for d in datasets if (d.get("targetStorageMode") or "").lower().startswith("directlake"))
         estate_cards.append(_env_card(
@@ -442,7 +444,7 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
     groups.append(_env_group("Estate", estate_cards))
 
     # --- Items breakdown --------------------------------------------------
-    if scan_ws and total_items:
+    if items_complete and total_items:
         breakdown = [
             _env_card(item_totals["lakehouses"], "Lakehouses"),
             _env_card(item_totals["warehouses"], "Warehouses"),
@@ -455,17 +457,13 @@ def _environment_overview(raw_dir: Path, findings: List[Dict[str, Any]]) -> str:
 
     # --- Governance & access ---------------------------------------------
     gov_cards = []
-    if scan_ws:
-        principals: set[str] = set()
-        for w in scan_ws:
-            for u in (w.get("users") or []):
-                ident = (u.get("identifier") or u.get("displayName")
-                         or u.get("graphId") or u.get("emailAddress"))
-                if ident:
-                    principals.add(str(ident).lower())
-        if principals:
-            gov_cards.append(_env_card(len(principals), "Principals with access",
-                                       "users + groups", "info"))
+    if all_ws is not None:
+        users = [workspace_users(w) for w in real_ws]
+        users_complete = all(group is not None for group in users)
+        principals = workspace_users({"users": [u for group in users for u in group or []]}) or []
+        gov_cards.append(_env_card(
+            len(principals) if users_complete else "Unknown", "Principals with access",
+            "users + groups" if users_complete else "membership inventory incomplete", "info"))
     settings = ts.get("tenantSettings") or ts.get("value") or []
     if settings:
         enabled = sum(1 for s in settings if s.get("enabled"))

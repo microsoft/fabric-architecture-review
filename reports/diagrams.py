@@ -22,6 +22,9 @@ No new API calls happen here and no customer data is read.
 from __future__ import annotations
 
 from collectors.workspace_scope import filter_review_payload, is_admin_workspace
+from collectors._common import load_workspace_inventory
+from collectors._http import HttpError
+from collectors.workspace_evidence import workspace_items, workspace_items_available
 
 import json
 from pathlib import Path
@@ -84,23 +87,29 @@ def _filter_workspaces(workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return [w for w in workspaces if not _is_personal_workspace(w) and not is_admin_workspace(w)]
 
 
-# Fabric Scanner API returns Power BI legacy items under lowercase plural keys
-# (`datasets`, `reports`, `dashboards`, `dataflows`) and Fabric-native items
-# under PascalCase singular keys (`Lakehouse`, `Warehouse`, `Notebook`,
-# `DataPipeline`, `KQLDatabase`, ...). Count both forms.
-_ITEM_KIND_ALIASES: Dict[str, tuple] = {
-    "lakehouses":  ("lakehouses", "Lakehouse"),
-    "warehouses":  ("warehouses", "Warehouse"),
-    "datasets":    ("datasets", "SemanticModel"),
-    "reports":     ("reports", "Report"),
-    "dataflows":   ("dataflows", "Dataflow", "Dataflow2"),
-    "notebooks":   ("notebooks", "Notebook"),
-    "pipelines":   ("pipelines", "DataPipeline"),
+_ITEM_KINDS: Dict[str, tuple] = {
+    "lakehouses": ("Lakehouse",),
+    "warehouses": ("Warehouse",),
+    "datasets": ("SemanticModel",),
+    "reports": ("Report",),
+    "dataflows": ("Dataflow", "Dataflow2"),
+    "notebooks": ("Notebook",),
+    "pipelines": ("DataPipeline",),
 }
 
 
-def _count_items(ws: Dict[str, Any], kind: str) -> int:
-    return sum(len(ws.get(k) or []) for k in _ITEM_KIND_ALIASES.get(kind, (kind,)))
+def _count_items(ws: Dict[str, Any], kind: str) -> int | None:
+    if not workspace_items_available({"items": None, **ws}):
+        return None
+    return len(workspace_items(ws, _ITEM_KINDS.get(kind, (kind,))))
+
+
+def _load_workspaces(raw_dir: Path) -> list[dict] | None:
+    """Load eligible, scoped Scanner and REST evidence without changing raw files."""
+    try:
+        return load_workspace_inventory(raw_dir)
+    except (HttpError, OSError, ValueError):
+        return None
 
 
 # --- Builders --------------------------------------------------------------
@@ -183,28 +192,13 @@ def _capacity_workspace_topology(raw_dir: Path) -> str:
     Each block holds at most 8 workspaces so it fits on a single PDF page.
     Capacities with more workspaces get multiple consecutive blocks.
     """
-    inv = _load(raw_dir, "workspace_inventory.json")
-    if not inv or not (inv.get("workspaces") or inv.get("value")):
-        inv = _load(raw_dir, "scanner.json")
-    if inv is None:
+    workspaces = _load_workspaces(raw_dir)
+    if workspaces is None:
         return _skip(
             "Capacity \u2192 Workspace topology",
             "workspace_inventory.json",
             "Implement and run `collectors.workspace_inventory` or `collectors.scanner_api`.",
         )
-
-    # Cross-reference scanner.json: workspaces that returned items from the
-    # admin scanner are "populated" - the rest are empty default experiences
-    # (auto-created Data Engineering / Data Science / Data Analytics buckets,
-    # untouched workspaces, etc.) and only add noise to the topology view.
-    scan = _load(raw_dir, "scanner.json") or {}
-    populated_ids = {
-        (w.get("id") or "").lower()
-        for w in (scan.get("workspaces") or [])
-        if any(_count_items(w, k) for k in
-               ("lakehouses", "warehouses", "datasets", "reports",
-                "dataflows", "notebooks", "pipelines"))
-    }
 
     # capacity_metrics.json carries the Azure friendly name (displayName) for
     # each capacity GUID. Build an id->name map so the topology shows the real
@@ -218,14 +212,14 @@ def _capacity_workspace_topology(raw_dir: Path) -> str:
         if cid and cname:
             cap_name_by_id[cid] = cname
 
-    workspaces = inv.get("workspaces") or inv.get("value") or []
     total = len(workspaces)
     workspaces = _filter_workspaces(workspaces)
     personal_excluded = total - len(workspaces)
 
-    if populated_ids:
+    if any(workspace_items(w) for w in workspaces):
         before_empty = len(workspaces)
-        workspaces = [w for w in workspaces if (w.get("id") or "").lower() in populated_ids]
+        workspaces = [w for w in workspaces
+                      if workspace_items(w) or not workspace_items_available({"items": None, **w})]
         empty_excluded = before_empty - len(workspaces)
     else:
         empty_excluded = 0
@@ -243,13 +237,13 @@ def _capacity_workspace_topology(raw_dir: Path) -> str:
         by_capacity.setdefault(str(cap), []).append(ws)
 
     parts = ["### Capacity \u2192 Workspace topology", ""]
-    intro = (f"Across **{len(by_capacity)} capacity bucket(s)** and **{len(workspaces)} populated "
+    intro = (f"Across **{len(by_capacity)} capacity bucket(s)** and **{len(workspaces)} "
              f"workspace(s)**.")
     notes = []
     if personal_excluded:
         notes.append(f"{personal_excluded} personal / `My workspace` entries")
     if empty_excluded:
-        notes.append(f"{empty_excluded} empty workspace(s) (no Fabric items per the admin scanner)")
+        notes.append(f"{empty_excluded} empty workspace(s) (no Fabric items in collected inventory)")
     if notes:
         intro += " Excluded from the architecture view: " + "; ".join(notes) + "."
     parts.append(intro)
@@ -288,15 +282,14 @@ def _capacity_workspace_topology(raw_dir: Path) -> str:
 
 def _workspace_items_table(raw_dir: Path) -> str:
     """Inventory table: items per workspace (much more report-friendly than a mermaid grid)."""
-    scan = _load(raw_dir, "scanner.json")
-    if scan is None:
+    workspaces = _load_workspaces(raw_dir)
+    if workspaces is None:
         return _skip(
             "Workspace items inventory",
-            "scanner.json",
-            "Implement and run `collectors.scanner_api`.",
+            "workspace_inventory.json",
+            "Run `collectors.workspace_inventory` or `collectors.scanner_api`.",
         )
 
-    workspaces = scan.get("workspaces") or []
     workspaces = _filter_workspaces(workspaces)
     if not workspaces:
         return ""
@@ -305,13 +298,14 @@ def _workspace_items_table(raw_dir: Path) -> str:
     headers = ["Workspace", "Lakehouses", "Warehouses", "Datasets", "Reports", "Dataflows", "Notebooks", "Pipelines"]
 
     parts = ["### Workspace items inventory", "",
-             "Counts of items per workspace returned by the Fabric Scanner API.", ""]
+             "Distinct items per workspace from Scanner and REST inventory; unknown means unavailable.", ""]
     parts.append("| " + " | ".join(headers) + " |")
     parts.append("|" + "|".join(["---"] + ["---:"] * (len(headers) - 1)) + "|")
     for ws in sorted(workspaces, key=lambda w: (w.get("name") or "").lower()):
         row = [_label(ws.get("name", "?"), max_len=40)]
         for kind in item_kinds:
-            row.append(str(_count_items(ws, kind)))
+            count = _count_items(ws, kind)
+            row.append(str(count) if count is not None else "Unknown")
         parts.append("| " + " | ".join(row) + " |")
     return "\n".join(parts) + "\n"
 

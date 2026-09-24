@@ -9,6 +9,9 @@
       "evaluatedWorkspaces": 1,
       "minAdmins": 2,
       "underAdminCount": 0,
+      "workspacesMissingMembershipEvidence": 0,
+      "missingMembershipExamples": [],
+      "workspacesMissingItemEvidence": [],
       "examples": []
     },
     "recommendation": "Assign at least two workspace admins (preferably via a security group) to avoid orphan risk.",
@@ -18,17 +21,18 @@
     "rule_id": "GOV-002",
     "dimension": "governance",
     "severity": "medium",
-    "status": "pass",
-    "title": "Items with no activity in the last 7 day(s)",
+    "status": "missing_evidence",
+    "title": "Item inactivity could not be evaluated",
     "evidence": {
       "windowDays": 7,
-      "inventoriedItems": 0,
+      "inventoriedItems": 6,
+      "workspacesMissingItemEvidence": [],
       "eventsWithArtifactId": 0,
-      "inactiveCount": 0,
+      "inactiveCount": null,
       "examples": [],
-      "missingEvidence": null
+      "missingEvidence": "Activity-log events contain no artifact/item identifiers."
     },
-    "recommendation": "Archive or delete confirmed inactive items after validating their business retention requirements.",
+    "recommendation": "Collect activity events with ArtifactId, ItemId, DatasetId, or ReportId fields before drawing an item-level inactivity conclusion.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/governance/governance-overview"
   },
   {
@@ -40,6 +44,8 @@
     "evidence": {
       "evaluatedItems": 6,
       "labelledItems": 0,
+      "itemsMissingLabelEvidence": 0,
+      "workspacesMissingItemEvidence": [],
       "ratio": 0.0
     },
     "recommendation": "Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; enforce via tenant setting and Purview integration.",
@@ -91,6 +97,7 @@
     "evidence": {
       "windowDays": 7,
       "orphanedCount": 0,
+      "workspacesMissingItemEvidence": [],
       "examples": [],
       "expectedLowFrequencyCount": 0,
       "expectedLowFrequency": []
@@ -120,6 +127,8 @@
     "evidence": {
       "endorsableItems": 6,
       "endorsedItems": 0,
+      "itemsMissingEndorsementEvidence": 0,
+      "workspacesMissingItemEvidence": [],
       "ratio": 0.0,
       "minRatio": 0.3
     },
@@ -135,6 +144,8 @@
     "evidence": {
       "productionWorkspaces": 1,
       "minRatio": 0.5,
+      "workspacesMissingEndorsementEvidence": [],
+      "workspacesMissingItemEvidence": [],
       "offenderCount": 1,
       "examples": [
         {

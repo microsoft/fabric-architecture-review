@@ -10,7 +10,7 @@ Endpoints (Fabric REST, all workspace-scoped):
   GET https://api.fabric.microsoft.com/v1/workspaces/{id}/reflexes
   GET https://api.fabric.microsoft.com/v1/workspaces/{id}/mirroredDatabases
 
-Iterates workspaces from scanner.json (preferred) or workspace_inventory.json.
+Iterates eligible workspaces reconciled from scanner.json and workspace_inventory.json.
 
 Docs:
   https://learn.microsoft.com/fabric/real-time-intelligence/overview

@@ -168,7 +168,7 @@ def test_review_readers_use_partial_identity_and_leave_raw_unchanged(tmp_path):
         {"id": "system", "workspaceId": ADMIN.upper()}, {"id": "normal", "workspaceId": NORMAL},
     ]})
     before = target.read_bytes()
-    assert [w["id"] for w in load_workspace_inventory(tmp_path)] == []
+    assert [w["id"] for w in load_workspace_inventory(tmp_path)] == [NORMAL, PERSONAL]
     assert load_complete_raw(target)["datasets"] == [{"id": "normal", "workspaceId": NORMAL}]
     assert load_raw(target)["datasets"] == [{"id": "normal", "workspaceId": NORMAL}]
     assert target.read_bytes() == before

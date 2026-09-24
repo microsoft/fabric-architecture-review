@@ -466,9 +466,17 @@ def test_raw_projection_corruption_is_not_clean(tmp_path):
     assert "Complete" in tables["gold_dataflow_queries"][0]["recommendation"]
 
 
-def test_scanner_selection_does_not_drop_explicit_native_inventory(tmp_path, monkeypatch):
+@pytest.mark.parametrize("native_type", ["Dataflow", "Dataflow2", "DataflowGen2"])
+@pytest.mark.parametrize("membership_failed", [False, True])
+def test_scanner_selection_does_not_drop_explicit_native_inventory(tmp_path, monkeypatch, native_type, membership_failed):
     replies = [response(403), response(403)]
-    setup_http(tmp_path, monkeypatch, replies, [{"id": FLOW, "type": "DataflowGen2", "displayName": "Native"}])
+    setup_http(tmp_path, monkeypatch, replies, [{"id": FLOW, "type": native_type, "displayName": "Native"}])
+    if membership_failed:
+        inventory_path = tmp_path / "workspace_inventory.json"
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        inventory.update(workspaceListComplete=True, collectionComplete=False)
+        inventory["workspaces"][0].update(users=None, usersCollectionStatus="unavailable", itemsCollectionStatus="collected")
+        inventory_path.write_text(json.dumps(inventory), encoding="utf-8")
     (tmp_path / "scanner.json").write_text(json.dumps({
         "workspaces": [{"id": WS, "name": "Workspace",
                         "dataflows": [{"objectId": "legacy-id", "name": "Legacy"}]}],

@@ -29,9 +29,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from analyzers._common import (
-    collection_coverage_incomplete, load_raw, load_rules, make_finding,
+    collection_coverage_incomplete, load_raw, load_rules, load_workspaces, make_finding,
     missing_raw_finding, threshold, write_findings,
 )
+from collectors.workspace_evidence import workspace_items
 
 STALE_DAYS = threshold("performance", "stale_model_days", 30, env="PERF_STALE_DAYS", cast=int)
 LONG_REFRESH_HOURS = threshold("performance", "long_refresh_hours", 2.0, env="PERF_LONG_REFRESH_HOURS", cast=float)
@@ -88,17 +89,15 @@ def _capacity_metrics_app_signal(raw_dir: Path) -> Dict[str, Any]:
     """Detect whether the Fabric Capacity Metrics App is installed.
 
     Order: explicit env flag wins; otherwise look for a workspace that contains
-    a 'Fabric Capacity Metrics' semantic model / report in scanner output.
+    a 'Fabric Capacity Metrics' semantic model / report in reconciled inventory.
     """
     if _truthy(os.environ.get("CAPACITY_METRICS_APP_INSTALLED")):
         return {"installed": True, "source": "env:CAPACITY_METRICS_APP_INSTALLED"}
-    scan = load_raw(raw_dir / "scanner.json") or {}
-    for ws in scan.get("workspaces", []):
-        for kind in ("datasets", "reports"):
-            for item in (ws.get(kind) or []):
-                name = (item.get("name") or "").lower()
-                if "fabric capacity metrics" in name or "capacity metrics" in name:
-                    return {"installed": True, "source": f"scanner:{ws.get('name')}/{item.get('name')}"}
+    for ws in load_workspaces(raw_dir):
+        for item in workspace_items(ws, ("SemanticModel", "Report")):
+            name = (item.get("name") or "").lower()
+            if "capacity metrics" in name:
+                return {"installed": True, "source": f"inventory:{ws.get('name')}/{item.get('name')}"}
     return {"installed": False, "source": None}
 
 

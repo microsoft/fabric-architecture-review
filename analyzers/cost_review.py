@@ -23,11 +23,11 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from analyzers._common import collection_coverage_incomplete, load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
+from analyzers._common import collection_coverage_incomplete, load_raw, load_rules, load_workspaces, make_finding, missing_raw_finding, threshold, write_findings, is_dedicated_capacity, capacity_kind
 from analyzers.applicability import classify_workspaces, load_capacity_overrides, load_workspace_overrides
+from collectors.workspace_evidence import workspace_items, workspace_items_available
 
 NONPROD_PATTERN = re.compile(r"(dev|test|qa|uat|sbx|sandbox|poc|demo)", re.IGNORECASE)
-PROD_PATTERN = re.compile(r"(prod|production|live)", re.IGNORECASE)
 LARGE_SKU_PATTERN = re.compile(r"^F(64|128|256|512|1024|2048)$", re.IGNORECASE)
 SMALL_SKU_PATTERN = re.compile(r"^F(1|2|4|8|16)$", re.IGNORECASE)
 SMALL_WORKSPACE_THRESHOLD = threshold("cost", "large_sku_min_workspaces", 5, env="COST_SMALL_WORKSPACE_THRESHOLD", cast=int)
@@ -64,36 +64,12 @@ def _capacity_cu_7d(raw_dir: Path) -> List[Dict[str, Any]]:
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
-    scan = load_raw(raw_dir / "scanner.json")
-    if scan and scan.get("workspaces"):
-        return scan["workspaces"]
-    inv = load_raw(raw_dir / "workspace_inventory.json")
-    if inv and inv.get("workspaces"):
-        return inv["workspaces"]
-    return []
+    return load_workspaces(raw_dir)
 
 
 def _workspace_items(workspace: Dict[str, Any]) -> List[Dict[str, Any]]:
-    excluded = {"folders", "users", "workbooks", "dashboardTiles", "widgets",
-                "dataSourceInstances", "datasourceUsages"}
-    items = []
-    seen = set()
-    for item_type, values in workspace.items():
-        if item_type in excluded or not isinstance(values, list):
-            continue
-        for value in values:
-            if not isinstance(value, dict):
-                continue
-            item_id = value.get("id") or value.get("objectId")
-            if not item_id or str(item_id) in seen:
-                continue
-            seen.add(str(item_id))
-            items.append({
-                "id": item_id,
-                "name": value.get("name") or value.get("displayName") or item_id,
-                "type": item_type,
-            })
-    return items
+    return [{"id": item["id"], "name": item.get("name") or item["id"], "type": item["type"]}
+            for item in workspace_items(workspace) if item.get("id")]
 
 
 def _capacity_workspace_details(capacity: Dict[str, Any], workspaces: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -106,7 +82,7 @@ def _capacity_workspace_details(capacity: Dict[str, Any], workspaces: List[Dict[
         details.append({
             "id": workspace.get("id") or workspace.get("objectId"),
             "name": workspace.get("name"),
-            "itemCount": len(items),
+            "itemCount": len(workspace_items(workspace)) if workspace_items_available(workspace) else None,
             "items": items[:50],
             "itemsTruncated": len(items) > 50,
         })
@@ -331,7 +307,7 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             offenders = []
             for w in workspaces:
                 name = w.get("name") or ""
-                if PROD_PATTERN.search(name):
+                if workspace_profiles.get(str(w.get("id") or "").lower(), {}).get("environment") == "production":
                     if w.get("type") in ("PersonalGroup", "Personal") or not (w.get("capacityId") or w.get("isOnDedicatedCapacity")):
                         offenders.append({"workspace": name, "type": w.get("type"),
                                           "capacityId": w.get("capacityId")})
@@ -375,7 +351,8 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                     "name": capacity.get("displayName"),
                     "sku": capacity.get("sku"),
                     "workspaceCount": capacity.get("assignedWorkspaceCount"),
-                    "itemCount": sum(w["itemCount"] for w in workspace_details),
+                    "itemCount": (sum(w["itemCount"] for w in workspace_details)
+                                  if all(w["itemCount"] is not None for w in workspace_details) else None),
                     "workspaces": workspace_details,
                 })
             findings.append(make_finding(

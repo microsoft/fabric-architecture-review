@@ -63,6 +63,41 @@ They do not become empty successful inventories or passing checks. The scanner
 integrity rule `ARCH-013` reports collection failure directly. See
 [outcomes and thresholds](#applicability-outcomes-and-thresholds) before scoring.
 
+### Reconciled workspace evidence
+
+Workspace analysis and reporting reconcile Scanner and REST inventory by
+case-insensitive **workspace ID**, never by display name. Eligible workspaces
+found in either source remain in scope; policy exclusions still apply. An
+incomplete Scanner export is not used as a complete inventory. A REST export
+with a complete workspace list can still contribute independently successful
+item or membership collections when another child request failed.
+
+Legacy Scanner buckets (`datasets`, `reports`, `notebooks`), native Scanner
+buckets (`SemanticModel`, `Notebook`, `Lakehouse`, `DataPipeline`), and REST
+`items` use shared item normalization. Items are deduplicated by ID while
+retaining Scanner detail. An empty flat `items` list does not hide typed Scanner
+items. SQL endpoints are counted without hiding the associated primary workload.
+
+Successful REST membership takes precedence, including a collected empty list.
+Unavailable membership does not overwrite valid Scanner membership and does not
+mean zero administrators. Repeated principal identities count once; conflicting
+roles are incomplete evidence. An application counts as an administrator only
+when its assigned role is **Admin**, not **Member**.
+
+For example, **GOV-001** checks classified production, shared, non-empty
+workspaces against the configured minimum number of administrators.
+`minAdmins` is the threshold; `evaluatedWorkspaces` is the number with evaluable
+membership. Known violations produce `fail`; otherwise missing required
+membership or item evidence produces `missing_evidence`, not a pass or an empty
+workspace. Workspace-name environment tokens remain boundary-aware and
+case-insensitive; explicit environment profiles take precedence. Unknown names
+such as `Finance` need a profile override rather than an assumed production
+classification.
+
+Basic REST item listings do not establish missing sensitivity labels or
+endorsements. Those checks require Scanner metadata or explicitly collected
+metadata fields; absent metadata is reported as `missing_evidence`.
+
 ### Optional monitoring-driven scope selection
 
 For the **normal FAR pipeline**, an empty `WORKSPACE_IDS` means **no

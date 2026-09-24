@@ -27,8 +27,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
-from analyzers._common import load_raw, load_rules, make_finding, missing_raw_finding, threshold, write_findings
+from analyzers._common import load_raw, load_rules, load_workspaces, make_finding, missing_raw_finding, threshold, write_findings
 from analyzers.applicability import classify_workspaces, load_workspace_overrides, production_scope
+from collectors.workspace_evidence import (
+    item_metadata_available, workspace_items, workspace_items_available,
+    workspace_roles_complete, workspace_users,
+)
 
 NAMING_PATTERN = re.compile(
     r"(bronze|silver|gold|raw|stg|staging|curated|landing|dev|test|qa|uat|prod|production|sbx|sandbox)",
@@ -42,11 +46,9 @@ NAMING_COVERAGE_MIN_RATIO = threshold("governance", "naming_coverage_min_ratio",
 ENDORSEMENT_MIN_RATIO = threshold("governance", "endorsement_min_ratio", 0.3, env="GOV_ENDORSEMENT_MIN_RATIO", cast=float)
 PROD_ENDORSEMENT_MIN_RATIO = threshold("governance", "prod_endorsement_min_ratio", 0.5, env="GOV_PROD_ENDORSEMENT_MIN_RATIO", cast=float)
 
-# Production workspaces (name markers) carry a stronger expectation of endorsed content.
-PROD_PATTERN = re.compile(r"(prod|production)", re.IGNORECASE)
 # Item kinds that can be endorsed (Certified / Promoted) in Fabric / Power BI.
-_ENDORSABLE_KINDS = ("datasets", "reports", "dataflows", "lakehouses", "warehouses")
-_LABELLED_KINDS = ("datasets", "reports", "lakehouses", "warehouses")
+_ENDORSABLE_KINDS = ("SemanticModel", "Report", "Dataflow", "Dataflow2", "Lakehouse", "Warehouse")
+_LABELLED_KINDS = ("SemanticModel", "Report", "Lakehouse", "Warehouse")
 _ACTIVITY_ITEM_ID_KEYS = (
     "ArtifactId", "ArtifactID", "artifactId", "ItemId", "ItemID", "itemId",
     "DatasetId", "DatasetID", "datasetId", "ReportId", "ReportID", "reportId",
@@ -61,22 +63,12 @@ def _endorsement(item: Dict[str, Any]) -> str:
 
 
 def _endorsable_items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
-    out: List[Dict[str, Any]] = []
-    for kind in _ENDORSABLE_KINDS:
-        out.extend(ws.get(kind) or [])
-    return out
+    return workspace_items(ws, _ENDORSABLE_KINDS)
 
 
 def _labelled_items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Return only item types covered by the sensitivity-label contract."""
-    out: List[Dict[str, Any]] = []
-    for kind in _LABELLED_KINDS:
-        out.extend(ws.get(kind) or [])
-    if out or not isinstance(ws.get("items"), list):
-        return out
-    supported = {"semanticmodel", "dataset", "report", "lakehouse", "warehouse"}
-    return [item for item in ws["items"]
-            if (item.get("type") or item.get("itemType") or "").lower().replace(" ", "") in supported]
+    return workspace_items(ws, _LABELLED_KINDS)
 
 
 def _activity_item_ids(events: List[Dict[str, Any]]) -> set[str]:
@@ -91,19 +83,13 @@ def _activity_item_ids(events: List[Dict[str, Any]]) -> set[str]:
 
 
 def _workspaces(raw_dir: Path) -> List[Dict[str, Any]]:
-    scan = load_raw(raw_dir / "scanner.json")
-    if scan and scan.get("workspaces"):
-        return scan["workspaces"]
-    inv = load_raw(raw_dir / "workspace_inventory.json")
-    if inv and inv.get("workspaces"):
-        return inv["workspaces"]
-    return []
+    return load_workspaces(raw_dir)
 
 
 def _admins(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
     # scanner: users with groupUserAccessRight == 'Admin'
     out: List[Dict[str, Any]] = []
-    for u in ws.get("users") or []:
+    for u in workspace_users(ws) or []:
         right = (u.get("groupUserAccessRight") or u.get("role") or "").lower()
         if right == "admin":
             out.append(u)
@@ -111,13 +97,7 @@ def _admins(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _items(ws: Dict[str, Any]) -> List[Dict[str, Any]]:
-    if isinstance(ws.get("items"), list):
-        return ws["items"]
-    bucket: List[Dict[str, Any]] = []
-    for key in ("datasets", "reports", "dashboards", "dataflows", "lakehouses",
-                "warehouses", "notebooks", "pipelines", "kqlDatabases", "mlModels"):
-        bucket.extend(ws.get(key) or [])
-    return bucket
+    return workspace_items(ws)
 
 
 def _is_shared_content_workspace(ws: Dict[str, Any]) -> bool:
@@ -141,6 +121,8 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
     workspaces = _workspaces(raw_dir)
     workspace_config = os.environ.get("WORKSPACES_CONFIG") or str(Path(checklist_path).parent / "workspaces.yaml")
     workspace_profiles = classify_workspaces(workspaces, load_workspace_overrides(workspace_config))
+    missing_items = [w.get("name") for w in workspaces
+                     if w.get("type") != "PersonalGroup" and not workspace_items_available(w)]
 
     # --- GOV-001 production workspaces have ≥2 admins ---
     rule = rules.get("GOV-001")
@@ -153,21 +135,27 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             if not relevant:
                 findings.append(make_finding(
                     rule, dimension="governance",
-                    status="unknown" if scope["unknown"] else "not_applicable",
+                    status="missing_evidence" if scope["missing_evidence"] else "unknown" if scope["unknown"] else "not_applicable",
                     title="Workspaces with fewer than 2 admins",
                     evidence={"evaluatedWorkspaces": 0, "minAdmins": MIN_ADMINS,
                               "unknownEnvironmentWorkspaces": [w.get("name") for w in scope["unknown"]],
+                              "workspacesMissingItemEvidence": [w.get("name") for w in scope["missing_evidence"]],
                               "note": "No classified production, shared, non-empty workspaces to evaluate."},
                     recommendation="Assign at least two workspace admins (preferably via a security group) to avoid orphan risk."
                 ))
             else:
-                under_admin = [w.get("name") for w in relevant if len(_admins(w)) < MIN_ADMINS]
+                evaluated = [w for w in relevant if workspace_roles_complete(w)]
+                missing_members = [w.get("name") for w in relevant if not workspace_roles_complete(w)]
+                under_admin = [w.get("name") for w in evaluated if len(_admins(w)) < MIN_ADMINS]
                 findings.append(make_finding(
                     rule, dimension="governance",
-                    status="pass" if not under_admin else "fail",
+                    status="fail" if under_admin else "missing_evidence" if missing_members or scope["missing_evidence"] else "pass",
                     title="Workspaces with fewer than 2 admins",
-                    evidence={"evaluatedWorkspaces": len(relevant), "minAdmins": MIN_ADMINS,
+                    evidence={"evaluatedWorkspaces": len(evaluated), "minAdmins": MIN_ADMINS,
                               "underAdminCount": len(under_admin),
+                              "workspacesMissingMembershipEvidence": len(missing_members),
+                              "missingMembershipExamples": missing_members[:20],
+                              "workspacesMissingItemEvidence": [w.get("name") for w in scope["missing_evidence"]],
                               "examples": under_admin[:20]},
                     recommendation="Assign at least two workspace admins (preferably via a security group) to avoid orphan risk."
                 ))
@@ -191,12 +179,15 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             inactive = [item for item in inventoried if item["id"] not in active_ids]
             evidence_available = bool(active_ids) or not inventoried
             status = ("pass" if not inactive else "fail") if evidence_available else "missing_evidence"
+            if missing_items and status == "pass":
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title=(f"Items with no activity in the last {logs.get('windowDays', '?')} day(s)"
                        if evidence_available else "Item inactivity could not be evaluated"),
                 evidence={"windowDays": logs.get("windowDays"),
                           "inventoriedItems": len(inventoried),
+                          "workspacesMissingItemEvidence": missing_items,
                           "eventsWithArtifactId": len(active_ids),
                           "inactiveCount": len(inactive) if evidence_available else None,
                           "examples": inactive[:20] if evidence_available else [],
@@ -218,14 +209,20 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             labelled = [item for item in governed
                         if item.get("sensitivityLabel") or item.get("informationProtectionLabel")]
             ratio = (len(labelled) / len(governed)) if governed else 0
+            missing_labels = sum(not item_metadata_available(item, "sensitivityLabel", "informationProtectionLabel")
+                                 for item in governed)
             status = "pass" if governed and ratio >= LABEL_COVERAGE_MIN_RATIO else (
                 "not_applicable" if not governed else "fail"
             )
+            if missing_items or missing_labels:
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title="Sensitivity label coverage",
                 evidence={"evaluatedItems": len(governed), "labelledItems": len(labelled),
-                          "ratio": round(ratio, 2)},
+                          "itemsMissingLabelEvidence": missing_labels,
+                          "workspacesMissingItemEvidence": missing_items,
+                          "ratio": None if missing_items or missing_labels else round(ratio, 2)},
                 recommendation="Apply sensitivity labels to semantic models, reports, lakehouses, and warehouses; "
                                "enforce via tenant setting and Purview integration."
             ))
@@ -307,11 +304,14 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 else:
                     orphans.append(row)
             status = "fail" if orphans else "info" if expected_inactive else "pass"
+            if missing_items and not orphans:
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title=f"Workspaces with content but no activity in last {logs.get('windowDays', '?')} day(s)",
                 evidence={"windowDays": logs.get("windowDays"),
                           "orphanedCount": len(orphans),
+                          "workspacesMissingItemEvidence": missing_items,
                           "examples": orphans[:20],
                           "expectedLowFrequencyCount": len(expected_inactive),
                           "expectedLowFrequency": expected_inactive[:20]},
@@ -326,16 +326,12 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
             "1", "true", "yes", "y", "on")
         source = "env:CAPACITY_METRICS_APP_INSTALLED" if installed else None
         if not installed:
-            scan = load_raw(raw_dir / "scanner.json") or {}
-            for ws in scan.get("workspaces") or []:
-                for kind in ("datasets", "reports"):
-                    for item in ws.get(kind) or []:
-                        name = (item.get("name") or "").lower()
-                        if "capacity metrics" in name:
-                            installed = True
-                            source = f"scanner:{ws.get('name')}/{item.get('name')}"
-                            break
-                    if installed:
+            for ws in workspaces:
+                for item in workspace_items(ws, ("SemanticModel", "Report")):
+                    name = (item.get("name") or "").lower()
+                    if "capacity metrics" in name:
+                        installed = True
+                        source = f"inventory:{ws.get('name')}/{item.get('name')}"
                         break
                 if installed:
                     break
@@ -358,21 +354,28 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         else:
             total = 0
             endorsed = 0
+            missing_endorsement = 0
             for w in workspaces:
                 if w.get("type") == "PersonalGroup":
                     continue
                 for item in _endorsable_items(w):
                     total += 1
+                    missing_endorsement += not item_metadata_available(item, "endorsementDetails")
                     if _endorsement(item) in ("Certified", "Promoted"):
                         endorsed += 1
             ratio = (endorsed / total) if total else 0.0
             # Advisory maturity signal: PASS when adopted, otherwise INFO (never a hard fail).
             status = "pass" if (total and ratio >= ENDORSEMENT_MIN_RATIO) else ("info" if total else "info")
+            if missing_items or missing_endorsement:
+                status = "missing_evidence"
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title="Endorsement (Certified / Promoted) coverage of content",
                 evidence={"endorsableItems": total, "endorsedItems": endorsed,
-                          "ratio": round(ratio, 2), "minRatio": ENDORSEMENT_MIN_RATIO},
+                          "itemsMissingEndorsementEvidence": missing_endorsement,
+                          "workspacesMissingItemEvidence": missing_items,
+                          "ratio": None if missing_items or missing_endorsement else round(ratio, 2),
+                          "minRatio": ENDORSEMENT_MIN_RATIO},
                 recommendation=("Endorse trusted datasets/reports as Promoted, and the authoritative ones as "
                                 "Certified, so consumers can tell governed content from ad-hoc content.")
             ))
@@ -383,13 +386,17 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
         if not workspaces:
             findings.append(missing_raw_finding(rule, "governance", "scanner.json"))
         else:
-            prod_ws = [w for w in workspaces
-                       if w.get("type") != "PersonalGroup" and PROD_PATTERN.search(w.get("name") or "")]
+            prod_scope = production_scope(workspaces, workspace_profiles)
+            prod_ws = prod_scope["applicable"]
             offenders: List[Dict[str, Any]] = []
             evaluated = 0
+            missing_endorsement_workspaces = []
             for w in prod_ws:
-                datasets = w.get("datasets") or []
+                datasets = workspace_items(w, ("SemanticModel",))
                 if not datasets:
+                    continue
+                if any(not item_metadata_available(item, "endorsementDetails") for item in datasets):
+                    missing_endorsement_workspaces.append(w.get("name"))
                     continue
                 evaluated += 1
                 endorsed = sum(1 for d in datasets if _endorsement(d) in ("Certified", "Promoted"))
@@ -397,11 +404,15 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 if ratio < PROD_ENDORSEMENT_MIN_RATIO:
                     offenders.append({"name": w.get("name"), "datasets": len(datasets),
                                       "endorsed": endorsed, "ratio": round(ratio, 2)})
-            status = "pass" if (not evaluated or not offenders) else "fail"
+            status = ("fail" if offenders else "missing_evidence" if prod_scope["missing_evidence"] or missing_endorsement_workspaces else
+                      "pass" if evaluated else
+                      "unknown" if prod_scope["unknown"] else "not_applicable")
             findings.append(make_finding(
                 rule, dimension="governance", status=status,
                 title="Production workspaces without endorsed semantic models",
                 evidence={"productionWorkspaces": evaluated, "minRatio": PROD_ENDORSEMENT_MIN_RATIO,
+                          "workspacesMissingEndorsementEvidence": missing_endorsement_workspaces,
+                          "workspacesMissingItemEvidence": [w.get("name") for w in prod_scope["missing_evidence"]],
                           "offenderCount": len(offenders), "examples": offenders[:20]},
                 recommendation=("Certify the authoritative semantic models in production workspaces so downstream "
                                 "reports build on governed, trusted data.")
