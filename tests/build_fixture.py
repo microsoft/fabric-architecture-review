@@ -135,12 +135,13 @@ def _tenant_settings() -> dict[str, Any]:
     return {
         "tenantSettings": [
             s("PublishToWeb", True),                       # enabled, unscoped -> fail
-            s("ExportData", False),                        # disabled -> pass
-            s("CreateFabricItem", True, [SG1]),            # scoped -> pass
-            s("ServicePrincipalAccess", True, [SG1]),      # scoped -> pass
-            s("AllowExternalDataSharing", True),           # enabled, unscoped -> fail
-            s("CustomVisualsTenantSettings", True, [SG1]), # scoped -> pass
-            s("RScriptVisualsTenantSettings", False),      # disabled -> pass
+            s("ExportToExcelSetting", False),             # both export controls disabled -> pass
+            s("ExportToCsv", False),
+            s("FabricGAWorkloads", True, [SG1]),           # scoped -> pass
+            s("ServicePrincipalAccessPermissionAPIs", True, [SG1]),  # scoped -> pass
+            s("AllowExternalDataSharingSwitch", True),    # enabled, unscoped -> fail
+            s("CustomVisualsTenant", True, [SG1]),         # scoped -> pass
+            s("RScriptVisual", False),                    # disabled -> pass
             # AllowGuestUserToAccessSharedContent omitted -> info (missing)
         ]
     }

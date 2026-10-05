@@ -27,27 +27,25 @@ def _iter_settings(payload: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
 
 def _evaluate(setting: Dict[str, Any], expect: str) -> tuple[str, str]:
     """Return the canonical status and supporting reason."""
-    enabled = bool(setting.get("enabled"))
-    can_specify_security_groups = bool(setting.get("canSpecifySecurityGroups"))
+    enabled = setting.get("enabled")
+    if not isinstance(enabled, bool):
+        return "missing_evidence", "Setting returned without a boolean enabled value."
     enabled_security_groups = setting.get("enabledSecurityGroups") or []
-    excluded_security_groups = setting.get("excludedSecurityGroups") or []
-    tenant_setting_group = setting.get("tenantSettingGroup")  # rarely present
-
-    is_scoped = bool(enabled_security_groups) or bool(excluded_security_groups)
+    is_scoped = bool(enabled_security_groups)
 
     if expect == "disabled_or_scoped":
         if not enabled:
             return "pass", "Setting is disabled tenant-wide."
         if is_scoped:
             return "pass", f"Enabled but scoped to {len(enabled_security_groups)} security group(s)."
-        return "fail", "Setting is enabled for the entire organization with no security group scoping."
+        return "fail", "Setting is enabled without restriction to allowed security groups."
 
     if expect == "scoped":
         if not enabled:
             return "pass", "Setting is disabled (effectively scoped to no one)."
         if is_scoped:
             return "pass", f"Enabled but scoped to {len(enabled_security_groups)} security group(s)."
-        return "fail", "Setting is enabled for the entire organization with no security group scoping."
+        return "fail", "Setting is enabled without restriction to allowed security groups."
 
     if expect == "enabled_and_scoped":
         if not enabled:
@@ -80,6 +78,48 @@ def analyze(
     for rule in rules.values():
         spec = rule.get("tenant_setting")
         if not isinstance(spec, dict):
+            continue
+        if "all_of" in spec:
+            required_names = spec["all_of"]
+            if not isinstance(required_names, list) or not required_names or not all(
+                isinstance(name, str) and name for name in required_names
+            ):
+                raise ValueError(f"{rule['id']}: tenant_setting.all_of must be a nonempty list of setting names")
+            controls = []
+            for name in required_names:
+                setting = settings_by_name.get(name)
+                if setting is None:
+                    controls.append({
+                        "setting_name": name, "present": False, "status": "missing_evidence",
+                        "reason": "Setting not returned by the tenant settings API.",
+                    })
+                else:
+                    status, reason = _evaluate(setting, spec["expect"])
+                    controls.append({
+                        "setting_name": name, "present": True, "status": status,
+                        "enabled": setting.get("enabled"),
+                        "enabledSecurityGroups": setting.get("enabledSecurityGroups"),
+                        "excludedSecurityGroups": setting.get("excludedSecurityGroups"),
+                        "canSpecifySecurityGroups": setting.get("canSpecifySecurityGroups"),
+                        "reason": reason,
+                    })
+            statuses = {control["status"] for control in controls}
+            # A known unrestricted control fails even when another control is absent.
+            status = next(value for value in ("fail", "missing_evidence", "unknown", "pass") if value in statuses)
+            missing = [control["setting_name"] for control in controls if not control["present"]]
+            recommendation = rule.get("description", "").strip()
+            if missing:
+                recommendation += " Verify collection coverage and API names for missing settings: " + ", ".join(missing) + "."
+            findings.append(make_finding(
+                rule, dimension=rule["dimension"], status=status, title=spec["title"],
+                evidence={
+                    "setting_names": required_names,
+                    "settings": controls,
+                    "missing_settings": missing,
+                    "reason": "; ".join(f"{control['setting_name']}: {control['reason']}" for control in controls),
+                },
+                recommendation=recommendation,
+            ))
             continue
         setting_name = str(spec["name"])
         setting = settings_by_name.get(setting_name)

@@ -196,7 +196,11 @@ if (-not (Test-Path rayfin/.env)) { Copy-Item rayfin/.env.example rayfin/.env }
 npm test
 npm run lint
 npm run build:fabric
+npm audit --audit-level=high
 ```
+
+Use `npm ci` with the committed lockfile to install the reviewed dependency
+versions, including the local deployment CLIs, through your configured registry.
 
 The build generates model bindings, checks TypeScript and bundles the app,
 sign-in pages and third-party notices. These local checks do **not** establish

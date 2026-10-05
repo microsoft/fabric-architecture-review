@@ -256,11 +256,11 @@ def analyze(raw_dir: str | os.PathLike = "output/raw",
                 signals.append("VNet data gateway present")
         if ts:
             settings = {s.get("settingName"): s for s in (ts.get("tenantSettings") or ts.get("value") or [])}
-            trusted = settings.get("AllowTrustedWorkspaceAccessForStorageAccounts") or \
-                       settings.get("AllowServicePrincipalsCreateAndUseProfiles")
+            trusted = settings.get("AllowTrustedWorkspaceAccessForStorageAccounts")
             if trusted and trusted.get("enabled"):
                 signals.append("Trusted-workspace access enabled")
-            evidence["trustedWorkspaceAccess"] = bool(trusted and trusted.get("enabled"))
+            evidence["trustedWorkspaceAccess"] = trusted.get("enabled") if trusted else None
+            evidence["trustedWorkspaceSettingPresent"] = trusted is not None
         if not gw and not ts:
             findings.append(missing_raw_finding(rule, "security", "gateways.json + tenant_settings.json"))
         else:

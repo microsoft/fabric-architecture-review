@@ -95,7 +95,7 @@ Scoped to *production* workspaces only — dev / test / sandbox / personal works
 | ID | Severity | Description | Reference |
 |---|---|---|---|
 | SEC-001 | critical | Tenant setting "Publish to web" is disabled or restricted to a specific security group | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web) |
-| SEC-002 | high | Tenant setting "Export data" is restricted to a security group, not enabled tenant-wide | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing) |
+| SEC-002 | high | Both Excel and CSV data exports are disabled or restricted to security groups, not enabled tenant-wide | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing) |
 | SEC-003 | high | Guest users cannot access the tenant unless explicitly scoped via security group | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing) |
 | SEC-004 | medium | Workspace access uses security groups (not individual users) and least privilege roles | [Learn](https://learn.microsoft.com/fabric/get-started/roles-workspaces) |
 | SEC-005 | medium | Workspaces with very broad direct access (more than 10 individual principals) should be reviewed; convert to security-group-based access | [Learn](https://learn.microsoft.com/fabric/get-started/roles-workspaces) |
@@ -123,10 +123,51 @@ Scoped to *production* workspaces only — dev / test / sandbox / personal works
 | ID | Severity | Description | Reference |
 |---|---|---|---|
 | TENANT-001 | high | "Users can create Fabric items" is scoped to a specific security group, not enabled for the entire organization | [Learn](https://learn.microsoft.com/fabric/admin/fabric-switch) |
-| TENANT-002 | medium | "Service principals can use Fabric APIs" is enabled and scoped to an automation security group; service-principal collection has separate prerequisites from the default user-identity review | [Learn](https://learn.microsoft.com/fabric/admin/metadata-scanning-enable-read-only-apis) |
-| TENANT-003 | high | External sharing tenant settings ("Allow sharing to external users", "Invite external users to your organization") are disabled or scoped to a security group | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing) |
-| TENANT-004 | medium | Uncertified / custom visuals tenant settings are scoped | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-visuals) |
-| TENANT-005 | medium | R and Python visual / script settings are scoped or disabled | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-r-and-python-visuals) |
+| TENANT-002 | medium | "Service principals can call Fabric public APIs" is enabled and scoped to an automation security group; separate from admin API access and not required for a user-identity review | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-developer) |
+| TENANT-003 | high | "External data sharing" (creating OneLake data shares) is disabled or scoped to a security group | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing) |
+| TENANT-004 | medium | "Allow visuals created using the Power BI SDK" is disabled or scoped | [Learn](https://learn.microsoft.com/fabric/admin/service-admin-portal-power-bi-visuals) |
+| TENANT-005 | medium | "Interact with and share R and Python visuals" is disabled or scoped; does not cover notebooks or general scripts | [Learn](https://learn.microsoft.com/power-bi/admin/service-admin-portal-r-and-python-visuals) |
+
+### Tenant-setting API name contract
+
+Rules match exact API `settingName` values, not display titles. Current names
+take precedence over legacy compatibility names:
+
+| Rule | Current API name(s) |
+|---|---|
+| SEC-001 | `PublishToWeb` |
+| SEC-002 | `ExportToExcelSetting` **and** `ExportToCsv` |
+| TENANT-001 | `FabricGAWorkloads` |
+| TENANT-002 | `ServicePrincipalAccessPermissionAPIs` |
+| TENANT-003 | `AllowExternalDataSharingSwitch` |
+| TENANT-004 | `CustomVisualsTenant` |
+| TENANT-005 | `RScriptVisual` |
+
+An enabled `FabricGAWorkloads` setting with allowed security groups passes
+TENANT-001; delegation to capacities does not change that tenant-level finding.
+This is not a review of individual capacity overrides.
+Scoping requires a nonempty allowed-security-group list; excluding groups from
+organization-wide access is not equivalent to restricting access to allowed groups.
+A setting without a boolean `enabled` value is incomplete evidence, not disabled.
+
+Settings for receiving shares, inviting guests, organization-wide
+sharing, certified-only/organizational visuals, and separate Python/script
+settings are not used as substitutes for the controls above.
+SEC-003 separately checks `AllowGuestUserToAccessSharedContent` (with its existing
+legacy fallback). SEC-009 only recognizes
+`AllowTrustedWorkspaceAccessForStorageAccounts` as its tenant-setting signal:
+service-principal profiles do not establish trusted-workspace access. If that
+setting is absent, the evidence is unknown (`null`), not disabled.
+
+SEC-002 evaluates `ExportToExcelSetting` and `ExportToCsv` independently and
+retains both results in one finding. Both must pass for the rule to pass.
+An unrestricted control fails the rule even if the other control is missing;
+otherwise an absent control yields `missing_evidence`. The legacy `ExportData`
+name alone cannot establish coverage of both controls. Report downloads and
+document/image exports are not included.
+
+Analyze and Report can be rerun against existing raw tenant settings without
+recollecting evidence.
 
 ## Notebook code (heuristic)
 

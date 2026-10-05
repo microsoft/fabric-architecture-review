@@ -51,6 +51,11 @@ All notable changes to this project are documented in this file.
 
 ### Reliability and deployment
 
+- Correct tenant-setting assessments to use current Fabric API names, check
+  Excel and CSV export controls independently, and avoid treating missing,
+  unrelated, or exclusions-only settings as evidence of policy compliance.
+- Refresh Fabric app and deployment-tool dependencies to resolve npm audit
+  advisories without major-version upgrades.
 - Local PowerShell/Bash collection enforces the existing skip flags for
   Fabric-only VertiPaq and Semantic Link BPA/health analysis, without importing
   or installing their SDK. Skipped snapshots replace stale evidence. Fabric

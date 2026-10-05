@@ -11,7 +11,7 @@
       "enabledSecurityGroups": [],
       "excludedSecurityGroups": [],
       "canSpecifySecurityGroups": true,
-      "reason": "Setting is enabled for the entire organization with no security group scoping."
+      "reason": "Setting is enabled without restriction to allowed security groups."
     },
     "recommendation": "Tenant setting \"Publish to web\" is disabled or restricted to a specific security group.",
     "microsoft_learn_url": "https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing#publish-to-web"
@@ -21,16 +21,38 @@
     "dimension": "security",
     "severity": "high",
     "status": "pass",
-    "title": "Export data is restricted to a security group",
+    "title": "Excel and CSV data exports are disabled or restricted to security groups",
     "evidence": {
-      "setting_name": "ExportData",
-      "enabled": false,
-      "enabledSecurityGroups": [],
-      "excludedSecurityGroups": [],
-      "canSpecifySecurityGroups": true,
-      "reason": "Setting is disabled (effectively scoped to no one)."
+      "setting_names": [
+        "ExportToExcelSetting",
+        "ExportToCsv"
+      ],
+      "settings": [
+        {
+          "setting_name": "ExportToExcelSetting",
+          "present": true,
+          "status": "pass",
+          "enabled": false,
+          "enabledSecurityGroups": [],
+          "excludedSecurityGroups": [],
+          "canSpecifySecurityGroups": true,
+          "reason": "Setting is disabled (effectively scoped to no one)."
+        },
+        {
+          "setting_name": "ExportToCsv",
+          "present": true,
+          "status": "pass",
+          "enabled": false,
+          "enabledSecurityGroups": [],
+          "excludedSecurityGroups": [],
+          "canSpecifySecurityGroups": true,
+          "reason": "Setting is disabled (effectively scoped to no one)."
+        }
+      ],
+      "missing_settings": [],
+      "reason": "ExportToExcelSetting: Setting is disabled (effectively scoped to no one).; ExportToCsv: Setting is disabled (effectively scoped to no one)."
     },
-    "recommendation": "Tenant setting \"Export data\" is restricted to a security group, not enabled tenant-wide.",
+    "recommendation": "Both \"Export to Excel\" and \"Export to .csv\" are disabled or restricted to security groups, not enabled tenant-wide. Report downloads and document/image exports are outside this rule's scope.",
     "microsoft_learn_url": "https://learn.microsoft.com/power-bi/admin/service-admin-portal-export-sharing"
   },
   {
@@ -40,7 +62,7 @@
     "status": "pass",
     "title": "Users can create Fabric items is scoped to a security group",
     "evidence": {
-      "setting_name": "CreateFabricItem",
+      "setting_name": "FabricGAWorkloads",
       "enabled": true,
       "enabledSecurityGroups": [
         "00000033-0000-4000-8000-000000000033"
@@ -57,9 +79,9 @@
     "dimension": "tenant_settings",
     "severity": "medium",
     "status": "pass",
-    "title": "Service principals can use Fabric APIs is enabled and scoped",
+    "title": "Service principals can call Fabric public APIs is enabled and scoped",
     "evidence": {
-      "setting_name": "ServicePrincipalAccess",
+      "setting_name": "ServicePrincipalAccessPermissionAPIs",
       "enabled": true,
       "enabledSecurityGroups": [
         "00000033-0000-4000-8000-000000000033"
@@ -68,8 +90,8 @@
       "canSpecifySecurityGroups": true,
       "reason": "Enabled and scoped to 1 security group(s)."
     },
-    "recommendation": "\"Service principals can use Fabric APIs\" is enabled and scoped to an automation security group (required for this assessment and for CI/CD).",
-    "microsoft_learn_url": "https://learn.microsoft.com/fabric/admin/metadata-scanning-enable-read-only-apis"
+    "recommendation": "\"Service principals can call Fabric public APIs\" is enabled and scoped to an automation security group. This is separate from read-only admin API access and is not a prerequisite for a user-identity review.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/admin/service-admin-portal-developer"
   },
   {
     "rule_id": "TENANT-003",
@@ -78,14 +100,14 @@
     "status": "fail",
     "title": "External data sharing is disabled or scoped to a security group",
     "evidence": {
-      "setting_name": "AllowExternalDataSharing",
+      "setting_name": "AllowExternalDataSharingSwitch",
       "enabled": true,
       "enabledSecurityGroups": [],
       "excludedSecurityGroups": [],
       "canSpecifySecurityGroups": true,
-      "reason": "Setting is enabled for the entire organization with no security group scoping."
+      "reason": "Setting is enabled without restriction to allowed security groups."
     },
-    "recommendation": "External sharing tenant settings (\"Allow sharing to external users\", \"Invite external users to your organization\") are disabled or scoped to a security group. Tenant-wide external sharing is a major data-exfiltration vector.",
+    "recommendation": "\"External data sharing\" (creating read-only OneLake data shares) is disabled or scoped to a security group. Accepting external shares, inviting guests, and sharing Power BI semantic models are separate controls.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/admin/service-admin-portal-export-sharing"
   },
   {
@@ -93,9 +115,9 @@
     "dimension": "tenant_settings",
     "severity": "medium",
     "status": "pass",
-    "title": "Uncertified / custom visuals are restricted to a security group",
+    "title": "Visuals created using the Power BI SDK are disabled or restricted to a security group",
     "evidence": {
-      "setting_name": "CustomVisualsTenantSettings",
+      "setting_name": "CustomVisualsTenant",
       "enabled": true,
       "enabledSecurityGroups": [
         "00000033-0000-4000-8000-000000000033"
@@ -104,24 +126,24 @@
       "canSpecifySecurityGroups": true,
       "reason": "Enabled but scoped to 1 security group(s)."
     },
-    "recommendation": "Uncertified / custom visuals tenant settings are scoped. Allowing arbitrary visuals tenant-wide opens an unreviewed code-execution surface inside reports.",
-    "microsoft_learn_url": "https://learn.microsoft.com/power-bi/admin/service-admin-portal-visuals"
+    "recommendation": "\"Allow visuals created using the Power BI SDK\" is disabled or scoped. \"Add and use certified visuals only\" and organizational visuals are separate controls, not aliases for this setting.",
+    "microsoft_learn_url": "https://learn.microsoft.com/fabric/admin/service-admin-portal-power-bi-visuals"
   },
   {
     "rule_id": "TENANT-005",
     "dimension": "tenant_settings",
     "severity": "medium",
     "status": "pass",
-    "title": "R / Python visuals and scripts are restricted to a security group",
+    "title": "Interacting with and sharing R / Python visuals is disabled or scoped",
     "evidence": {
-      "setting_name": "RScriptVisualsTenantSettings",
+      "setting_name": "RScriptVisual",
       "enabled": false,
       "enabledSecurityGroups": [],
       "excludedSecurityGroups": [],
       "canSpecifySecurityGroups": true,
       "reason": "Setting is disabled (effectively scoped to no one)."
     },
-    "recommendation": "R and Python visual / script settings are scoped or disabled. R/Python visuals run arbitrary code; tenant-wide enablement bypasses code review.",
+    "recommendation": "\"Interact with and share R and Python visuals\" is disabled or scoped to security groups. This rule does not assess notebook or general script execution.",
     "microsoft_learn_url": "https://learn.microsoft.com/power-bi/admin/service-admin-portal-r-and-python-visuals"
   }
 ]

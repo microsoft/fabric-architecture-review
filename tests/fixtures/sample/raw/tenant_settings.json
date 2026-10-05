@@ -9,16 +9,24 @@
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "ExportData",
-      "title": "ExportData",
+      "settingName": "ExportToExcelSetting",
+      "title": "Export to Excel",
       "enabled": false,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [],
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "CreateFabricItem",
-      "title": "CreateFabricItem",
+      "settingName": "ExportToCsv",
+      "title": "Export to .csv",
+      "enabled": false,
+      "canSpecifySecurityGroups": true,
+      "enabledSecurityGroups": [],
+      "excludedSecurityGroups": []
+    },
+    {
+      "settingName": "FabricGAWorkloads",
+      "title": "Users can create Fabric items",
       "enabled": true,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [
@@ -27,8 +35,8 @@
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "ServicePrincipalAccess",
-      "title": "ServicePrincipalAccess",
+      "settingName": "ServicePrincipalAccessPermissionAPIs",
+      "title": "Service principals can call Fabric public APIs",
       "enabled": true,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [
@@ -37,16 +45,16 @@
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "AllowExternalDataSharing",
-      "title": "AllowExternalDataSharing",
+      "settingName": "AllowExternalDataSharingSwitch",
+      "title": "External data sharing",
       "enabled": true,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [],
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "CustomVisualsTenantSettings",
-      "title": "CustomVisualsTenantSettings",
+      "settingName": "CustomVisualsTenant",
+      "title": "Allow visuals created using the Power BI SDK",
       "enabled": true,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [
@@ -55,8 +63,8 @@
       "excludedSecurityGroups": []
     },
     {
-      "settingName": "RScriptVisualsTenantSettings",
-      "title": "RScriptVisualsTenantSettings",
+      "settingName": "RScriptVisual",
+      "title": "Interact with and share R and Python visuals",
       "enabled": false,
       "canSpecifySecurityGroups": true,
       "enabledSecurityGroups": [],

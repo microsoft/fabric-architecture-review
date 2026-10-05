@@ -111,7 +111,8 @@
     "evidence": {
       "vnetGatewayCount": 0,
       "vnetGateways": [],
-      "trustedWorkspaceAccess": false
+      "trustedWorkspaceAccess": null,
+      "trustedWorkspaceSettingPresent": false
     },
     "recommendation": "If production datasources are reached over public endpoints, evaluate a Virtual Network data gateway, Fabric trusted-workspace access for ADLS / Storage, or private endpoints on the tenant.",
     "microsoft_learn_url": "https://learn.microsoft.com/fabric/security/security-network-overview"

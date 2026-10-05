@@ -5,7 +5,7 @@ schema_version: 1
 analyzers:
   - module: analyzers.tenant_settings_review
     output: findings_tenant_settings.json
-    predicate_version: 1
+    predicate_version: 2
     cardinality: exactly_one_per_rule
     missing_data_policy: missing_evidence
     required_inputs: [tenant_settings.json]
@@ -77,7 +77,7 @@ analyzers:
 
   - module: analyzers.security_review
     output: findings_security.json
-    predicate_version: 1
+    predicate_version: 2
     cardinality: exactly_one_per_rule
     missing_data_policy: missing_evidence
     required_inputs: [scanner.json, workspace_inventory.json]
