@@ -25,9 +25,9 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 1. **Open an issue first** for anything beyond a trivial fix, so we can align on the approach.
 2. **Fork** the repository and create a topic branch from `main`.
 3. Make your change with clear, focused commits.
-4. **Run the automated tests** against the tracked synthetic fixture in
-   `tests/fixtures/sample/raw/`. If collector behavior changes, also run the local pipeline
-   against a tenant where you are authorized to perform the review.
+4. **Run the automated tests**, which use synthetic evidence only. If collector behavior
+   changes, also run the local pipeline against a tenant where you are authorized to
+   perform the review.
 5. Open a **pull request** describing the change and the motivation.
 
 ## The data-safety contract (mandatory)
@@ -39,14 +39,15 @@ rejected if it:
 - Issues `EVALUATE` / `SELECT` returning customer business rows. The opt-in,
   fixed-contract FUAM monitoring query is governed separately by the
   [targeted-review source contract](docs/targeted-review.md#supported-fuam-source-contract),
-- Downloads customer business OneLake file contents (FAR's own artifacts and
+- Downloads customer business OneLake file contents (the suite's own artifacts and
   runtime packages are not customer business data),
 - Reads notebook cell **outputs**,
-- Enables Scanner API scopes that return PII (`getArtifactUsers`, `datasetSchema`,
-  `datasetExpressions`, `datasourceDetails`),
+- Enables Scanner API scopes that return schemas, expressions or credentials (`datasetSchema`,
+  `datasetExpressions`, `datasourceDetails`), or persists the scanner's item access lists
+  (`getArtifactUsers` may be requested only because it is reduced to counts in memory),
 - Commits live tenant payloads, credentials, notebook execution outputs or private
   test harnesses. Keep operational artifacts in approved local output folders or
-  the FAR Lakehouse, with appropriate access controls.
+  the review Lakehouse, with appropriate access controls.
 
 Every collector module must include a `DATA SAFETY:` comment or docstring
 documenting what it reads. See [data safety](docs/data-safety.md) for the
@@ -54,19 +55,22 @@ collection boundaries.
 
 ## Adding a rule, collector, or analyzer
 
-See **[Extending the framework](REFERENCE.md#-extending-the-framework)** for the
-end-to-end pattern (collector → analyzer → checklist → thresholds). Key
-points:
+See **[Extending the framework](REFERENCE.md#extending-the-framework)** for the
+end-to-end pattern. Key points:
 
-- Numeric pass/fail boundaries belong in [config/thresholds.yaml](config/thresholds.yaml),
-  resolved via `analyzers._common.threshold()` — do not hard-code magic numbers.
-- Rule metadata (id, dimension, severity, description, Learn URL) belongs in
-  [config/review-checklist.yaml](config/review-checklist.yaml).
+- The review covers **architecture only**. Monitoring, optimization and cost rules
+  belong to FUAM and FCA; do not add checks that duplicate them.
+- Numeric tuning belongs in [config/thresholds.yaml](config/thresholds.yaml) and is
+  read from the frozen configuration, not hard-coded or taken from the environment.
+- Rule metadata (id, kind, dimension, severity, description, Learn URL) belongs in
+  [config/review-checklist.yaml](config/review-checklist.yaml). A rule is a `control`
+  (can pass or fail and is scored), a `signal` (context, never a failure) or
+  `coverage`. Production and purpose are declared, never inferred from names.
 - Findings are dicts with `rule_id`, `dimension`, `severity`, `status`
   (`pass`, `fail`, `info`, `not_applicable`, `unknown`, or `missing_evidence`),
   `title`, `evidence`, and `recommendation`.
-- Add or update focused tests. Every enabled checklist ID must be emitted by the
-  synthetic analyzer registry; disabled IDs must declare an active `superseded_by`.
+- Add or update focused tests. Every catalogue rule must be registered in
+  [config/analyzer-registry.yaml](config/analyzer-registry.yaml) and emitted by the analyzer.
 
 ## Code style
 

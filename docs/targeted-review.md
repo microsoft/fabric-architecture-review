@@ -2,7 +2,7 @@
 
 # Optional targeted reviews
 
-**Goal:** let FUAM choose the workspaces FAR reviews, optionally notifying their
+**Goal:** let FUAM choose the workspaces the review covers, optionally notifying their
 administrators afterwards. For the shortest setup path, follow
 [deployment step 5](../fabric/DEPLOYMENT.md#5-optionally-enable-fuam-targeted-reviews).
 This page is the detailed parameter and operations reference.
@@ -15,7 +15,7 @@ This page is the detailed parameter and operations reference.
 | Configure or troubleshoot email | [Outlook email](#3-optionally-configure-native-outlook-owner-email) |
 | Confirm the deployment works | [Verification](#deployment-verification) |
 
-Targeted review is an orchestration layer around FAR, not a replacement for the
+Targeted review is an orchestration layer around the review, not a replacement for the
 standalone review. Base setup deploys disabled `06_TargetedReviewSetup` but does
 not start monitoring queries, create a schedule, or send messages. The setup
 order is **base setup -> opt-in 06 -> targeted parent**. Configure optional native
@@ -27,45 +27,48 @@ For a workspace-owner audience, independently opt in to the
 model/report and Data Agent remain central-only and are **not secured** by this
 feature. Existing pipeline bindings do not change.
 
-## 1. Deploy standalone FAR
+## 1. Deploy the standard review
 
 1. Deploy FAR using [standard setup](../fabric/setup.ipynb). For a step-by-step
    walkthrough from an empty workspace, follow the [Fabric deployment guide](../fabric/DEPLOYMENT.md).
-2. Run the normal FAR pipeline for a test workspace and confirm the report is
+2. Run the standard review pipeline for a test workspace and confirm the report is
    available before adding monitoring-driven selection.
 
 ## 2. Enable FUAM-based selection
+
+First connect FUAM: in the `FAR_Connections` Variable Library set `fuam__enabled` to
+`true` and fill `fuam__workspace_id` and `fuam__lakehouse_id` (see
+[Configure the review](far-policy-configuration.md#2-connect-fuam-and-fca-connections-library)).
+Targeted selection reads them at run time; they are not pipeline parameters.
 
 Open the deployed `06_TargetedReviewSetup` notebook. Change only these basic settings:
 
 ```python
 DEPLOY_TARGETED_REVIEW = "true"
-FUAM_WORKSPACE_ID = "<FUAM workspace GUID>"
-FUAM_LAKEHOUSE_ID = "<FUAM Lakehouse GUID>"
 CAPACITY_ID_OR_NAME = ""  # All; or one name/GUID; or '["Capacity A", "Capacity B"]'
 RANKING_METRIC = "cu_seconds"
 LOOKBACK_DAYS = "7"
 TOP_N = "5"
 ```
 
-Its **advanced wiring** (FAR workspace, output Lakehouse, child pipeline and
+Its **advanced wiring** (review workspace, output Lakehouse, child pipeline and
 repository settings) is stamped by base setup. Normally leave that section alone.
-The FAR output Lakehouse remains attached; it is not the FUAM source Lakehouse.
+The output Lakehouse remains attached; it is not the FUAM source Lakehouse.
 FUAM is the supported monitoring source.
 
 When base setup deploys the optional owner report, it stamps the existing 07
 notebook's GUID into **`OWNER_ACCESS_NOTEBOOK_ID`** in 06's advanced wiring.
 Normally leave it unchanged. A blank value omits post-review access sync;
-a nonblank value must identify an existing notebook in the FAR workspace or
+a nonblank value must identify an existing notebook in the review workspace or
 setup fails. This is a setup binding, not a parent run parameter, and does not
-change the standalone FAR pipeline. Rerun base setup and then all cells of 06
+change the standard review pipeline. Rerun base setup and then all cells of 06
 to apply this binding to an existing targeted parent.
 
 1. Run the notebook. It creates a selection **Runner**, a **Completion** notebook
    that prepares email records only, and a native same-workspace targeted-review
    parent. On a new deployment the parent's native email activity is inactive,
    has no connection, and `NOTIFICATIONS_ENABLED="false"`. Setup sends no messages.
-   The original four-stage FAR pipeline is not modified.
+   The original four-stage review pipeline is not modified.
 2. **Success:** the output lists the parent pipeline, selection runner and
    completion notebook IDs, plus the bound access-sync notebook ID when enabled.
    In **Review selected workspaces**, confirm **Sync owner access** follows
@@ -95,14 +98,14 @@ Before upgrading, pause the parent schedule and let active runs finish. Rerun
 **all cells** of 06 against the intended repository branch/ref, including after a
 partial deployment. Keep the same artifact names and IDs: setup updates the
 existing parent and stage notebooks. There is
-no need to delete the FAR Lakehouse or standalone pipeline. Do not
+no need to delete the Lakehouse or standalone pipeline. Do not
 run the parent until 06 completes: both stage notebooks and the parent parameter
 contracts must be upgraded together.
 
 Setup validates saved email settings before provisioning. Only one operator
 should edit or redeploy the parent at a time.
 
-Both stage notebooks run the deployed code stored in the FAR Lakehouse.
+Both stage notebooks run the deployed code stored in the Lakehouse.
 No repository download or GitHub token is required at run time.
 The deployment identity needs write access to that Lakehouse; the execution
 identity needs read access. Treat these runtime packages as executable artifacts:
@@ -118,8 +121,6 @@ parameter contract.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `FUAM_WORKSPACE_ID` | blank | Workspace containing FUAM monitoring data |
-| `FUAM_LAKEHOUSE_ID` | blank | Explicit FUAM source Lakehouse; required if its workspace has more than one Lakehouse |
 | `CAPACITY_ID_OR_NAME` | blank | One GUID/exact FUAM capacity name, or a JSON list of names/GUIDs; blank ranks across all capacities |
 | `RANKING_METRIC` | `cu_seconds` | CU-seconds or `recorded_throttling_minutes`; never substitutes operation counts or another metric |
 | `LOOKBACK_DAYS` | `7` | Last 1-28 complete reporting dates ending before today's UTC date; FUAM retention still applies |
@@ -135,16 +136,16 @@ unrestricted selection.
 After owner live acceptance, manually set `FAR_REPORT_URL` to the **owner
 report**, rather than granting recipients access to the central report.
 The owner model supports the native email URL filter without exposing the
-central risk table or full FAR score. URL filters are navigation, never authorization.
+central risk table or full review score. URL filters are navigation, never authorization.
 
 Workspace, pipeline and runner IDs are deployment wiring, not user-overridable run
-parameters. All other FAR parameters, including engagement labels, collection
+parameters. All other review parameters, including engagement labels, collection
 flags and analysis thresholds, pass through to the child.
 
 Setting `NOTIFICATIONS_ENABLED="true"` alone does not configure email. Enabled
 runs validate `FAR_REPORT_URL`; if the email activity is reached before it
 is activated, it fails rather than silently appearing sent. Configure the connection
-and optional sender in the parent's native activity, not the FAR child.
+and optional sender in the parent's native activity, not the review child.
 
 Enter ordinary strings in the parent parameters, leaving optional values blank
 when appropriate. Run the parent rather than its stage notebooks directly; it
@@ -160,7 +161,7 @@ schedule overrides, and the source/selection logs:
 - `source_rows` counts aggregated workspace rows, not raw operations. Zero points
   to the source or date window; nonzero rows with no `selected_workspaces` point
   to zero metrics, exclusions or a restrictive `WORKSPACE_IDS` allow-list.
-- Clear the parent's allow-list for automatic top-N selection. The FAR hosting
+- Clear the parent's allow-list for automatic top-N selection. The review hosting
   workspace and FUAM workspace are always excluded, even if allow-listed.
 
 ### Select capacities
@@ -211,8 +212,8 @@ parent run.
 2. **Review selected workspaces** is a nonempty-scope condition. Open its true
    branch to see **Invoke FAR**, a native same-workspace `ExecutePipeline`
    activity with `waitOnCompletion=true`, followed by **Record FAR run ID**.
-   When 07 is bound, this branch also runs **Sync owner access** after FAR
-   succeeds and before notifications. Normal FAR has no such added step.
+   When 07 is bound, this branch also runs **Sync owner access** after the review
+   succeeds and before notifications. The standard review has no such added step.
 3. **Notify owners if enabled** requires a successful child run and
    `NOTIFICATIONS_ENABLED="true"`. Its branch runs **Prepare owner emails**
    (the Completion notebook), then **Store owner emails** to save the complete
@@ -226,7 +227,7 @@ parent run.
    Mail retry is `0`.
 
 The native invocation needs no additional Fabric connection, service principal,
-or workspace identity. Selection finishes before FAR starts. The generated
+or workspace identity. Selection finishes before the review starts. The generated
 activity timeout is 12 hours with zero automatic retries.
 Inspect the parent's **Invoke FAR** activity in monitoring after
 timeout or cancellation rather than assuming the child stopped.
@@ -268,7 +269,7 @@ capacity overload. Missing columns, permissions or Lakehouses fail explicitly.
 **Why no direct Capacity Metrics adapter:** Microsoft states that
 [custom consumption of the Capacity Metrics semantic model is unsupported](https://learn.microsoft.com/fabric/enterprise/metrics-app#considerations-and-limitations).
 Targeted review does not use that model. If FUAM is unavailable, configure it
-first or run standalone FAR.
+first or run the standard review.
 
 ## Selection and failure behavior
 
@@ -282,13 +283,16 @@ first or run standalone FAR.
   absent policy fields alone do not exclude a matched workspace.
   These exclusions happen before `TOP_N`, so the next eligible workspaces fill
   the slots within the existing capacity and allow-list scope. If none remain,
-  FAR and email are safely skipped. Inventory authentication, service, malformed
+  the review and email are safely skipped. Inventory authentication, service, malformed
   response, or pagination errors stop selection rather than fabricating emptiness.
-- Exclude the FAR hosting workspace (`CHILD_WORKSPACE_ID`) and the configured
+- Exclude the review hosting workspace (`CHILD_WORKSPACE_ID`) and the configured
   FUAM workspace (`FUAM_WORKSPACE_ID`) by GUID before ranking and taking `TOP_N`.
+  Capacity Metrics app workspaces are also excluded, identified by their standard
+  linked report and semantic-model metadata, not the workspace name.
   These exclusions override the candidate allow-list and apply to both metrics;
-  remaining eligible workspaces fill the available slots. No name-based discovery
-  or additional parameter is needed. Standalone FAR's scope is unchanged.
+  remaining eligible workspaces fill the available slots. No additional parameter
+  is needed. The FAR hosting workspace and Capacity Metrics app workspaces are
+  also excluded from standard reviews, even when explicitly listed in `WORKSPACE_IDS`.
 - Rank by a positive metric, descending, with workspace GUID as a deterministic
   tie-breaker. Aggregate multiple rows for the same workspace.
 - FUAM metric groups with a null, empty or whitespace-only `WorkspaceId` cannot
@@ -296,15 +300,15 @@ first or run standalone FAR.
   is saved as `unattributed_workspace_groups` in the selection audit. Their
   consumption is not assigned by workspace name or redistributed to other
   workspaces. Nonblank malformed IDs still stop selection. If no eligible
-  workspaces remain, FAR and notifications are skipped.
+  workspaces remain, the review and notifications are skipped.
 - High consumption is a selection signal, **not proof of poor performance**.
   Throttling attribution is different from identifying which workload caused a
   capacity overload.
 - Query/authentication/schema errors stop the parent. They must never be
   reinterpreted as an empty successful query or silently downgrade to CU ranking.
 - An empty selection is a logged skip. It never passes an empty workspace list to
-  FAR (which would otherwise mean tenant-wide collection).
-- The parent invokes FAR with a native pipeline activity and waits for completion.
+  the review (which would otherwise mean tenant-wide collection).
+- The parent invokes the review with a native pipeline activity and waits for completion.
   Success-only dependencies gate email preparation; a failed/cancelled child
   cannot trigger notifications. The Completion notebook validates the recorded
   selection and resolves owners; it does not make a separate child-status request.
@@ -316,7 +320,7 @@ first or run standalone FAR.
   alone does not prove deletion. Reconcile the prior run and start a new parent
   run after correction rather than bypassing the notification replay guard.
 - Avoid overlapping scheduled runs. Test on the intended capacity before
-  scheduling, including source access and the existing FAR stages.
+  scheduling, including source access and the existing review stages.
 - Automatic activity retries are disabled. A saved selection blocks re-execution
   of the selection stage for the same parent ID. An email-preparation replay
   guard blocks re-preparation for that parent run. These safeguards are
@@ -327,7 +331,7 @@ Audit records are in `Files/far-orchestration/runs/<parent-run-id>.json`. They r
 the selected workspace IDs and metric values, source, lookback and fixed child
 pipeline IDs. **Fabric pipeline monitoring is authoritative for child status.**
 With notifications disabled, the selection audit remains `selected`, even after
-FAR succeeds; this does not mean the child is still running. Enabled completion
+the review succeeds; this does not mean the child is still running. Enabled completion
 preparation adds the native `child_run_id` and preparation state. Records do not store
 the complete parameter dictionary, tokens, or raw source operation rows.
 
@@ -363,7 +367,7 @@ For owners, use the validated **Workspace Owner report**, whose RLS restricts it
 curated evidence to authorized workspaces. Recipients can select **Request access**
 on the linked report, or contact its owner if unavailable. Operators must complete
 [reader approval](workspace-owner-report.md#approve-each-new-reader).
-Links never grant access. Do not grant FAR workspace membership, including
+Links never grant access. Do not grant review-workspace membership, including
 Viewer, raw Lakehouse/SQL access or Build to make the link work.
 
 Recipients are **current direct-user workspace administrators** (`User`/`Admin`),
@@ -387,10 +391,10 @@ not just `TOP_N` or the current recipients. Sync does not discover the full tena
 or backfill governance history.
 
 When 06 is bound to the existing 07 notebook, **only the targeted parent** runs
-access sync after successful FAR/Gold and before preparing email. It runs even
+access sync after successful the review/Gold and before preparing email. It runs even
 when notifications are disabled; an empty selection skips it. Sync failure
 blocks email preparation. Without that binding, the parent retains its original
-flow. The normal FAR pipeline remains unchanged.
+flow. The the standard review pipeline remains unchanged.
 
 New workspaces have no grants until sync succeeds. Grants expire within 24 hours,
 so weekly reviews cannot replace daily sync. Avoid overlapping daily, targeted
@@ -423,10 +427,10 @@ pipeline UI and preserve its generated dynamic fields.
 
 Before enabling a recurring schedule, verify the deployment in your environment:
 
-1. Confirm standalone FAR produces a report for an explicit test workspace.
+1. Confirm the standard review produces a report for an explicit test workspace.
 2. Run the parent with a candidate allow-list and notifications off. Reconcile
    the selected IDs, ranking metric and date window with FUAM, and confirm the
-   child receives the intended workspace IDs and FAR parameters.
+   child receives the intended workspace IDs and review parameters.
 3. If enabling email, complete the scoped delivery test in the deployment guide.
    Check recipient report access as well as mail activity success.
 4. Record the deployed Git ref/SHA and verify scheduled execution with the

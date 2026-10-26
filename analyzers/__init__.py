@@ -10,7 +10,7 @@ to `output/findings.json`.
 Finding shape:
     {
         "rule_id": "TENANT-001",
-        "dimension": "tenant_settings",
+        "dimension": "architecture",
         "severity": "high",
         "status": "fail" | "pass" | "info",
         "title": "...",

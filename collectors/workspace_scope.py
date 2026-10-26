@@ -5,9 +5,45 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Iterable
 from collectors._http import HttpError
+
+_CAPACITY_METRICS_NAMES = frozenset({
+    "fabric capacity metrics", "microsoft fabric capacity metrics", "power bi premium capacity metrics",
+})
+
+
+def review_workspace_id() -> str:
+    """The workspace this review runs in. Each Fabric stage notebook sets FAR_REVIEW_WORKSPACE_ID for it and its children."""
+    return os.environ.get("FAR_REVIEW_WORKSPACE_ID", "").strip().lower()
+
+
+def is_review_workspace(workspace: dict) -> bool:
+    """The review's own workspace is never part of the estate under review."""
+    own = review_workspace_id()
+    identity = str(workspace.get("id") or workspace.get("objectId") or "").strip().lower()
+    return bool(own and identity == own)
+
+
+def is_capacity_metrics_workspace(workspace: dict) -> bool:
+    """Recognize the standard metrics app by its linked report/model, not the workspace name."""
+    if isinstance(workspace.get("isCapacityMetricsWorkspace"), bool):
+        return workspace["isCapacityMetricsWorkspace"]
+    models = {
+        str(model["id"]).strip().casefold()
+        for model in workspace.get("datasets") or []
+        if isinstance(model, dict) and model.get("id")
+        and str(model.get("name") or "").strip().casefold() in _CAPACITY_METRICS_NAMES
+    }
+    return any(
+        isinstance(report, dict)
+        and str(report.get("datasetId") or "").strip().casefold() in models
+        and str(report.get("name") or "").strip().casefold().removeprefix("[app] ").strip()
+        in _CAPACITY_METRICS_NAMES
+        for report in workspace.get("reports") or []
+    )
 
 
 def is_admin_workspace(workspace: dict) -> bool:
@@ -24,10 +60,11 @@ def is_excluded_capacity(capacity: dict) -> bool:
 
 
 def is_excluded_workspace(workspace: dict, capacity_ids=(), *, operational: bool = False) -> bool:
-    """Exclude only positive metadata, never names, absent fields or user licenses."""
+    """Exclude positive policy metadata, never workspace names or user licenses."""
     state = str(workspace.get("state") or "").strip().casefold()
     return (
-        (not operational and is_admin_workspace(workspace))
+        is_review_workspace(workspace)
+        or (not operational and (is_admin_workspace(workspace) or is_capacity_metrics_workspace(workspace)))
         or state in {"deleted", "removing", "deleting", "inactive", "notactive"}
         or workspace.get("isOnDedicatedCapacity") is False
         or workspace.get("isOnPremiumPerUserCapacity") is True
@@ -87,10 +124,12 @@ def excluded_capacity_ids(raw_dir: Path) -> set[str]:
 
 def _persist_scope(raw_dir: Path, workspaces: list[dict], capacities: list[dict]) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
-    fields = ("id", "objectId", "type", "state", "capacityId", "capacitySku",
+    fields = ("id", "objectId", "type", "state", "capacityId", "capacitySku", "isCapacityMetricsWorkspace",
               "isOnDedicatedCapacity", "isOnPremiumPerUserCapacity")
     identities: dict[str, dict] = {}
     for w in workspaces:
+        if "datasets" in w or "reports" in w:
+            w = {**w, "isCapacityMetricsWorkspace": is_capacity_metrics_workspace(w)}
         identity = w.get("id") or w.get("objectId")
         if identity:
             key = str(identity).lower()
@@ -142,6 +181,7 @@ def excluded_workspace_identities(workspaces: Iterable[dict]) -> list[dict]:
               "isOnDedicatedCapacity", "isOnPremiumPerUserCapacity")
     return [
         {"id": workspace.get("id") or workspace.get("objectId"),
+         **({"isCapacityMetricsWorkspace": True} if is_capacity_metrics_workspace(workspace) else {}),
          **{key: workspace[key] for key in fields if key in workspace}}
         for workspace in workspaces
         if is_excluded_workspace(workspace) and (workspace.get("id") or workspace.get("objectId"))
@@ -153,10 +193,13 @@ def excluded_workspace_ids(raw_dir: Path, *, operational: bool = False) -> set[s
     workspaces, catalog = _scope_records(raw_dir)
     capacities = {str(c.get("id") or c.get("capacityId") or "").lower()
                   for c in catalog if is_excluded_capacity(c)}
-    return {str(w.get("id") or w.get("objectId")).strip().lower()
-            for w in workspaces
-            if is_excluded_workspace(w, capacities, operational=operational)
-            and (w.get("id") or w.get("objectId"))}
+    excluded = {str(w.get("id") or w.get("objectId")).strip().lower()
+                for w in workspaces
+                if is_excluded_workspace(w, capacities, operational=operational)
+                and (w.get("id") or w.get("objectId"))}
+    if own := review_workspace_id():
+        excluded.add(own)
+    return excluded
 
 
 def filter_review_payload(data: Any, raw_dir: Path) -> Any:

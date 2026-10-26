@@ -61,7 +61,7 @@ def _members(headers: Headers, gateway_id: str) -> List[Dict[str, Any]]:
 
 
 @record_collection_failure("gateways.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     provider = get_default_provider()
     headers = lambda: provider.headers(scope=POWERBI_SCOPE)
 
@@ -117,7 +117,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

@@ -54,12 +54,6 @@ class FabricApiTests(unittest.TestCase):
             self.client.list_items(WS, "Notebook")
         self.transport.assert_called_once()
 
-    def test_no_ambiguous_pipeline_submission_retry(self):
-        self.transport.return_value = response(503)
-        with self.assertRaises(RuntimeError):
-            self.client.start_pipeline(WS, ITEM, {"WORKSPACE_IDS": WS})
-        self.transport.assert_called_once()
-
     def test_validation_error_retains_response_without_logging_service_payload(self):
         failed = response(400, {
             "requestId": ITEM, "errorCode": "BadRequest",
@@ -90,14 +84,6 @@ class FabricApiTests(unittest.TestCase):
                 self.assertIn("error code unknown", str(caught.exception))
                 self.assertNotIn("sensitive-test-value", str(caught.exception))
                 self.assertNotIn("unsafe", str(caught.exception))
-
-    def test_pipeline_request_parameters_and_location(self):
-        location = BASE + "/workspaces/" + WS + "/items/" + ITEM + "/jobs/instances/" + ITEM
-        self.transport.return_value = response(202, headers={"Location": location})
-        self.assertEqual(self.client.start_pipeline(WS, ITEM, {"WORKSPACE_IDS": WS}), location)
-        payload = self.transport.call_args.kwargs["json"]
-        self.assertEqual(payload, {"parameters": [{"name": "WORKSPACE_IDS", "type": "Text", "value": WS}]})
-        self.assertFalse(self.transport.call_args.kwargs["allow_redirects"])
 
     def test_empty_update_operation_result_is_valid(self):
         self.transport.side_effect = [
@@ -269,12 +255,57 @@ class FabricApiTests(unittest.TestCase):
                 self.client.complete(response(202, headers={"Location": location}))
         self.transport.assert_not_called()
 
-    def test_failed_or_cancelled_child_is_not_success(self):
-        for status in ("Failed", "Cancelled", "Deduped"):
-            with self.subTest(status=status):
-                self.transport.return_value = response(data={"status": status})
-                with self.assertRaises(RuntimeError):
-                    self.client.wait_pipeline(BASE + "/job", 60)
+
+
+class RefreshModelTests(unittest.TestCase):
+    """The deploy step frames the model once so a table added by a release is queryable at once."""
+
+    @staticmethod
+    def http(post, *gets):
+        client = Mock()
+        client.post.return_value = post
+        client.get.side_effect = list(gets)
+        return client
+
+    @staticmethod
+    def reply(status, location=None, body=None):
+        return Mock(status_code=status, headers={"Location": location} if location else {}, json=Mock(return_value=body or {}))
+
+    def refresh(self, client, **kw):
+        from reports.powerbi.deploy import refresh_model
+        with patch("reports.powerbi.deploy.time.sleep"):
+            return refresh_model(client, {"Authorization": "x"}, WS, ITEM, poll_seconds=0, **kw)
+
+    def test_a_full_refresh_is_requested_and_waited_for(self):
+        where = f"https://api.powerbi.com/v1.0/myorg/groups/{WS}/datasets/{ITEM}/refreshes/abc"
+        client = self.http(self.reply(202, where), self.reply(200, body={"status": "Unknown"}), self.reply(200, body={"status": "Completed"}))
+        self.assertEqual(self.refresh(client), "Model refreshed.")
+        url = client.post.call_args.args[0]
+        self.assertEqual(url, f"https://api.powerbi.com/v1.0/myorg/groups/{WS}/datasets/{ITEM}/refreshes")
+        self.assertEqual(client.post.call_args.kwargs["json"], {"type": "full"})
+        self.assertEqual(client.get.call_args.args[0], where)
+
+    def test_a_failed_or_refused_refresh_is_reported_and_never_raised(self):
+        where = "https://api.powerbi.com/refreshes/abc"
+        failed = self.refresh(self.http(self.reply(202, where), self.reply(200, body={"status": "Failed"})))
+        self.assertIn("ended as Failed", failed)
+        self.assertIn("HTTP 403", self.refresh(self.http(self.reply(403))))
+        broken = Mock()
+        broken.post.side_effect = ConnectionError("down")
+        self.assertIn("not started (ConnectionError)", self.refresh(broken))
+
+    def test_a_slow_refresh_does_not_hold_setup_up(self):
+        where = "https://api.powerbi.com/refreshes/abc"
+        client = self.http(self.reply(202, where), *[self.reply(200, body={"status": "Unknown"})] * 50)
+        with patch("reports.powerbi.deploy.time.monotonic", side_effect=[0, 1, 2, 999]):
+            self.assertEqual(self.refresh(client), "Model refresh started.")
+
+    def test_setup_refreshes_the_model_right_after_deploying_it(self):
+        cell = next("".join(c["source"]) for c in json.loads((Path(__file__).resolve().parents[1] / "fabric" / "setup.ipynb")
+                    .read_text(encoding="utf-8"))["cells"] if "refresh_model" in "".join(c["source"]))
+        self.assertLess(cell.index('mid = upsert_definition(wid, "semanticModels"'), cell.index("refresh_model(requests, _H(), wid, mid)"))
+        self.assertLess(cell.index("refresh_model(requests, _H(), wid, mid)"), cell.index("report_definition(mid)"))
+        self.assertIn("except Exception as _e", cell[cell.index("refresh_model"):cell.index("report_definition(mid)")])
 
 
 if __name__ == "__main__":

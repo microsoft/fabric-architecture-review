@@ -197,34 +197,3 @@ class FabricClient:
         parts = result["definition"]["parts"]
         part = next(p for p in parts if p["path"] == "pipeline-content.json")
         return json.loads(base64.b64decode(part["payload"], validate=True))
-
-    def start_pipeline(self, workspace_id: str, pipeline_id: str, parameters: dict[str, str]) -> str:
-        response = self.request(
-            "POST",
-            f"/workspaces/{guid(workspace_id)}/items/{guid(pipeline_id)}/jobs/Pipeline/instances",
-            json_body={"parameters": [
-                {"name": name, "value": value, "type": "Text"}
-                for name, value in parameters.items()
-            ]},
-        )
-        location = response.headers.get("Location")
-        if response.status_code != 202 or not location:
-            raise RuntimeError("Pipeline submission did not return HTTP 202 and a job Location; do not retry blindly.")
-        return location
-
-    def wait_pipeline(self, location: str, timeout_seconds: int) -> dict[str, Any]:
-        deadline = self.clock() + timeout_seconds
-        while self.clock() < deadline:
-            result = self.get_json(location)
-            status = result.get("status")
-            if status == "Completed":
-                return result
-            if status in ("Failed", "Cancelled", "Canceled", "Deduped"):
-                raise RuntimeError(f"Child FAR pipeline {status}: {result.get('failureReason')}")
-            if status not in ("NotStarted", "InProgress", "Running"):
-                raise RuntimeError(f"Unexpected child pipeline status: {status!r}")
-            self.sleep(30)
-        raise TimeoutError(
-            "Child FAR pipeline is still pending at the parent timeout. "
-            "It was not cancelled; inspect the recorded job Location before starting another run."
-        )

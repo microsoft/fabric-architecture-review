@@ -8,17 +8,23 @@ set -uo pipefail
 # cd to repo root (two levels up: scripts/bash -> scripts -> repo root)
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-# Load .env (KEY=VALUE lines, skipping comments/blank lines) into the environment.
-if [[ -f .env ]]; then
+# Load .env.far (KEY=VALUE lines, skipping comments/blank lines) into the environment.
+if [[ -f .env.far ]]; then
     set -a
     while IFS='=' read -r key value; do
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
         export "${key// /}=${value}"
-    done < <(grep -E '^[[:space:]]*[^#].*=' .env)
+    done < <(grep -E '^[[:space:]]*[^#].*=' .env.far)
     set +a
 fi
 
-OUT_DIR="${OUTPUT_DIR:-output}"
+OUT_DIR="${OUTPUT_DIR:-output/far}"
+if [[ ! -f "$OUT_DIR/review_config.json" ]]; then
+    echo "Review configuration not found. Run FAR collection first." >&2
+    exit 1
+fi
+export FAR_CONFIG_SNAPSHOT="$PWD/$OUT_DIR/review_config.json"
+if [[ "$OUT_DIR" = /* ]]; then export FAR_CONFIG_SNAPSHOT="$OUT_DIR/review_config.json"; fi
 RAW_DIR="$OUT_DIR/raw"
 mkdir -p "$OUT_DIR"
 echo "Output directory: $OUT_DIR"
@@ -31,7 +37,7 @@ invoke_analyzer() {
     echo ""
     echo "==> $label"
     expected_outputs+=("$OUT_DIR/$findings_name")
-    if python -m "$module" --raw-dir "$RAW_DIR" --out "$OUT_DIR/$findings_name"; then
+    if python -m "$module" --raw-dir "$RAW_DIR" --out-dir "$OUT_DIR"; then
         return 0
     else
         local rc=$?
@@ -40,18 +46,7 @@ invoke_analyzer() {
     fi
 }
 
-invoke_analyzer "analyzers.tenant_settings_review"        "Tenant settings baseline"        "findings_tenant_settings.json"
-invoke_analyzer "analyzers.architecture_review"           "Architecture review"             "findings_architecture.json"
-invoke_analyzer "analyzers.performance_review"            "Performance review"              "findings_performance.json"
-invoke_analyzer "analyzers.dax_review"                    "Metadata-only DAX review"        "findings_dax.json"
-invoke_analyzer "analyzers.dataflow_review"               "Dataflow Gen2 static M review"   "findings_dataflows.json"
-invoke_analyzer "analyzers.semantic_model_storage_review" "Semantic model storage-mode / DirectLake feasibility" "findings_storage_mode.json"
-invoke_analyzer "analyzers.governance_review"             "Governance review"               "findings_governance.json"
-invoke_analyzer "analyzers.operational_excellence_review" "Operational Excellence review"   "findings_operational_excellence.json"
-invoke_analyzer "analyzers.security_review"               "Security review"                 "findings_security.json"
-invoke_analyzer "analyzers.cost_review"                   "Cost review"                     "findings_cost.json"
-invoke_analyzer "analyzers.notebook_code_review"          "Notebook code smells (heuristic)" "findings_notebook_code.json"
-invoke_analyzer "analyzers.best_practices_review"         "Best practices (BPA / Direct Lake / Delta / capacity)" "findings_best_practices.json"
+invoke_analyzer "analyzers.far_review" "FAR architectural profile" "findings_architecture.json"
 
 invalid_outputs=()
 for path in "${expected_outputs[@]}"; do

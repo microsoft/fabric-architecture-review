@@ -16,6 +16,10 @@ Endpoints:
   - GET https://api.fabric.microsoft.com/v1/workspaces/{id}/roleAssignments (member)
   - GET https://api.fabric.microsoft.com/v1/workspaces/{id}/items  (member)
 
+When the connected FUAM is passed in (``fuam_reader``), items and members are read from it first
+and the endpoints above are called only for the workspaces, or the part of a workspace, that FUAM
+does not cover. Each workspace records where its items and members came from.
+
 DATA SAFETY: Item names, types, IDs, capacity assignment, and role assignments
 only. Item bodies / contents are never read.
 """
@@ -25,12 +29,13 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from collectors._common import filter_workspaces_by_scope, get_scope_workspace_ids, record_collection_failure
 from collectors.workspace_scope import excluded_workspace_identities, resolve_workspace_scope, filter_review_payload
 from collectors._http import HttpError, collect_value, collect_workspace_groups
 from collectors.auth import FABRIC_SCOPE, POWERBI_SCOPE, get_default_provider
+from collectors.fuam_inventory import FuamInventory
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
 FAB = "https://api.fabric.microsoft.com/v1"
@@ -89,7 +94,10 @@ def _list_items(provider, workspace_id: str) -> List[Dict[str, Any]]:
 
 
 @record_collection_failure("workspace_inventory.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(
+    output_dir: str | os.PathLike = "output/far/raw",
+    fuam_reader: Callable[[List[str]], FuamInventory] | None = None,
+) -> Path:
     provider = get_default_provider()
     workspaces, is_admin = _list_workspaces(provider)
     workspaces = resolve_workspace_scope(
@@ -105,6 +113,11 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     workspaces = filter_review_payload({"workspaces": workspaces}, Path(output_dir))["workspaces"]
     print(f"Workspace inventory: {len(workspaces)} workspace(s) in review scope (admin={is_admin}).")
 
+    fuam = fuam_reader([str(w["id"]) for w in workspaces if w.get("id")]) if fuam_reader else None
+    if fuam is not None and not fuam.usable:
+        print(f"Workspace inventory: FUAM unusable ({fuam.reason}); every workspace is read from the API.")
+    from_fuam = {"items": 0, "users": 0}
+    from_api = {"items": 0, "users": 0}
     enriched: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
     workspace_list_complete = True
@@ -130,12 +143,22 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             "description": ws.get("description"),
         }
         for component in ("users", "items"):
+            held = (fuam.users if component == "users" else fuam.items).get(str(wsid).lower()) if fuam and fuam.usable else None
+            if held:
+                row[component] = held
+                row[f"{component}CollectionStatus"] = "collected"
+                row[f"{component}DataSource"] = "fuam"
+                from_fuam[component] += 1
+                continue
             try:
                 row[component] = (
                     _list_users(provider, wsid, is_admin) if component == "users"
                     else _list_items(provider, wsid)
                 )
                 row[f"{component}CollectionStatus"] = "collected"
+                if fuam is not None:
+                    row[f"{component}DataSource"] = "api"
+                from_api[component] += 1
             except HttpError as exc:
                 row[component] = None
                 row[f"{component}CollectionStatus"] = "unavailable"
@@ -148,6 +171,18 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         if i % 25 == 0:
             print(f"  ... {i}/{len(workspaces)}")
 
+    summary: Dict[str, Any] = {}
+    if fuam is not None:
+        used = fuam.usable and bool(from_fuam["items"] or from_fuam["users"])
+        summary = {"dataSource": "fuam+api" if used else "api", "inventorySource": {
+            "fuamObservedAt": fuam.observed_at, "fromFuam": from_fuam, "fromApi": from_api,
+        }}
+        if not used:
+            summary["reason"] = fuam.reason or "no_workspace_covered"
+            summary["fallback"] = "full_api_call"
+        print(f"Workspace inventory: items from FUAM {from_fuam['items']} / API {from_api['items']}, "
+              f"members from FUAM {from_fuam['users']} / API {from_api['users']}.")
+
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     target = out / "workspace_inventory.json"
@@ -156,7 +191,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
             "adminMode": is_admin, "workspaces": enriched,
             "excludedWorkspaces": excluded,
             "workspaceListComplete": workspace_list_complete, "collectionComplete": not errors,
-            "collectionErrors": errors,
+            "collectionErrors": errors, **summary,
         }, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -166,7 +201,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

@@ -29,6 +29,7 @@ def provision(
     repo_dir: Path, name: str,
     defaults: dict[str, str], context: dict[str, Any] | None = None,
     owner_access_notebook_id: str = "",
+    connections_library: str = "",
 ) -> dict[str, str]:
     if context is None:
         import notebookutils
@@ -42,6 +43,10 @@ def provision(
     if not name.strip():
         raise ValueError("PARENT_PIPELINE_NAME is required.")
     options = {**DEFAULTS, **defaults, "NOTIFICATIONS_ENABLED": "false"}
+    if connections_library:
+        import notebookutils
+        from orchestration.review_config import targeting_source
+        options.update(targeting_source(notebookutils.variableLibrary.getLibrary, connections_library))
     options["CAPACITY_ID_OR_NAME"] = capacity_selector(options["CAPACITY_ID_OR_NAME"])
     validate_config(options)
     validate_source(options)
@@ -49,6 +54,7 @@ def provision(
         client, workspace_id=guid(workspace_id), lakehouse_id=guid(lakehouse_id),
         child_pipeline_id=guid(child_pipeline_id), repo_dir=repo_dir, name=name,
         defaults=options,
+        **({"connections_library": connections_library} if connections_library else {}),
         **({"owner_access_notebook_id": owner_access_notebook_id}
            if owner_access_notebook_id else {}),
     )

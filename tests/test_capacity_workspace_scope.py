@@ -6,10 +6,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from analyzers._common import load_raw
+from tests._raw import load_raw
 from collectors import (
-    capacity_metrics, capacity_metrics_app, dataflows, deployment_pipelines,
-    git_integration, pipelines_notebooks, realtime_intelligence, scanner_api,
+    capacity_metrics, git_integration, pipelines_notebooks, scanner_api,
     semantic_model_definitions, semantic_models, workspace_inventory,
 )
 from collectors._common import filter_workspaces_by_scope, load_workspace_inventory
@@ -19,7 +18,6 @@ from collectors.workspace_scope import (
     is_excluded_capacity, is_excluded_workspace, resolve_workspace_scope,
 )
 from reports.gold_layer import build_gold
-from reports.execution_history import build_execution_evidence
 
 SHARED, PPU, PP3, DELETED, DEDICATED, UNKNOWN = [
     f"aaaaaaaa-0000-4000-8000-{i:012d}" for i in range(1, 7)
@@ -173,69 +171,24 @@ def test_semantic_models_use_eligible_workspace_endpoints_not_global_catalog(tmp
 
     monkeypatch.setattr(semantic_models, "collect_value", listing)
     monkeypatch.setattr(semantic_models, "collect_workspace_groups", listing)
-    refresh = Mock(return_value=[])
-    monkeypatch.setattr(semantic_models, "_refresh_history", refresh)
     payload = json.loads(semantic_models.collect(tmp_path).read_text())
     assert [d["workspaceId"] for d in payload["datasets"]] == [DEDICATED, UNKNOWN]
-    assert [c.args[1] for c in refresh.call_args_list] == [DEDICATED, UNKNOWN]
 
 
-def test_pp3_capacity_receives_no_refreshable_or_workload_requests(tmp_path, monkeypatch):
+def test_pp3_capacity_is_excluded_from_capacity_inventory(tmp_path, monkeypatch):
     write(tmp_path / "workspace_inventory.json", {"workspaces": ROWS})
     monkeypatch.setattr(capacity_metrics, "get_default_provider", Mock())
-    refresh, workload = Mock(return_value=[]), Mock(return_value=[])
-    monkeypatch.setattr(capacity_metrics, "_refreshables", refresh)
-    monkeypatch.setattr(capacity_metrics, "_workloads", workload)
     payload = json.loads(capacity_metrics.collect(tmp_path).read_text())
     assert [cap["id"] for cap in payload["capacities"]] == ["real"]
     assert payload["excludedCapacities"] == [CAPACITIES[0]]
-    assert refresh.call_args.args[1] == workload.call_args.args[1] == "real"
-    assert refresh.call_count == workload.call_count == 1
 
 
-@pytest.mark.parametrize("override", [False, True])
-def test_metrics_source_discovery_never_queries_excluded_models(tmp_path, monkeypatch, override):
-    if override:
-        monkeypatch.setenv("METRICS_APP_WORKSPACE_ID", PP3)
-        monkeypatch.setenv("METRICS_APP_DATASET_ID", "metrics")
-    calls = []
-
-    def listing(url, *_, **kwargs):
-        calls.append(url)
-        assert not url.endswith("/admin/datasets")
-        if url.endswith("/groups"):
-            return ROWS
-        assert f"/groups/{DEDICATED}/datasets" in url
-        return [{"id": "metrics", "name": "Fabric Capacity Metrics"}]
-
-    monkeypatch.setattr(capacity_metrics_app, "collect_value", listing)
-    monkeypatch.setattr(capacity_metrics_app, "collect_workspace_groups", listing)
-    monkeypatch.setattr(capacity_metrics_app, "get_default_provider", Mock())
-    execute = Mock(return_value={"ok": True, "rowCount": 0, "rows": []})
-    monkeypatch.setattr(capacity_metrics_app, "_execute_dax", execute)
-    payload = json.loads(capacity_metrics_app.collect(tmp_path).read_text())
-    if override:
-        execute.assert_not_called()
-        assert not payload["datasetLocated"]
-    else:
-        assert execute.call_count == len(capacity_metrics_app.PROBES)
-        assert all(c.args[1] == DEDICATED for c in execute.call_args_list)
-
-
-def test_legacy_inputs_and_explicit_dataflow_ids_cannot_restore_exclusions(tmp_path, monkeypatch):
+def test_legacy_inputs_cannot_restore_exclusions(tmp_path):
     write(tmp_path / "capacity_metrics.json", {"capacities": CAPACITIES})
     write(tmp_path / "workspace_inventory.json", {"workspaces": ROWS})
     assert [w["id"] for w in load_workspace_inventory(tmp_path)] == [DEDICATED, UNKNOWN]
     for module in (pipelines_notebooks, git_integration):
         assert [w[0] for w in module._load_workspaces(tmp_path)] == [DEDICATED, UNKNOWN]
-    assert [w["id"] for w in realtime_intelligence._list_workspace_ids(tmp_path)] == [DEDICATED, UNKNOWN]
-    monkeypatch.setenv("WORKSPACE_IDS", ",".join([SHARED, PPU, PP3, DELETED]))
-    provider = Mock(side_effect=AssertionError("Excluded workspaces must not authenticate"))
-    monkeypatch.setattr(dataflows, "get_default_provider", provider)
-    payload = json.loads(dataflows.collect(tmp_path).read_text())
-    assert payload["collectionComplete"] is True
-    assert not payload["workspaces"]
-    provider.assert_not_called()
 
 
 def test_historical_models_are_not_defined_and_gold_does_not_include_exclusions(tmp_path, monkeypatch):
@@ -259,19 +212,9 @@ def test_historical_models_are_not_defined_and_gold_does_not_include_exclusions(
     assert (tmp_path / "semantic_models.json").read_bytes() == before
 
 
-def test_deployment_artifacts_skip_excluded_stage_and_tenant_records_survive(tmp_path, monkeypatch):
+def test_unscoped_records_survive_the_review_payload_filter(tmp_path):
     write(tmp_path / "workspace_inventory.json", {"workspaces": ROWS})
     write(tmp_path / "capacity_metrics.json", {"capacities": CAPACITIES})
-    monkeypatch.setattr(deployment_pipelines, "get_default_provider", Mock())
-    monkeypatch.setattr(deployment_pipelines, "_list_pipelines", lambda _: [{"id": "pipe"}])
-    monkeypatch.setattr(deployment_pipelines, "_users", lambda *_: [])
-    monkeypatch.setattr(deployment_pipelines, "_stages", lambda *_: [
-        {"workspaceId": PP3, "order": 0}, {"workspaceId": DEDICATED, "order": 1},
-    ])
-    probe = Mock(return_value=[])
-    monkeypatch.setattr(deployment_pipelines, "_stage_artifacts", probe)
-    deployment_pipelines.collect(tmp_path)
-    assert probe.call_count == 1 and probe.call_args.args[2] == 1
     tenant = {"tenantSettings": [{"settingName": "ExportData", "enabled": True}],
               "events": [{"Operation": "UpdateTenantSetting"}]}
     assert filter_review_payload(tenant, tmp_path) == tenant
@@ -293,21 +236,7 @@ def test_historical_unsupported_metrics_source_cannot_supply_analysis_signals(tm
     assert filtered["queries"] == {} and payload["queries"]
 
 
-def test_execution_evidence_scope_failure_is_an_explicit_gap_not_unfiltered_data(tmp_path):
-    (tmp_path / "review_scope.json").write_text("{", encoding="utf-8")
-    write(tmp_path / "semantic_models.json", {
-        "datasets": [{"id": "model", "workspaceId": PP3}],
-        "refreshes": {"model": [{"status": "Completed"}]},
-    })
-    result = build_execution_evidence(tmp_path, "run", "2026-09-23T00:00:00Z")
-    assert result["gold_item_executions"] == []
-    coverage = next(row for row in result["gold_execution_coverage"] if row["item_type"] == "SemanticModel")
-    assert coverage["item_id"] is None
-    assert coverage["collection_status"] != "empty"
-    assert "source_scope_unavailable" in coverage["notice"]
-
-
-@pytest.mark.parametrize("module", [semantic_models, capacity_metrics_app, scanner_api])
+@pytest.mark.parametrize("module", [semantic_models, scanner_api])
 def test_required_scope_discovery_failure_stops_model_and_scan_requests(tmp_path, monkeypatch, discovery, module):
     discovery.side_effect = HttpError("Capacity lookup failed", status_code=503)
     monkeypatch.setattr(module, "get_default_provider", Mock())
@@ -316,9 +245,8 @@ def test_required_scope_discovery_failure_stops_model_and_scan_requests(tmp_path
         monkeypatch.setattr(module._http, "collect_workspace_groups", lambda *_, **kw: ROWS)
         probe_name = "_start_scan"
     else:
-        monkeypatch.setattr(module, "collect_value", lambda *_, **kw: ROWS)
         monkeypatch.setattr(module, "collect_workspace_groups", lambda *_, **kw: ROWS)
-        probe_name = "_refresh_history" if module is semantic_models else "_execute_dax"
+        probe_name = "collect_value"
     probe = Mock(side_effect=AssertionError("No resource probe after discovery failure"))
     monkeypatch.setattr(module, probe_name, probe)
     payload = json.loads(module.collect(tmp_path).read_text())

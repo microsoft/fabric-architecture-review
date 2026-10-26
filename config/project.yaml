@@ -1,0 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Project identity. Do not change: setup and every stage check it so that a
+# deployment cannot silently mix with another project's artifacts.
+project_id: fabric-architecture-review

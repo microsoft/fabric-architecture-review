@@ -4,6 +4,55 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.10.1
+
+### Architecture reviews
+
+- 70 rules across architecture, governance, operations, reliability and security,
+  with actionable recommendations and a searchable rule catalogue.
+- Production scope and requirements are explicitly configured. Only assessed controls
+  affect the score; signals and missing evidence remain separate.
+- Optional FUAM and FCA connections enrich reviews with activity, capacity and sharing
+  evidence. Unconnected sources do not trigger additional monitoring or financial collection.
+- Exclude FAR hosting and Capacity Metrics app workspaces from reviews. Targeted
+  reviews skip excluded candidates before Top-N selection and use the next eligible workspaces.
+
+### Semantic model security
+
+- RLS and OLS checks for declared semantic models, with coverage for missing models
+  and a signal for models that define neither mechanism.
+- A Model security view in the report and app, with corresponding owner-report and Agent support.
+- Optional role details and temporary workspace access for Fabric administrators.
+  Both are off by default; filter expressions and role membership are never stored.
+- Scoped reviews let Fabric administrators discover models without workspace membership. Temporary
+  access checks current membership before granting, rather than relying on cached FUAM membership.
+
+### Reports and deployment
+
+- Updated central and workspace-owner reports, actionable findings, estate navigation,
+  Data Agents and optional Fabric IQ ontology.
+- Consistent FAR names for deployment artifacts, configuration, environment settings and local files.
+- Three Variable Libraries for identity, source connections and review policy. Setup preserves
+  configured values and adds new settings with their defaults.
+- Updated deployment, configuration and local-review guides.
+- Deployment defaults and notebook documentation links target the Microsoft
+  repository's `main` branch. Use a release tag for repeatable deployments.
+- App builds refresh the semantic-model binding, so changing the configured model
+  does not leave the dashboard connected to a previous deployment.
+- App chat shows request progress and actionable failures, avoids repeating slow
+  failed requests, and offers only targeted, bounded suggested questions.
+- Update app and build dependencies to address the reported npm security advisories.
+- Patch transitive authentication, request parsing, URI, schema-validation and HTTP
+  client dependencies without downgrading Rayfin or disabling the dependency audit.
+- Add explicit standard/preview runtime selection to central and owner Agent
+  deployment notebooks, defaulting to standard and verifying the setting before publication.
+
+### Upgrade
+
+Rerun setup, verify the configuration, and complete a scoped review before resuming schedules.
+Use `.env.far` for local runs. Results from different review versions are not compared.
+See the [upgrade guide](fabric/DEPLOYMENT.md#upgrading).
+
 ## 2026.09.2
 
 ### Hotfix: consistent workspace evidence

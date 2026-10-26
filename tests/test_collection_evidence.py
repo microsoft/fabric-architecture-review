@@ -6,17 +6,14 @@ from __future__ import annotations
 
 import importlib
 import json
-import sys
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import requests
 
-from analyzers._common import load_raw
-from analyzers.performance_review import analyze
+from tests._raw import load_raw
 from collectors import (
-    _http, capacity_metrics, capacity_metrics_app, scanner_api, semantic_models, workspace_inventory,
+    _http, capacity_metrics, scanner_api, semantic_models, workspace_inventory,
 )
 from collectors._common import load_complete_raw, load_workspace_inventory, record_collection_failure
 
@@ -104,7 +101,7 @@ def test_headers_provider_is_resolved_for_every_retry_and_page(monkeypatch):
     ]
 
 
-def test_semantic_collection_uses_fresh_headers_for_inventory_pages_and_refreshes(tmp_path, monkeypatch):
+def test_semantic_collection_uses_fresh_headers_for_inventory_pages_only(tmp_path, monkeypatch):
     provider = Mock()
     provider.headers.side_effect = [{"Authorization": str(i)} for i in range(5)]
     monkeypatch.setattr(semantic_models, "get_default_provider", lambda: provider)
@@ -119,10 +116,9 @@ def test_semantic_collection_uses_fresh_headers_for_inventory_pages_and_refreshe
         response(200, {"value": []}),
     ])
     monkeypatch.setattr(_http.requests, "request", send)
-    raw = json.loads(semantic_models.collect(tmp_path).read_text())
-    assert raw["refreshes"] == {"first": [], "second": []}
+    json.loads(semantic_models.collect(tmp_path).read_text())
     assert [call.kwargs["headers"]["Authorization"] for call in send.call_args_list] == [
-        "0", "1", "2", "3", "4",
+        "0", "1", "2",
     ]
 
 
@@ -176,13 +172,17 @@ def test_workspace_groups_exhaust_top_skip_without_continuation(monkeypatch, adm
         "value": rows[params["$skip"]:params["$skip"] + params["$top"]],
     })
     monkeypatch.setattr(_http, "get_json", get)
+    artifacts = Mock(return_value=[])
+    monkeypatch.setattr(_http, "collect_value", artifacts)
     url = "https://api.powerbi.com/v1.0/myorg/" + ("admin/" if admin else "") + "groups"
     headers = lambda: {}
     assert _http.collect_workspace_groups(url, headers) == rows
     assert [call.kwargs["params"] for call in get.call_args_list] == [
-        {"$top": 5000, "$skip": skip} for skip in range(0, count + 1, 5000)
+        {"$top": 5000, "$skip": skip, **({"$expand": "datasets,reports"} if admin else {})}
+        for skip in range(0, count + 1, 5000)
     ]
     assert all(call.args == (url, headers) for call in get.call_args_list)
+    assert artifacts.call_count == (0 if admin else count * 2)
 
 
 @pytest.mark.parametrize("page", [
@@ -207,7 +207,7 @@ def test_workspace_groups_repeated_page_fails_instead_of_looping(monkeypatch):
     assert get.call_count == 2
 
 
-@pytest.mark.parametrize("module", [semantic_models, scanner_api, capacity_metrics_app, workspace_inventory])
+@pytest.mark.parametrize("module", [semantic_models, scanner_api, workspace_inventory])
 @pytest.mark.parametrize("status", [403, 503])
 def test_late_workspace_page_failure_stops_probes_without_member_fallback(
     tmp_path, monkeypatch, module, status,
@@ -220,10 +220,9 @@ def test_late_workspace_page_failure_stops_probes_without_member_fallback(
     monkeypatch.setattr(module, "get_default_provider", Mock())
     monkeypatch.setattr(scanner_api, "_modified_workspaces", lambda _: ["0"])
     monkeypatch.delenv("WORKSPACE_IDS", raising=False)
-    monkeypatch.delenv("CAPACITY_METRICS_APP_INSTALLED", raising=False)
     probe_names = {
         semantic_models: "_datasets_for_groups", scanner_api: "_start_scan",
-        capacity_metrics_app: "_execute_dax", workspace_inventory: "_list_items",
+        workspace_inventory: "_list_items",
     }
     probe = Mock(side_effect=AssertionError("No probe after incomplete discovery"))
     monkeypatch.setattr(module, probe_names[module], probe)
@@ -236,17 +235,15 @@ def test_late_workspace_page_failure_stops_probes_without_member_fallback(
     probe.assert_not_called()
 
 
-@pytest.mark.parametrize("module", [semantic_models, capacity_metrics_app, workspace_inventory])
+@pytest.mark.parametrize("module", [semantic_models, workspace_inventory])
 def test_workspace_5001_is_discovered_before_child_probes(tmp_path, monkeypatch, module):
     first = [{"id": str(i), "isOnDedicatedCapacity": False} for i in range(5000)]
     last = {"id": "workspace-5001", "type": "Workspace"}
     get = Mock(side_effect=[{"value": first}, {"value": [last]}])
     monkeypatch.setattr(_http, "get_json", get)
     monkeypatch.setattr(module, "get_default_provider", Mock())
-    for key in ("WORKSPACE_IDS", "METRICS_APP_WORKSPACE_ID", "METRICS_APP_DATASET_ID",
-                "CAPACITY_METRICS_APP_INSTALLED"):
-        monkeypatch.delenv(key, raising=False)
-    model = {"id": "last-model", "name": "Fabric Capacity Metrics"}
+    monkeypatch.delenv("WORKSPACE_IDS", raising=False)
+    model = {"id": "last-model", "name": "Model"}
     if module is workspace_inventory:
         users, items = Mock(return_value=[]), Mock(return_value=[])
         monkeypatch.setattr(module, "_list_users", users)
@@ -254,16 +251,10 @@ def test_workspace_5001_is_discovered_before_child_probes(tmp_path, monkeypatch,
     else:
         datasets = Mock(return_value=[model])
         monkeypatch.setattr(module, "collect_value", datasets)
-        if module is semantic_models:
-            monkeypatch.setattr(module, "_refresh_history", Mock(return_value=[]))
-        else:
-            monkeypatch.setattr(module, "_execute_dax", Mock(return_value={
-                "ok": True, "rowCount": 0, "rows": [],
-            }))
     raw = json.loads(module.collect(tmp_path).read_text())
     assert raw.get("collectionComplete", True)
     assert get.call_count == 2
-    assert get.call_args.kwargs["params"] == {"$top": 5000, "$skip": 5000}
+    assert get.call_args.kwargs["params"] == {"$top": 5000, "$skip": 5000, "$expand": "datasets,reports"}
     if module is workspace_inventory:
         assert [row["id"] for row in raw["workspaces"]] == [last["id"]]
         assert items.call_count == users.call_count == 1
@@ -271,10 +262,7 @@ def test_workspace_5001_is_discovered_before_child_probes(tmp_path, monkeypatch,
     else:
         assert datasets.call_count == 1
         assert datasets.call_args.args[0].endswith(f"/admin/groups/{last['id']}/datasets")
-        if module is semantic_models:
-            assert raw["datasets"] == [{**model, "workspaceId": last["id"], "workspaceName": None}]
-        else:
-            assert raw["datasetLocated"] and raw["dataset"]["workspaceId"] == last["id"]
+        assert raw["datasets"] == [{**model, "workspaceId": last["id"], "workspaceName": None}]
 
 
 def setup_model_collector(monkeypatch):
@@ -284,56 +272,16 @@ def setup_model_collector(monkeypatch):
     ])
 
 
-@pytest.mark.parametrize("status", [403, 500])
-def test_failed_refresh_collection_emits_missing_not_pass(tmp_path, monkeypatch, status):
-    setup_model_collector(monkeypatch)
-    monkeypatch.setattr(_http.requests, "request", Mock(return_value=response(status)))
-    target = semantic_models.collect(tmp_path)
-    raw = json.loads(target.read_text())
-    assert "model" not in raw["refreshes"]
-    assert raw["refreshErrors"]["model"]["statusCode"] == status
-    assert load_raw(target)["datasets"] == raw["datasets"]
-    assert load_complete_raw(target)["datasets"] == raw["datasets"]
-    findings = {item["rule_id"]: item for item in analyze(tmp_path)}
-    for rule_id in ("PERF-004", "PERF-010", "PERF-006", "PERF-007", "PERF-014", "PERF-015"):
-        assert findings[rule_id]["status"] == "missing_evidence"
-
-
-def test_successful_empty_refresh_is_not_a_collection_failure(tmp_path, monkeypatch):
-    setup_model_collector(monkeypatch)
-    monkeypatch.setattr(_http.requests, "request", Mock(return_value=response(200, {"value": []})))
-    target = semantic_models.collect(tmp_path)
-    raw = json.loads(target.read_text())
-    assert raw["refreshes"] == {"model": []}
-    assert raw["refreshErrors"] == {}
-    findings = {item["rule_id"]: item for item in analyze(tmp_path)}
-    assert findings["PERF-004"]["status"] == "pass"
-    assert findings["PERF-010"]["status"] == "pass"
-
-
-def test_later_refresh_page_failure_discards_incomplete_history(tmp_path, monkeypatch):
-    setup_model_collector(monkeypatch)
-    monkeypatch.setattr(_http.requests, "request", Mock(side_effect=[
-        response(200, {"value": [{"status": "Completed"}], "@odata.nextLink": "https://example.invalid/next"}),
-        response(403),
-    ]))
-    raw = json.loads(semantic_models.collect(tmp_path).read_text())
-    assert "model" not in raw["refreshes"]
-    assert raw["refreshErrors"]
-    assert next(f for f in analyze(tmp_path) if f["rule_id"] == "PERF-004")["status"] == "missing_evidence"
-
-
-def test_missing_refresh_key_is_unknown_but_known_failures_remain_fail(tmp_path):
+def test_historical_refresh_rows_are_replaced_by_architecture_inventory(tmp_path, monkeypatch):
     raw = {
         "datasets": [{"id": "known"}, {"id": "unavailable", "isRefreshable": True}],
         "refreshes": {"known": [{"status": "Failed"}, {"status": "Failed"}]},
     }
     (tmp_path / "semantic_models.json").write_text(json.dumps(raw))
-    findings = {item["rule_id"]: item for item in analyze(tmp_path)}
-    for rule_id in ("PERF-004", "PERF-010"):
-        assert findings[rule_id]["status"] == "fail"
-        assert findings[rule_id]["evidence"]["missingRefreshDatasetIds"] == ["unavailable"]
-    assert findings["PERF-015"]["status"] == "missing_evidence"
+    setup_model_collector(monkeypatch)
+    fresh = json.loads(semantic_models.collect(tmp_path).read_text())
+    assert [d["id"] for d in fresh["datasets"]] == ["model"]
+    assert not {"refreshes", "refreshErrors", "executionEvidence"} & fresh.keys()
 
 
 def test_capacity_permission_fallback_but_not_server_failure(monkeypatch):
@@ -347,7 +295,10 @@ def test_capacity_permission_fallback_but_not_server_failure(monkeypatch):
         capacity_metrics._list_capacities({})
 
 
-def test_semantic_admin_permission_fallback(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_semantic_admin_permission_fallback(tmp_path, monkeypatch, scoped):
+    if scoped:
+        monkeypatch.setenv("WORKSPACE_IDS", "11111111-1111-1111-1111-111111111111")
     monkeypatch.setattr(semantic_models, "get_default_provider", lambda: Mock(headers=lambda **_: {}))
     send = Mock(side_effect=[response(403), response(200, {"value": []})])
     monkeypatch.setattr(_http.requests, "request", send)
@@ -372,89 +323,60 @@ def test_capacity_mapping_cannot_infer_empty_capacity_from_failed_workspace_inve
         capacity_metrics._workspaces_by_capacity(tmp_path)
 
 
-def test_capacity_workloads_uses_documented_non_admin_route(monkeypatch):
-    send = Mock(return_value=response(200, {"value": []}))
-    monkeypatch.setattr(_http.requests, "request", send)
-    assert capacity_metrics._workloads({}, "capacity") == []
-    assert send.call_args.args[1] == capacity_metrics.PBI + "/capacities/capacity/Workloads"
-
-
-@pytest.mark.parametrize("failed_component", ["refreshables", "workloads", "workspace_mapping"])
-def test_capacity_component_failure_preserves_inventory_and_other_requests(
-    tmp_path, monkeypatch, failed_component,
-):
-    from analyzers.cost_review import analyze as analyze_cost
-    from reports.gold_layer import build_gold
-
+def test_capacity_workspace_mapping_failure_preserves_capacity_inventory(tmp_path, monkeypatch):
     capacities = [{"id": cid, "displayName": cid, "sku": "F64", "state": "Active"}
                   for cid in ("first", "second", "third")]
     monkeypatch.setattr(capacity_metrics, "get_default_provider", lambda: Mock(headers=lambda **_: {}))
     monkeypatch.setattr(capacity_metrics, "_list_capacities", lambda _: capacities)
-    monkeypatch.setattr(capacity_metrics, "get_scope_workspace_ids", lambda: set())
+    monkeypatch.setattr(capacity_metrics, "get_run_scope_workspace_ids", lambda: set())
     mapping = {c["id"]: [{"id": f"workspace-{c['id']}", "name": "Workspace"}] for c in capacities}
     monkeypatch.setattr(capacity_metrics, "_workspaces_by_capacity", Mock(
-        side_effect=_http.HttpError("Synthetic mapping failure", status_code=403)
-        if failed_component == "workspace_mapping" else None, return_value=mapping,
+        side_effect=_http.HttpError("Synthetic mapping failure", status_code=403), return_value=mapping,
     ))
-    probes = {}
-    for component in ("refreshables", "workloads"):
-        probe = Mock(side_effect=[
-            [], _http.HttpError("Synthetic component failure", status_code=400), [],
-        ] if failed_component == component else None, return_value=[])
-        monkeypatch.setattr(capacity_metrics, f"_{component}", probe)
-        probes[component] = probe
 
     raw = json.loads(capacity_metrics.collect(tmp_path).read_text())
     assert raw["collectionComplete"] is False
     assert raw["capacityListComplete"] is True
     assert [c["id"] for c in raw["capacities"]] == ["first", "second", "third"]
-    assert all(probe.call_count == 3 for probe in probes.values())
-    assert raw["collectionErrors"][0]["component"] == failed_component
-    assert raw["capacities"][0]["refreshables"] == []
-    assert raw["capacities"][2]["workloads"] == []
-    findings = {f["rule_id"]: f for f in analyze_cost(tmp_path)}
-    assert findings["COST-007"]["status"] == "pass"
-    if failed_component == "workspace_mapping":
-        assert all(c["assignedWorkspaceCount"] is None for c in raw["capacities"])
-        assert raw["summary"]["emptyCapacities"] == []
-        for rule in ("COST-005", "COST-006", "COST-008"):
-            assert findings[rule]["status"] == "missing_evidence"
-        gold = build_gold([], tmp_path, run_id="test-run",
-                          run_timestamp="2026-09-22T00:00:00Z", check_remote=False)
-        assert len(gold["gold_capacities"]) == 3
-        assert all(c["assigned_workspace_count"] is None for c in gold["gold_capacities"])
-    else:
-        assert raw["capacities"][1][failed_component] is None
-        assert findings["COST-005"]["status"] == "fail"
-        assert findings["COST-008"]["status"] == "pass"
-        if failed_component == "refreshables":
-            assert raw["capacities"][1]["refreshableCount"] is None
+    assert all(c["assignedWorkspaceCount"] is None for c in raw["capacities"])
+    assert raw["summary"]["emptyCapacities"] == []
+    assert raw["collectionErrors"][0]["component"] == "workspace_mapping"
 
 
-def test_report_bpa_uses_scanner_inventory_and_continues_after_report_failure(tmp_path, monkeypatch):
-    from collectors import best_practices
-    from collectors._common import collection_incomplete
+def test_the_capacity_list_follows_the_review_scope_not_the_collectors_narrower_one(tmp_path, monkeypatch):
+    """The planner hands each collector only the workspaces that need its evidence. That is not a limited review."""
+    inside, outside = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+    capacities = [{"id": "busy", "displayName": "busy", "sku": "F8", "state": "Active"},
+                  {"id": "idle", "displayName": "idle", "sku": "F4", "state": "Active"}]
+    monkeypatch.setattr(capacity_metrics, "get_default_provider", lambda: Mock(headers=lambda **_: {}))
+    monkeypatch.setattr(capacity_metrics, "_list_capacities", lambda _: capacities)
+    monkeypatch.setattr(capacity_metrics, "_workspaces_by_capacity", lambda _: {"busy": [{"id": inside, "name": "w"}]})
+    monkeypatch.setenv("WORKSPACE_IDS", inside)  # what the planner gives this collector
 
-    monkeypatch.setenv("BEST_PRACTICES_SKIP", "false")
-    monkeypatch.setattr(best_practices, "_ensure_sempy_labs", lambda: None)
-    monkeypatch.setattr(best_practices, "_shim_fabric_rest_client", lambda: None)
-    monkeypatch.setattr(best_practices, "_capacity_readiness", lambda _: [])
-    monkeypatch.setitem(sys.modules, "sempy_labs", SimpleNamespace())
-    (tmp_path / "semantic_models.json").write_text('{"datasets": []}', encoding="utf-8")
-    (tmp_path / "scanner.json").write_text(json.dumps({"workspaces": [{
-        "id": "workspace", "name": "Workspace",
-        "reports": [{"id": "first", "name": "First"}, {"id": "second", "name": "Second"}],
-    }]}), encoding="utf-8")
-    check_report = Mock(side_effect=[RuntimeError("Synthetic report access failure"), [{"Rule Name": "Synthetic rule"}]])
-    monkeypatch.setattr(best_practices, "_report_bpa", check_report)
-    raw = json.loads(best_practices.collect(tmp_path).read_text())
-    assert [call.args[1:] for call in check_report.call_args_list] == [
-        ("first", "workspace"), ("second", "workspace"),
-    ]
-    assert [report["report_id"] for report in raw["reports"]] == ["first", "second"]
-    assert raw["reports"][1]["report_bpa"] == [{"Rule Name": "Synthetic rule"}]
-    assert raw["errors"][0]["report_id"] == "first"
-    assert collection_incomplete(raw, include_errors=True)
+    monkeypatch.setenv(capacity_metrics_run_scope(), "")  # the review itself was not limited
+    whole = json.loads(capacity_metrics.collect(tmp_path).read_text())
+    assert whole["workspaceScopeLimited"] is False
+    assert [c["id"] for c in whole["capacities"]] == ["busy", "idle"]
+    assert whole["summary"]["emptyCapacities"] == ["idle"]
+
+    monkeypatch.setenv(capacity_metrics_run_scope(), f"{inside},{outside}")  # the review was limited
+    limited = json.loads(capacity_metrics.collect(tmp_path).read_text())
+    assert limited["workspaceScopeLimited"] is True
+    assert [c["id"] for c in limited["capacities"]] == ["busy"]
+
+
+def test_without_a_planner_the_collector_scope_is_the_review_scope(tmp_path, monkeypatch):
+    from collectors._common import get_run_scope_workspace_ids
+    monkeypatch.delenv(capacity_metrics_run_scope(), raising=False)
+    monkeypatch.setenv("WORKSPACE_IDS", "11111111-1111-4111-8111-111111111111")
+    assert get_run_scope_workspace_ids() == {"11111111-1111-4111-8111-111111111111"}
+    monkeypatch.delenv("WORKSPACE_IDS")
+    assert get_run_scope_workspace_ids() == set()
+
+
+def capacity_metrics_run_scope():
+    from collectors._common import RUN_SCOPE_ENV
+    return RUN_SCOPE_ENV
 
 
 def test_failed_inventory_replaces_stale_evidence(tmp_path, monkeypatch, capsys):
@@ -464,9 +386,6 @@ def test_failed_inventory_replaces_stale_evidence(tmp_path, monkeypatch, capsys)
     target = semantic_models.collect(tmp_path)
     assert json.loads(target.read_text())["collectionComplete"] is False
     assert load_raw(target) is None
-    findings = {item["rule_id"]: item for item in analyze(tmp_path)}
-    assert findings["PERF-004"]["status"] == "missing_evidence"
-    assert findings["PERF-010"]["status"] == "missing_evidence"
     assert "Collection incomplete:" in capsys.readouterr().out
 
 
@@ -513,39 +432,25 @@ def test_legacy_partial_scanner_can_fall_back_to_complete_workspace_inventory(tm
     {"collectionComplete": False, "collectionErrors": [{"statusCode": 403}]},
     {"collectionComplete": False, "_meta": {"complete": True}},
 ])
-def test_architecture_integrity_inspects_incomplete_metadata_without_using_partial_data(tmp_path, marker):
-    from analyzers.architecture_review import analyze as analyze_architecture
-
+def test_incomplete_metadata_is_hidden_unless_inspection_is_explicit(tmp_path, marker):
     payload = {**marker, "workspaces": [{"id": "partial", "name": "partial"}]}
     scanner = tmp_path / "scanner.json"
     scanner.write_text(json.dumps(payload))
     assert load_raw(scanner) is None
     assert load_raw(scanner, allow_incomplete=True) == payload
-    findings = {item["rule_id"]: item for item in analyze_architecture(tmp_path)}
-    assert findings["ARCH-013"]["status"] == "fail"
-    assert findings["ARCH-001"]["status"] == "missing_evidence"
-    assert findings["ARCH-002"]["status"] == "missing_evidence"
 
 
-def test_integrity_does_not_claim_complete_when_meta_has_no_complete_flag(tmp_path):
-    from analyzers.architecture_review import analyze as analyze_architecture
-
-    (tmp_path / "scanner.json").write_text('{"_meta": {}, "workspaces": []}')
-    finding = next(item for item in analyze_architecture(tmp_path) if item["rule_id"] == "ARCH-013")
-    assert finding["status"] == "info"
+def test_meta_without_complete_flag_is_not_treated_as_incomplete(tmp_path):
+    scanner = tmp_path / "scanner.json"
+    scanner.write_text('{"_meta": {}, "workspaces": []}')
+    assert load_raw(scanner) == {"_meta": {}, "workspaces": []}
 
 
-@pytest.mark.parametrize("name", [
-    "gateways", "deployment_pipelines", "capacity_metrics_app",
-    "lakehouse_warehouse", "realtime_intelligence", "pipelines_notebooks",
-])
+@pytest.mark.parametrize("name", ["gateways", "pipelines_notebooks"])
 def test_collectors_persist_permission_failure_not_empty_inventory(tmp_path, monkeypatch, name):
     module = importlib.import_module(f"collectors.{name}")
     monkeypatch.setattr(module, "get_default_provider", lambda: Mock(headers=lambda **_: {}))
     monkeypatch.setattr(_http.requests, "request", Mock(return_value=response(403)))
-    monkeypatch.setenv("METRICS_APP_WORKSPACE_ID", "")
-    monkeypatch.setenv("METRICS_APP_DATASET_ID", "")
-    monkeypatch.setenv("CAPACITY_METRICS_APP_INSTALLED", "true")
     (tmp_path / "workspace_inventory.json").write_text(json.dumps({
         "workspaces": [{"id": "workspace", "name": "Workspace"}],
     }))
@@ -557,9 +462,7 @@ def test_collectors_persist_permission_failure_not_empty_inventory(tmp_path, mon
 @pytest.mark.parametrize("name,source", [
     ("semantic_model_definitions", "semantic_models.json"),
     ("pipeline_definitions", "pipelines_notebooks.json"),
-    ("lakehouse_warehouse", "workspace_inventory.json"),
     ("pipelines_notebooks", "workspace_inventory.json"),
-    ("realtime_intelligence", "workspace_inventory.json"),
     ("git_integration", "workspace_inventory.json"),
 ])
 def test_dependent_collectors_cannot_relabel_unavailable_inventory_as_empty(tmp_path, name, source):
@@ -582,26 +485,3 @@ def test_optional_gateway_members_failure_is_not_assumed_single_member(tmp_path,
     raw = json.loads(gateways.collect(tmp_path).read_text())
     assert raw["collectionComplete"] is False
     assert "gateways" not in raw
-
-
-def test_arm_denied_subscription_is_explicitly_incomplete_and_others_continue(tmp_path, monkeypatch):
-    from collectors import azure_capacity_automation as automation
-
-    monkeypatch.setenv("CAPACITY_AUTO_PAUSE_CONFIGURED", "true")
-    monkeypatch.setenv("AZURE_SUBSCRIPTION_ID", "")
-    monkeypatch.setattr(automation, "get_default_provider", lambda: Mock(headers=lambda **_: {}))
-    monkeypatch.setattr(automation, "_list_subscriptions", lambda _: [
-        {"subscriptionId": "denied"}, {"subscriptionId": "visible"},
-    ])
-    scan = Mock(side_effect=[
-        _http.HttpError("denied", status_code=403),
-        {"subscriptionId": "visible", "pauseAutomations": [], "pauseCandidates": []},
-    ])
-    monkeypatch.setattr(automation, "_scan_subscription", scan)
-    target = automation.collect(tmp_path)
-    raw = json.loads(target.read_text())
-    assert scan.call_count == 2
-    assert raw["collectionComplete"] is False
-    assert raw["collectionErrors"][0]["subscriptionId"] == "denied"
-    assert raw["perSubscription"][0]["subscriptionId"] == "visible"
-    assert load_raw(target) is None

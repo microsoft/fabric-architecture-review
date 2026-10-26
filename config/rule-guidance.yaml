@@ -1,0 +1,501 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Plain-language guidance shown next to every finding in the reports and the app.
+#
+# This file only explains results; it never changes how a rule is evaluated, so editing it
+# does not affect scores or the rule-logic hash. Keep each text short and actionable.
+#
+# rules      One entry per rule id.
+#              why        Why the result matters.
+#              fix        What to do when the rule fails or flags something.
+#              configure  The Variable Library variables that control the rule ("" when none).
+# reasons    Why a rule could not give pass or fail (reason_code of an unknown, missing evidence
+#            or not applicable finding): what it means and what to do next.
+# statuses   What each status means.
+
+statuses:
+  pass: "The control was checked and met."
+  fail: "The control was checked and not met. It counts against the score."
+  info: "A signal: context that suggests where to look. It never changes the score."
+  unknown: "The review could not decide, usually because a requirement was not declared. It is never counted as a pass."
+  missing_evidence: "The review needed data it could not obtain or trust, so it makes no claim either way."
+  not_applicable: "The rule does not apply to this workspace or this review."
+
+rules:
+  ARCH-001:
+    why: "Workspaces that hold unexpected item types drift away from the intended landing-zone design and become harder to govern and secure."
+    fix: "Move or delete the items whose type is not on your allowed list, or add the type to policy__allowed_item_types if it is intended."
+    configure: "policy__allowed_item_types"
+  ARCH-002:
+    why: "A production workspace owned by a person, or running on an unapproved capacity, loses its continuity when that person leaves and can fall outside agreed capacity and cost boundaries."
+    fix: "Make a shared workspace the owner and move the workspace to an approved capacity in the Fabric admin portal."
+    configure: "scope__production_workspace_ids or scope__production_capacity_ids, policy__allowed_capacity_ids"
+  ARCH-003:
+    why: "The storage mode decides refresh cost, freshness and how much data the capacity must hold, so an unplanned mode can break performance and cost assumptions."
+    fix: "Convert the model to an allowed storage mode, or add the mode to policy__allowed_storage_modes if it is intended."
+    configure: "policy__allowed_storage_modes"
+  ARCH-004:
+    why: "A pipeline that passes a parameter the notebook does not declare is silently ignored or fails at run time, so scheduled loads can run with wrong values."
+    fix: "Add the missing parameter to the notebook's parameter cell, or remove it from the pipeline activity."
+    configure: ""
+  ARCH-005:
+    why: "Broken activity dependencies (missing activities, duplicates, cycles) make a pipeline fail or skip steps unpredictably."
+    fix: "Open the pipeline, fix the dependency arrows so every activity depends on an existing activity and no loop exists."
+    configure: ""
+  ARCH-006:
+    why: "When production shares a capacity with development or test work, a heavy test run can throttle production reports and refreshes."
+    fix: "Move production workspaces to a capacity that hosts production only, or move the non-production workspaces off it."
+    configure: "scope__production_workspace_ids, scope__nonproduction_workspace_ids, scope__production_capacity_ids, scope__nonproduction_capacity_ids"
+  ARCH-007:
+    why: "Data residency rules usually require data to stay in approved regions; a capacity in another region can place data outside them."
+    fix: "Move the workspace to a capacity in an approved region, or add the region to policy__allowed_regions if it is approved."
+    configure: "policy__allowed_regions"
+  ARCH-008:
+    why: "A very large workspace often mixes unrelated responsibilities, which makes access control, deployment and ownership unclear."
+    fix: "Review whether the workspace should be split by purpose or team, for example one workspace per layer or data product."
+    configure: "architecture__monolith_max_items"
+  ARCH-009:
+    why: "Without descriptions nobody can tell what an item is for or who owns it, which slows support and hand-over."
+    fix: "Add a short description with purpose and owner to the workspace and its main items."
+    configure: "architecture__description_coverage_min_ratio"
+  ARCH-010:
+    why: "Code tied to one Spark platform needs rework before it can run elsewhere, which limits portability."
+    fix: "Review the flagged notebooks; replace platform-specific calls where portability matters, and ignore intentional ones."
+    configure: ""
+  ARCH-011:
+    why: "Literal paths, workspace IDs and server names tie code to one environment, so promoting from development to production means editing code."
+    fix: "Replace literals with notebook parameters, Variable Library values or relative paths."
+    configure: ""
+  ARCH-012:
+    why: "An unpinned install can pull a new package version on any run, so a job that worked yesterday can break today."
+    fix: "Pin versions (package==1.2.3), use a requirements file, or attach a Fabric Environment item."
+    configure: ""
+  ARCH-013:
+    why: "With no retry a transient error stops the whole pipeline, and the default 12-hour timeout lets a hung activity block it for half a day."
+    fix: "Set a retry count and a realistic timeout on activities that call a service."
+    configure: ""
+  ARCH-014:
+    why: "Items that depend on many other workspaces break when any of those workspaces changes, which makes changes risky."
+    fix: "Review the upstream workspaces; consolidate shared items or document the dependency as intentional."
+    configure: "architecture__cross_workspace_dependency_max"
+  ARCH-015:
+    why: "Legacy item types are no longer developed and are candidates for migration to current Fabric items."
+    fix: "Plan a migration of each Datamart to a Warehouse or a semantic model."
+    configure: ""
+  ARCH-016:
+    why: "A capacity with no workspace still costs money while it runs."
+    fix: "Assign workspaces to the capacity, pause it, or delete it if it is not needed."
+    configure: ""
+  ARCH-017:
+    why: "An empty workspace still has administrators, access and possibly a capacity assignment, and it hides what is really in use."
+    fix: "Delete the workspace if it is a leftover, or document what it is reserved for."
+    configure: ""
+  ARCH-018:
+    why: "A report with no semantic model behind it cannot show data, and it clutters the workspace and search."
+    fix: "Rebind the report to its semantic model, or delete it. Check first that the model is not in a workspace outside this review."
+    configure: ""
+  ARCH-019:
+    why: "A semantic model nothing uses still takes storage and refresh capacity, and it is easy to mistake for a source of truth."
+    fix: "Confirm nobody uses it (Excel, Analyze in Excel, reports in other workspaces), then delete it or stop its refresh."
+    configure: ""
+  ARCH-020:
+    why: "Every result for a workspace is only as complete as its item and member inventory."
+    fix: "If the inventory is incomplete, rerun the collection and check the identity's admin access and any workspace errors in the run output."
+    configure: ""
+  GOV-001:
+    why: "With a single administrator, a departure or locked account leaves the workspace with nobody who can manage access."
+    fix: "Add at least the required number of independent individual administrators to the workspace."
+    configure: "governance__min_admins, policy__eligible_admin_ids"
+  GOV-002:
+    why: "When everyone can create Fabric items, workspaces and items multiply without ownership or cost control."
+    fix: "In the Fabric admin portal, restrict item creation to a security group or disable it."
+    configure: ""
+  GOV-003:
+    why: "An orphaned workspace has no administrator, so nobody can manage its access, content or cost."
+    fix: "Use the admin portal to assign a new administrator, or delete the workspace if it is no longer needed."
+    configure: ""
+  GOV-004:
+    why: "Consistent names make workspaces and items easy to find, filter and automate against."
+    fix: "Rename items that do not match the pattern, or adjust the pattern if it no longer reflects your standard."
+    configure: "governance__naming_pattern, governance__naming_coverage_min_ratio"
+  GOV-005:
+    why: "Promoted or certified models tell consumers which data to trust; unendorsed production models invite use of unvetted data."
+    fix: "Review production semantic models and promote or certify the ones that are the trusted source."
+    configure: "governance__endorsement_min_ratio, scope__production_workspace_ids"
+  GOV-006:
+    why: "Domains organize workspaces by business area and enable delegated governance; workspaces without one are hard to attribute."
+    fix: "Assign each workspace to a domain in the Fabric admin portal."
+    configure: "governance__domain_coverage_min_ratio"
+  GOV-007:
+    why: "A workspace with no activity for months is likely abandoned but may still hold data and cost."
+    fix: "Confirm with the owner; archive, hand over or delete workspaces nobody uses."
+    configure: "governance__inactive_workspace_days"
+  GOV-008:
+    why: "Items nobody has modified for a long time are candidates for clean-up and often hold outdated data."
+    fix: "Review the stale items with their owners and remove or refresh them."
+    configure: "governance__stale_item_days, governance__stale_item_max_ratio"
+  GOV-009:
+    why: "Azure tags tie a capacity to an owner and cost centre, which is needed for cost allocation and accountability."
+    fix: "Add the required tags to each Fabric capacity resource in Azure."
+    configure: "policy__required_capacity_tags, scope__capacity_arm_resource_ids"
+  GOV-010:
+    why: "The tenant-setting controls can only be judged when the settings were recorded for this run."
+    fix: "Run the review as a Fabric administrator so the tenant settings can be read."
+    configure: ""
+  OPS-001:
+    why: "Without Git, changes are not versioned or reviewable and a bad change cannot be rolled back reliably."
+    fix: "Connect the production workspace to a Git repository in its workspace settings."
+    configure: "scope__production_workspace_ids"
+  OPS-002:
+    why: "A high failure rate means a load or report is unreliable, and failed runs still consume capacity."
+    fix: "Open the flagged items in the Monitoring hub, fix the cause of the failures and rerun."
+    configure: "operations__failure_max_ratio, operations__failure_min_events, operations__window_days"
+  OPS-003:
+    why: "One item that uses a large share of a capacity can crowd out everything else and drives capacity size and cost."
+    fix: "Optimize the item (query, schedule, model size) or move it to its own capacity."
+    configure: "operations__expensive_item_cu_max_ratio, operations__window_days"
+  OPS-004:
+    why: "Throttling slows or delays every workload on the capacity, which users notice as slow reports and late refreshes."
+    fix: "Reduce peak load, spread schedules, optimize heavy items or scale the capacity up."
+    configure: "operations__throttled_day_max_ratio, operations__window_days"
+  OPS-005:
+    why: "Failed refreshes leave reports and models showing old data, and users usually notice before the owner does."
+    fix: "Open the refresh history of the flagged items, fix the cause (credentials, source availability, timeouts) and refresh again."
+    configure: "operations__refresh_failure_max_ratio, operations__refresh_min_events, operations__window_days"
+  OPS-006:
+    why: "Trial and embedded capacities are not meant for production: a trial expires, and neither carries the capacity guarantees of a purchased Fabric or Premium capacity."
+    fix: "Move the production workspace to a purchased Fabric (F) or Premium (P) capacity."
+    configure: "scope__production_workspace_ids"
+  OPS-007:
+    why: "A workspace that takes a large share of a shared capacity can slow or throttle every other workspace on it."
+    fix: "Optimize the heaviest items of the workspace, schedule its loads outside peak hours, or move it to its own capacity."
+    configure: "operations__workspace_cu_max_ratio, operations__window_days"
+  OPS-008:
+    why: "A capacity that is not active stops everything on it: reports, refreshes, notebooks and pipelines."
+    fix: "Resume the capacity, or move the workloads that must keep running to an active one."
+    configure: ""
+  OPS-009:
+    why: "With one capacity administrator, a departure or locked account leaves nobody who can resize, pause or reassign the capacity."
+    fix: "Add at least the required number of capacity administrators, preferably a group, in the capacity settings."
+    configure: "operations__min_capacity_admins"
+  OPS-010:
+    why: "A production workspace that is changed in place has no tested path to production and no way to compare stages."
+    fix: "Assign the workspace to the production stage of a deployment pipeline, or release it through Git and document that choice."
+    configure: "scope__production_workspace_ids"
+  REL-001:
+    why: "Production workspaces on one capacity share one failure domain: a pause, an overload or a regional problem stops all of them, and Fabric does not move the workload to another capacity by itself."
+    fix: "Decide how production would run if that capacity were lost. Consider a second capacity, in another region where your residency rules allow it, and document how workspaces would be reassigned."
+    configure: "operations__capacity_concentration_max_ratio, scope__production_workspace_ids"
+  REL-002:
+    why: "In a pipeline with several steps and no step that runs on failure, an error stops the run quietly: later steps are skipped and nobody is told unless someone is watching the monitoring page."
+    fix: "Add an activity that runs when a step fails, for example a notification or a cleanup, or set up an alert on the pipeline outside it."
+    configure: ""
+  REL-003:
+    why: "A production model or dataflow that reads from a non-production workspace changes or breaks when that workspace is edited, refreshed, paused or deleted."
+    fix: "Point the production item at a production source, or promote the upstream item to a production workspace."
+    configure: "scope__production_workspace_ids, scope__nonproduction_workspace_ids"
+  SEC-001:
+    why: "Direct access outside the approved list bypasses group-based access control and is easy to forget."
+    fix: "Remove the principals that are not approved, or grant access through a group and add the principal to policy__allowed_principal_ids if it is intended."
+    configure: "policy__allowed_principal_ids"
+  SEC-002:
+    why: "Higher roles than needed (for example Admin or Member for a reader) widen who can change or share content."
+    fix: "Lower the role to the least privilege the person needs."
+    configure: "policy__allowed_roles"
+  SEC-003:
+    why: "Publish to web makes a report public to anyone on the internet with no sign-in."
+    fix: "In the Fabric admin portal, disable Publish to web or restrict it to a security group."
+    configure: ""
+  SEC-004:
+    why: "External data sharing lets OneLake data be shared with other tenants, which can move data outside your control."
+    fix: "In the Fabric admin portal, disable external data sharing or restrict it to a security group."
+    configure: ""
+  SEC-005:
+    why: "If every service principal can call Fabric APIs, any compromised app registration becomes an automation entry point."
+    fix: "In the Fabric admin portal, restrict service principal API access to a dedicated security group."
+    configure: ""
+  SEC-006:
+    why: "An item published to the web is visible to anyone with the link, including its data."
+    fix: "Remove the embed code under Settings > Embed codes in the Fabric admin portal, then review what was exposed."
+    configure: ""
+  SEC-007:
+    why: "Letting everyone invite guests through sharing lets external people reach content without central approval."
+    fix: "In the Fabric admin portal, restrict guest invitations through sharing to a security group or disable them."
+    configure: ""
+  SEC-008:
+    why: "Resource keys can access content without a user sign-in, so they bypass conditional access and auditing."
+    fix: "In the Fabric admin portal, enable the setting that blocks resource-key authentication."
+    configure: ""
+  SEC-009:
+    why: "Many individual grants are hard to review and revoke compared with group membership."
+    fix: "Replace direct grants with Microsoft Entra security groups that map to roles."
+    configure: "security__broad_access_max_principals"
+  SEC-010:
+    why: "A single gateway member is a single point of failure, and old versions miss security and reliability fixes."
+    fix: "Add a second member to each cluster and update members to the same, current version."
+    configure: "security__gateway_min_version"
+  SEC-011:
+    why: "Credentials written in code can leak through source control, notebook sharing and logs."
+    fix: "Move the secret to Azure Key Vault or a managed connection and rotate the exposed value."
+    configure: ""
+  SEC-012:
+    why: "Sensitivity labels drive protection and policy such as encryption and sharing limits; unlabeled production content is unprotected by them."
+    fix: "Apply a sensitivity label to production models and reports, or set a default label policy in Microsoft Purview."
+    configure: "security__label_min_ratio, scope__production_workspace_ids"
+  SEC-013:
+    why: "Tenant-level Private Link blocks public access to Fabric, which some organizations require; the signal shows the current choice."
+    fix: "Decide whether your network design needs Private Link; if so, enable it in the Fabric admin portal with the matching network setup."
+    configure: ""
+  SEC-014:
+    why: "Export and download settings open to everyone let any user copy data out of Fabric to files, where labels, row-level security and auditing no longer apply."
+    fix: "In the Fabric admin portal, limit the listed export settings to security groups or disable the ones your organization does not need."
+    configure: ""
+  SEC-015:
+    why: "Organization-wide links and external sharing settings open to everyone let content reach guests and the whole company without central approval."
+    fix: "In the Fabric admin portal, limit the listed sharing and guest settings to security groups or disable them."
+    configure: ""
+  SEC-016:
+    why: "Automation, embedding and custom visual settings open to everyone widen who can run code against the tenant or load third-party code in reports."
+    fix: "In the Fabric admin portal, limit the listed settings to a dedicated security group, or disable them."
+    configure: ""
+  SEC-017:
+    why: "Guest accounts belong to people outside your organization. A guest with a direct workspace role can see or change content, and guests are easy to forget."
+    fix: "Confirm each guest is still needed. Remove those who are not, and prefer the Viewer role or a managed group for those who are."
+    configure: ""
+  SEC-018:
+    why: "An application (service principal) with an Admin or Member role can change and share content with no person behind the action, so its credentials become a powerful entry point."
+    fix: "Confirm the application needs write access. Lower it to Contributor or Viewer where it does not, and protect and rotate its credentials."
+    configure: ""
+  SEC-019:
+    why: "A link that anyone in the organization can open exposes the item to the whole company, including people who have no reason to see it."
+    fix: "Open the flagged items, remove the organization-wide link and share through named people or groups."
+    configure: ""
+  SEC-020:
+    why: "Without custom OneLake data access roles, everyone who can read the lakehouse can read all of its data, whatever its sensitivity."
+    fix: "Define OneLake data access roles that limit folders and tables to the people who need them."
+    configure: "scope__production_workspace_ids"
+  SEC-021:
+    why: "A production workspace open to the public internet can be reached from anywhere, and its data can be sent anywhere, when your design says it should not. Firewall rules and private endpoints protect little while the default stays open."
+    fix: "Set the default inbound action to Deny and keep only narrow IP rules, use private links, and turn on outbound access protection with managed private endpoints for the sources the workspace needs."
+    configure: "policy__restricted_network_directions, scope__production_workspace_ids"
+  SEC-022:
+    why: "Direct grants with the right to share again let access spread beyond the workspace roles without anyone approving it."
+    fix: "Review the direct grants on the listed items, remove those that are not needed and drop the right to share from the rest."
+    configure: "scope__production_workspace_ids"
+  SEC-023:
+    why: "Workspace network restrictions only work when the tenant allows them. If the matching tenant switch is off, a workspace cannot be locked down however it is configured."
+    fix: "Turn on the tenant setting for workspace-level inbound or outbound rules in the Fabric admin portal, or remove the direction from policy__restricted_network_directions if you do not need it."
+    configure: "policy__restricted_network_directions, scope__production_workspace_ids"
+  SEC-024:
+    why: "Without row-level security every reader of the model can query all of its rows, and Copilot and other query experiences answer from whatever the reader's permissions allow."
+    fix: "Add a role that can read the model with a table filter that restricts rows and assign the readers to it, or remove the model from policy__rls_required_model_ids if it needs none."
+    configure: "policy__rls_required_model_ids"
+  SEC-025:
+    why: "Without object-level security every reader can see all tables and columns, including sensitive ones, and Copilot can use them in its answers."
+    fix: "Hide the sensitive table or column (metadata permission None) in a role that can read the model and assign the readers to it, or remove the model from policy__ols_required_model_ids."
+    configure: "policy__ols_required_model_ids"
+  SEC-026:
+    why: "Row-level and object-level security are what narrow a reader's view of a model, including what Copilot can answer. A model with neither shows every authorized reader everything."
+    fix: "Review each listed model. If readers should see only part of it, add row-level or object-level security. If everyone may see everything, no action is needed."
+    configure: ""
+  SEC-027:
+    why: "A declared model ID that matches nothing is silently not checked, so a typo or a deleted model would leave a required control unassessed."
+    fix: "Correct the IDs in policy__rls_required_model_ids and policy__ols_required_model_ids, or review the workspaces that hold the models."
+    configure: "policy__rls_required_model_ids, policy__ols_required_model_ids"
+
+collection:
+  collected: {meaning: "Collected and used by the rules.", action: ""}
+  context_only: {meaning: "Collected as background context. It is shown for reference and no rule judges from it alone.", action: ""}
+  disabled: {meaning: "This module is not connected.", action: "Enable it and set its IDs in the Connections library if you want its evidence."}
+  empty_review_scope: {meaning: "The review scope contained no workspaces, so nothing was read.", action: "Check WORKSPACE_IDS and the identity's workspace access."}
+  missing_capacity_resource_bridge: {meaning: "Capacities are not mapped to Azure resources, so FCA cannot be matched.", action: "Set scope__capacity_arm_resource_ids in the Thresholds library."}
+  unavailable: {meaning: "The data could not be read.", action: "Check the run output for this source, the identity's access and that the table has data, then rerun."}
+  failed: {meaning: "The collection step failed.", action: "Open the failed step in the run output, fix the cause and rerun."}
+  partial: {meaning: "Only part of the data was collected.", action: "Check the run output for the workspaces or items that failed and rerun."}
+  skipped: {meaning: "No rule needed this data, so it was not collected.", action: ""}
+
+reasons:
+  policy_undeclared:
+    meaning: "This control only judges what you declare, and nothing is declared for this workspace."
+    action: "Set the matching policy variable (see Configure for the rule) in the Thresholds library, or add the rule to policy__disabled_rules if it does not apply."
+  policy_incomplete:
+    meaning: "The requirement is switched on but the list it checks against is empty."
+    action: "Fill the matching policy variable (see Configure for the rule) in the Thresholds library."
+  environment_undeclared:
+    meaning: "Production is never guessed from names, and this workspace is not declared production or non-production."
+    action: "Add the workspace or its capacity to scope__production_workspace_ids / scope__nonproduction_workspace_ids (or the capacity variables) in the Thresholds library."
+  source_not_enabled:
+    meaning: "The rule needs FUAM or FCA data and that module is not connected."
+    action: "Enable the module and set its workspace and Lakehouse IDs in the Connections library, or ignore the rule."
+  source_data_stale:
+    meaning: "The FUAM or FCA data is older than the freshness limit, so it is not trusted as current."
+    action: "Refresh the module's pipelines, or raise its max_age_hours in the Connections library."
+  enrichment_unavailable:
+    meaning: "The FUAM or FCA evidence for this rule was not available."
+    action: "Check that the module is enabled, its Lakehouse is reachable and the identity has read access to the SQL endpoint."
+  family_unavailable:
+    meaning: "The module did not return the table this rule reads."
+    action: "Check that the FUAM or FCA table exists and has data; rerun the module's load."
+  query_failed:
+    meaning: "The query against the FUAM or FCA Lakehouse failed."
+    action: "Check the identity's read access to the Lakehouse SQL analytics endpoint and the module's table schema."
+  workspaces_not_in_source:
+    meaning: "FUAM has no record of this workspace."
+    action: "Wait for the next FUAM refresh or check that FUAM covers this workspace."
+  capacity_not_in_source:
+    meaning: "The module has no record of this capacity."
+    action: "Wait for the next module refresh or check the capacity is in its scope."
+  capacity_resource_bridge_missing:
+    meaning: "The capacity is not mapped to its Azure resource, so FCA cannot be matched to it."
+    action: "Set scope__capacity_arm_resource_ids to <capacity-guid>=<azure-resource-id> pairs in the Thresholds library."
+  no_required_tags_declared:
+    meaning: "No required tag names are declared."
+    action: "Set policy__required_capacity_tags (for example owner, cost-center) in the Thresholds library."
+  activity_history_shorter_than_window:
+    meaning: "FUAM holds less activity history than the inactivity window, so inactivity cannot be proven."
+    action: "Wait until FUAM has kept enough history, or shorten governance__inactive_workspace_days."
+  item_inventory_incomplete:
+    meaning: "The item list for the workspace is incomplete, so the result would be a guess."
+    action: "Rerun the collection and check the run output for workspaces that failed; the identity needs Fabric admin API access."
+  principal_inventory_incomplete:
+    meaning: "The member list for the workspace is incomplete."
+    action: "Rerun the collection; the identity needs Fabric admin API access to read workspace members."
+  model_inventory_incomplete:
+    meaning: "The semantic model list for the workspace is incomplete."
+    action: "Rerun the collection and check the run output for failed workspaces."
+  hosting_identity_unavailable:
+    meaning: "The workspace's capacity could not be read."
+    action: "Rerun with a Fabric administrator identity so the capacity assignment is returned."
+  hosting_identity_unresolved:
+    meaning: "The workspace's capacity could not be matched to a known capacity."
+    action: "Check the capacity inventory in the run output and that the identity can list capacities."
+  workspace_type_unavailable:
+    meaning: "The workspace type (shared or personal) was not returned."
+    action: "Rerun with a Fabric administrator identity."
+  workspace_type_unsupported:
+    meaning: "The workspace type is not one this rule evaluates."
+    action: "No action needed unless you expected this workspace to be assessed."
+  workspace_state_unavailable:
+    meaning: "The workspace state was not returned."
+    action: "Rerun with a Fabric administrator identity."
+  workspace_state_unsupported:
+    meaning: "The workspace is in a state this rule does not evaluate (for example deleted)."
+    action: "No action needed unless you expected this workspace to be assessed."
+  administrator_group_membership_unverified:
+    meaning: "The administrators are groups, and group members are not expanded, so independence cannot be proven."
+    action: "Add at least the required number of individual administrators, or declare eligible users in policy__eligible_admin_ids."
+  administrator_identity_unresolved:
+    meaning: "An administrator could not be resolved to a user."
+    action: "Check for deleted accounts among the administrators and replace them."
+  principal_identity_unresolved:
+    meaning: "A principal could not be resolved to a known identity."
+    action: "Check for deleted users or groups in the workspace access list and remove them."
+  principal_role_unresolved:
+    meaning: "A principal's role could not be read."
+    action: "Rerun the collection; if it persists, review the workspace access list in the portal."
+  advisory_inventory_unavailable:
+    meaning: "The inventory this signal needs was not available."
+    action: "Rerun the collection and check the run output for collection errors."
+  definition_unavailable:
+    meaning: "A pipeline or notebook definition could not be read."
+    action: "Give the identity at least read access to the items, or check the run output for the failing item."
+  pipeline_definitions_incomplete:
+    meaning: "Some pipeline definitions could not be read, so the result would be incomplete."
+    action: "Give the identity access to the pipelines and rerun the collection."
+  storage_bindings_unavailable:
+    meaning: "The semantic model definitions could not be read, so the storage mode is unknown."
+    action: "Give the identity access to the models (read definition permission) and rerun the collection."
+  storage_mode_unsupported:
+    meaning: "A model uses a storage mode this rule does not recognize."
+    action: "Review the model's tables; the rule knows Import, DirectQuery, DirectLake and Dual."
+  git_connection_unavailable:
+    meaning: "The Git connection status was not returned."
+    action: "Give the identity access to the workspace settings (Contributor or higher) and rerun."
+  tenant_settings_unavailable:
+    meaning: "The tenant settings were not available."
+    action: "Run the review as a Fabric administrator, or enable FUAM, which records them."
+  setting_not_returned:
+    meaning: "The tenant setting is not present in the returned settings."
+    action: "The setting may not exist in your tenant yet or its name changed; check the admin portal."
+  setting_state_unavailable:
+    meaning: "The tenant setting was returned without an on or off state."
+    action: "Check the setting in the admin portal and report it if the state is missing."
+  capacity_inventory_unavailable:
+    meaning: "The capacity list was not available."
+    action: "Rerun with an identity that can list capacities."
+  capacity_region_unavailable:
+    meaning: "The capacity's region was not returned."
+    action: "Rerun with an identity that can list capacities, or enable FUAM, which records regions."
+  scanner_unavailable:
+    meaning: "The tenant scanner (admin metadata scan) was not available."
+    action: "Enable the admin API settings for metadata scanning and run as a Fabric administrator."
+  review_scope_limited:
+    meaning: "A review limited to chosen workspaces cannot answer a tenant-wide question."
+    action: "Leave WORKSPACE_IDS blank to review the whole tenant."
+  no_dedicated_capacity:
+    meaning: "The workspace is not on a dedicated capacity, so the rule has nothing to compare."
+    action: "No action needed unless the workspace should be on a dedicated capacity."
+  no_pipeline_items:
+    meaning: "The workspace has no pipelines."
+    action: "No action needed."
+  naming_metadata_unavailable:
+    meaning: "Item names were not available."
+    action: "Rerun the collection and check the run output."
+  gateway_version_metadata_unavailable:
+    meaning: "Gateway versions were not returned."
+    action: "Run as an identity that can read gateways, or set no gateway_min_version."
+  profile_not_comparable:
+    meaning: "The result belongs to a different rule-logic version and is not comparable."
+    action: "Compare runs only within one rule-logic version."
+  incompatible_schema:
+    meaning: "The FUAM or FCA table does not have the columns this version of the review reads."
+    action: "Update FUAM or FCA to a current version, or report the table and column names that differ."
+  incompatible_identity:
+    meaning: "The FUAM or FCA table holds identifiers in a format the review cannot match to your workspaces or items."
+    action: "Check the module's data for malformed IDs and rerun its load."
+  incompatible_tags:
+    meaning: "The tags column in FCA is in a format the review cannot read."
+    action: "Check the FCA Tags column format and report an example (without values)."
+  no_activity_history:
+    meaning: "FUAM holds no activity history for this workspace, so inactivity cannot be judged."
+    action: "Run the FUAM activity load; a workspace with no activity at all may also simply be unused."
+  workspace_principals_unavailable:
+    meaning: "The member list for the workspace was not collected."
+    action: "Rerun the collection as a Fabric administrator so workspace members are returned."
+  capacity_sku_unavailable:
+    meaning: "The capacity type (SKU) of the workspace was not returned."
+    action: "Rerun with an identity that can list capacities."
+  capacity_state_unavailable:
+    meaning: "The state of the capacity was not returned."
+    action: "Rerun with an identity that can list capacities."
+  capacity_admins_unavailable:
+    meaning: "The administrators of the capacity were not returned."
+    action: "Rerun as a Fabric administrator so capacity administrators are listed."
+  deployment_pipelines_unavailable:
+    meaning: "Deployment pipelines could not be read."
+    action: "Rerun as a Fabric administrator, or check the run output for the failing call."
+  pipelines_partly_visible:
+    meaning: "Only the deployment pipelines the reviewer can see were read, so the workspace being absent proves nothing."
+    action: "Run the review as a Fabric administrator so every pipeline is listed."
+  onelake_roles_unavailable:
+    meaning: "The OneLake data access roles of a lakehouse could not be read."
+    action: "Give the identity access to the lakehouse, or check that OneLake security is available for it, then rerun."
+  workspace_network_unavailable:
+    meaning: "The network policy of the workspace could not be read."
+    action: "Give the identity access to the workspace settings and rerun."
+  item_access_unavailable:
+    meaning: "Who can access the items of the workspace could not be read."
+    action: "Run the review as a Fabric administrator so the scan returns who can access each item."
+  no_transfer_snapshot:
+    meaning: "FUAM holds no snapshot of this data, so the review cannot tell the current state."
+    action: "Run the FUAM pipeline that loads this data, or rely on the tenant setting evidence."
+  model_security_unavailable:
+    meaning: "The roles of a declared model could not be read completely, so whether it enforces the required security is not known."
+    action: "Give the review identity read and write access to the model so its definition can be read, check the run output for the model, and rerun."
+  no_declared_model_in_workspace:
+    meaning: "None of the models you declared for this requirement is in this workspace."
+    action: "No action needed."
+  declared_models_not_found:
+    meaning: "A model you declared was not found in the reviewed workspaces, so its requirement is not being checked."
+    action: "Correct the model ID in policy__rls_required_model_ids or policy__ols_required_model_ids, or review the workspace that holds it."

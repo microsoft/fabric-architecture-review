@@ -1,148 +1,93 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-# =============================================================================
-# Thresholds — the single tuning surface for every pass / fail boundary.
-# =============================================================================
-# Analyzers load this file (analyzers/_common.py -> threshold()) and use it to
-# decide whether a rule is a PASS, FAIL, or INFO. Tune these per engagement to
-# match the client's SLOs and maturity; the defaults are sensible for a typical
-# production Fabric tenant.
+# Threshold defaults for the architecture rules.
 #
-# Resolution precedence (highest first):
-#   1. Environment variable (the "env:" name noted below) — set in .env, CI, or
-#      the Fabric pipeline parameters. Overrides everything.
-#   2. The value in this file.
-#   3. A built-in default inside the analyzer (matches the values here).
+# WHERE TO CHANGE THEM
+#   Fabric  Edit the values in the "<prefix>_Thresholds" Variable Library created by
+#           setup (variable names are "<group>__<key>", e.g. architecture__monolith_max_items).
+#           The same library holds the policy.yaml variables. Setup never overwrites values
+#           you have changed.
+#   Local   Edit this file.
 #
-# The pass/fail concept is deliberately conservative: a rule only FAILS when a
-# real, actionable problem crosses a threshold a reviewer would act on. Softer
-# signals (empty/orphaned/streaming inventory, point-in-time gauges) are emitted
-# as INFO so the report highlights genuine issues instead of noise.
-# -----------------------------------------------------------------------------
+# SCOPE
+#   A value here applies to every workspace. Which workspaces are production and which
+#   values are allowed are declared in policy.yaml.
+#
+# Only signals are tuned by ratios and counts; they suggest where to look and are never
+# a failure. The one threshold that can affect the score is governance.min_admins (GOV-001).
+#
+# Thresholds marked "FUAM" are used only when FUAM is connected (config/sources.yaml). They
+# are relative (a share of items, of capacity, of days) so they scale with the estate.
+#
+# Do not add keys: unknown or missing keys are rejected so a typo cannot silently
+# change a review.
 
 architecture:
-  # ARCH-005 — a workspace with MORE than this many items is "monolithic"
-  # (hard to govern, slow to deploy). 50 items is a practical ceiling for one
-  # domain workspace.   env: ARCH_MONOLITH_THRESHOLD
+  # ARCH-008. A workspace with more items than this is flagged for a responsibility review.
+  # Example: 30 for a team that keeps workspaces small.
   monolith_max_items: 50
-
-  # ARCH-014 — a deployment-pipeline stage whose last deployment is older than
-  # this many days is "stale" (prod running behind validated content).
-  # env: ARCH_PIPELINE_STALE_DAYS
-  pipeline_stale_days: 30
-
-  # ARCH-001 — PASS when at least this fraction of workspaces carry a medallion
-  # layer token (bronze/silver/gold/raw/...). Below it, the convention is not
-  # adopted widely enough.
-  layer_naming_min_ratio: 0.5
-
-  # ARCH-006 — PASS when at least this fraction of *shared, non-empty*
-  # workspaces have a description. Personal and empty workspaces are excluded so
-  # the check reflects real documentation hygiene, not "My workspace" clutter.
+  # ARCH-009. Minimum share (0 to 1) of the workspace and its items that have a description.
+  # Example: 0.8 expects four of every five artifacts to be documented.
   description_coverage_min_ratio: 0.5
-
-performance:
-  # PERF-003 — semantic-model size bands (MB). At/over warn = FAIL; over critical
-  # is additionally surfaced as the most urgent.   2 GB warn / 8 GB critical.
-  # env: PERF_MODEL_SIZE_WARN_MB / PERF_MODEL_SIZE_CRITICAL_MB
-  model_size_warn_mb: 2048
-  model_size_critical_mb: 8192
-
-  # PERF-004 — FAIL when a model's failed-refresh ratio over its recent history
-  # reaches this fraction. 0.2 = one in five refreshes failing.
-  # env: PERF_FAIL_RATIO_THRESHOLD
-  refresh_failure_ratio: 0.2
-
-  # PERF-015 — a refreshable model with no successful refresh in this many days
-  # is "stale".   env: PERF_STALE_DAYS
-  stale_model_days: 30
-
-  # PERF-007 — FAIL when a model's average successful-refresh duration exceeds
-  # this many hours.   env: PERF_LONG_REFRESH_HOURS
-  long_refresh_hours: 2.0
-
-  # PERF-014 — two scheduled refreshes in the same workspace are "overlapping"
-  # when their start times fall within this many minutes of each other.
-  # env: PERF_REFRESH_OVERLAP_MIN
-  refresh_overlap_minutes: 2
-
-  # PERF-001 — Capacity Metrics App P95 throttling buckets (% of the future-
-  # smoothing window). At/over critical = active rejection (FAIL); at/over warn
-  # = approaching the ceiling (FAIL); between 0 and warn = headroom consumed
-  # (INFO).   env: PERF_THROTTLE_CRITICAL_PCT / PERF_THROTTLE_WARN_PCT
-  throttle_critical_pct: 100
-  throttle_warn_pct: 70
-
-  # PERF-002 — 7-day average CU%. At/over critical = FAIL (no headroom, throttling
-  # imminent); between warn and critical = INFO (watch); below warn = PASS.
-  # PERF-011 reuses cu_avg_warn_pct as the "running hot, needs autoscale" line.
-  cu_avg_warn_pct: 70
-  cu_avg_critical_pct: 80
-
-  # PERF-008 / PERF-009 — a pipeline/notebook is "failing" when its failure ratio
-  # reaches this fraction AND it has at least two failures (avoids flagging a
-  # single blip). "Long-running" when average successful duration exceeds the hours.
-  # env: PERF_JOB_FAIL_RATIO / PERF_JOB_LONG_HOURS
-  job_failure_ratio: 0.2
-  job_long_hours: 1.0
+  # ARCH-014. A workspace whose items depend on items in more than this many other
+  # workspaces is flagged as tightly coupled. Example: 3.
+  cross_workspace_dependency_max: 5
 
 governance:
-  # GOV-001 — every production, shared, non-empty workspace should have at least
-  # this many admins (no single-owner orphan risk).
+  # GOV-001. Minimum number of independent individual administrators per workspace.
   min_admins: 2
-
-  # GOV-003 — PASS when at least this fraction of governed items carry a sensitivity label.
-  label_coverage_min_ratio: 0.5
-
-  # GOV-004 — PASS when at least this fraction of workspaces match the naming
-  # convention (env/layer markers).
+  # GOV-004. Regular expression the full name must match. Empty disables the comparison.
+  # Example: "^(dev|test|prod)-[a-z]+-[a-z0-9-]+$"
+  naming_pattern: ""
+  # GOV-004. Minimum share (0 to 1) of names that must match naming_pattern.
   naming_coverage_min_ratio: 0.5
+  # GOV-005. Minimum share (0 to 1) of a production workspace's semantic models that are
+  # Promoted or Certified. Example: 0.8.
+  endorsement_min_ratio: 0.5
+  # GOV-006 (FUAM). Minimum share (0 to 1) of reviewed workspaces assigned to a domain.
+  domain_coverage_min_ratio: 0.8
+  # GOV-007 (FUAM). A workspace with no recorded activity for this many days is flagged.
+  # FUAM must hold at least this much activity history, otherwise the result is missing evidence.
+  inactive_workspace_days: 90
+  # GOV-008 (FUAM). Items not modified for this many days count as stale.
+  stale_item_days: 180
+  # GOV-008 (FUAM). Flag a workspace when more than this share (0 to 1) of its items are stale.
+  stale_item_max_ratio: 0.5
 
-  # GOV-005 — FAIL when share events in the activity-log window reach this count.
-  # Tune up for large tenants where routine sharing volume is naturally higher.
-  # env: GOV_SHARE_VOLUME_THRESHOLD
-  share_volume_warn: 100
-
-  # GOV-008 — endorsement is a maturity signal, never a hard fail: PASS when at
-  # least this fraction of endorsable items are Certified/Promoted, else INFO.
-  endorsement_min_ratio: 0.3
-
-  # GOV-009 — a PRODUCTION workspace FAILS when fewer than this fraction of its
-  # semantic models are endorsed (Certified/Promoted). Prod content should be trusted.
-  prod_endorsement_min_ratio: 0.5
-
-operational_excellence:
-  # OPS-001 — PASS when at least this fraction of PRODUCTION workspaces are attached
-  # to a deployment pipeline. Only production-named, non-empty workspaces are scored.
-  prod_pipeline_min_ratio: 0.8
-
-  # OPS-002 — PASS when at least this fraction of PRODUCTION workspaces are Git-connected.
-  prod_git_min_ratio: 0.8
+operations:
+  # OPS-002 to OPS-004 (FUAM). Number of days of capacity metrics to look back.
+  window_days: 30
+  # OPS-002 (FUAM). Items with fewer operations in the window are not judged, to avoid noise.
+  failure_min_events: 20
+  # OPS-002 (FUAM). Flag items whose failed share of operations (0 to 1) exceeds this.
+  failure_max_ratio: 0.2
+  # OPS-003 (FUAM). Flag an item that uses more than this share (0 to 1) of its capacity's
+  # compute (CU) in the window. Example: 0.25 means a quarter of the capacity.
+  expensive_item_cu_max_ratio: 0.25
+  # OPS-004 (FUAM). Flag a capacity that was throttled on more than this share (0 to 1) of
+  # the days in the window.
+  throttled_day_max_ratio: 0.1
+  # OPS-005 (FUAM). Refreshes of an item in the window are judged only above this count, to avoid noise.
+  refresh_min_events: 5
+  # OPS-005 (FUAM). Flag items whose failed share of refreshes (0 to 1) exceeds this.
+  refresh_failure_max_ratio: 0.2
+  # OPS-007 (FUAM). Flag a workspace that uses more than this share (0 to 1) of its capacity's
+  # compute (CU) in the window. Example: 0.5 means half the capacity.
+  workspace_cu_max_ratio: 0.5
+  # OPS-009. A capacity with fewer administrators than this is flagged, so one departure does not
+  # leave it without anyone who can manage it.
+  min_capacity_admins: 2
+  # REL-001. Flag production when more than this share (0 to 1) of the declared production workspaces
+  # run on one capacity. Example: 0.8 means more than four in five.
+  capacity_concentration_max_ratio: 0.8
 
 security:
-  # SEC-005 — FAIL when a workspace has MORE than this many individual (non-group)
-  # principals with access — convert broad direct access to security groups.
-  # env: SEC_BROAD_ACCESS_THRESHOLD
+  # SEC-009. More direct (non-group) principals than this is flagged; prefer groups.
   broad_access_max_principals: 10
-
-  # SEC-010 — minimum acceptable on-prem / VNet gateway version. Empty string
-  # means "only check intra-cluster version consistency", not an absolute floor.
-  # Set e.g. "3000.200" to also fail members below a specific monthly release.
-  # env: SEC_GATEWAY_MIN_VERSION
+  # SEC-012. Minimum share (0 to 1) of a production workspace's items that carry a
+  # sensitivity label. Example: 0.8.
+  label_min_ratio: 0.5
+  # SEC-010. Dotted numeric version below which gateway members are flagged. Empty skips
+  # the version floor. Example: "3000.250"
   gateway_min_version: ""
-
-cost:
-  # COST-001 — sustained 7-day average CU outside this band is a right-sizing
-  # concern. Low utilization suggests downsize/consolidation; high utilization
-  # suggests optimization, autoscale, or upsize.
-  cu_avg_idle_pct: 20
-  cu_avg_saturated_pct: 85
-
-  # COST-005 — a large capacity (F64+) hosting FEWER than this many workspaces is
-  # a downsize / consolidation candidate.   env: COST_SMALL_WORKSPACE_THRESHOLD
-  large_sku_min_workspaces: 5
-
-  # COST-007 — INFO (advisory) when there are at least this many small, active,
-  # dedicated F-SKUs (F1..F16) — often consolidatable into one right-sized capacity.
-  consolidation_min_small_capacities: 3

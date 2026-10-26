@@ -10,16 +10,16 @@ client secret leaves your machine.
 
 For a standing, unattended governance deployment you can instead run as a
 dedicated read-only **service principal**: set CLIENT_ID + CLIENT_SECRET (the
-secret comes from Key Vault / a managed connection, never code) and the same
-provider authenticates headless. Leave CLIENT_SECRET unset for the default
+secret comes from Key Vault, never code) and the same provider authenticates
+headless. In Fabric this is configured in the Environment Variable Library. Leave CLIENT_SECRET unset for the default
 interactive behaviour.
 
 Credential chain (first that works wins):
   0. ClientSecretCredential   — ONLY when CLIENT_ID + CLIENT_SECRET are set
      (a dedicated read-only service principal). This is the unattended /
-     scheduled "standing governance" mode; the secret is pasted post-setup into
-     a Key Vault / managed connection and surfaces here as CLIENT_SECRET. When no
-     secret is present the framework stays fully interactive (below).
+     scheduled mode; in Fabric the secret is read from Key Vault at run time and
+     surfaces here as CLIENT_SECRET. When no secret is present the framework stays
+     fully interactive (below).
   1. AzureCliCredential       — if you've already run `az login --tenant <id>`
   2. InteractiveBrowserCredential — opens a browser window for the first run,
      then re-uses a persisted token cache so you aren't prompted every time.
@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict
 
 # NOTE: azure.identity is imported lazily inside TokenProvider.__init__ (not at
@@ -46,8 +47,6 @@ from dotenv import load_dotenv
 # permissions are whatever the signed-in user already has in the tenant.
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 POWERBI_SCOPE = "https://analysis.windows.net/powerbi/api/.default"
-ARM_SCOPE = "https://management.azure.com/.default"
-STORAGE_SCOPE = "https://storage.azure.com/.default"
 TOKEN_REFRESH_MARGIN_SEC = 300
 
 # Microsoft-owned, pre-consented public client used by the Azure CLI.
@@ -62,7 +61,7 @@ class UserAuthConfig:
     # Optional service-principal secret. When set, the framework runs as the SP
     # (CLIENT_ID) instead of the interactive user — required for unattended,
     # scheduled governance runs. The secret never lives in code: it is pasted
-    # post-setup into a Key Vault / managed connection and resolved at runtime.
+    # into a Key Vault and resolved at runtime.
     client_secret: str | None = None
 
     @property
@@ -71,11 +70,11 @@ class UserAuthConfig:
 
     @classmethod
     def from_env(cls) -> "UserAuthConfig":
-        load_dotenv()
+        load_dotenv(Path(__file__).resolve().parents[1] / ".env.far")
         tenant_id = os.environ.get("TENANT_ID")
         if not tenant_id:
             raise RuntimeError(
-                "TENANT_ID is not set. Copy .env.example to .env and set the "
+                "TENANT_ID is not set. Copy .env.example to .env.far and set the "
                 "client tenant ID (the tenant you have guest / member access to)."
             )
         return cls(
@@ -104,7 +103,7 @@ class TokenProvider:
         )
 
         cache_options = TokenCachePersistenceOptions(
-            name=f"fabric-arch-review-{self._config.tenant_id}",
+            name=f"far-{self._config.tenant_id}",
             allow_unencrypted_storage=True,
         )
 

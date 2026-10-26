@@ -1,0 +1,45 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Optional FUAM and FCA connections.
+#
+# The review collects the architectural metadata it needs from the Fabric and Power BI APIs.
+# When the FUAM connection below is enabled, the review reads what FUAM already holds first
+# and calls the API only for the rest:
+#   Tenant settings        read from FUAM; the admin API adds the group detail FUAM lacks, and
+#                          replaces FUAM entirely when its snapshot is stale or unreadable.
+#   Workspace items and    read from FUAM per workspace; a workspace FUAM has no rows for is read
+#   members                from the API, and so is every workspace when FUAM is stale or unreadable.
+# Where each part came from, and why a fallback happened, is recorded in the run. FUAM holds a
+# daily snapshot, so something changed since its last transfer is not in it.
+# The connected modules also enable the rules that need them (GOV-006 to GOV-009, OPS-002 to
+# OPS-005, SEC-006 and SEC-019). Those rules are not applicable while the module is disabled and
+# report missing evidence when its data is stale; a module that is absent never triggers API
+# collection of its monitoring or financial data.
+#
+# WHERE TO CHANGE THEM
+#   Fabric  Edit the "<prefix>_Connections" Variable Library created by setup
+#           (variable names are "<module>__<key>", e.g. fuam__lakehouse_id).
+#   Local   Edit this file.
+#
+# HOW TO CONNECT A MODULE
+#   1. Open the module's workspace and Lakehouse in Fabric. The workspace ID and the
+#      Lakehouse ID are the two GUIDs in the Lakehouse URL:
+#      https://app.fabric.microsoft.com/groups/<workspace_id>/lakehouses/<lakehouse_id>
+#   2. Grant the identity that runs the review read access to that Lakehouse and its
+#      SQL analytics endpoint. Write access is not needed.
+#   3. Set enabled to true and fill both IDs. An enabled module with a missing ID is rejected.
+#
+# max_age_hours is the oldest module data the review will accept as current.
+
+fuam:
+  enabled: false
+  workspace_id: ""      # Example: "11111111-1111-1111-1111-111111111111"
+  lakehouse_id: ""      # Example: "22222222-2222-2222-2222-222222222222"
+  max_age_hours: 24
+
+fca:
+  enabled: false
+  workspace_id: ""
+  lakehouse_id: ""
+  max_age_hours: 48

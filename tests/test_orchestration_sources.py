@@ -129,7 +129,8 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(result.workspace_inventory["workspace_count"], 5001)
         self.assertEqual(result.workspace_inventory["unmatched_count"], 0)
         self.assertEqual([call.kwargs["params"] for call in get.call_args_list], [
-            {"$top": 5000, "$skip": 0}, {"$top": 5000, "$skip": 5000},
+            {"$top": 5000, "$skip": 0, "$expand": "datasets,reports"},
+            {"$top": 5000, "$skip": 5000, "$expand": "datasets,reports"},
         ])
 
     @patch("orchestration.sources.query_rows", return_value=[])

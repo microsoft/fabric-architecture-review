@@ -1,205 +1,88 @@
 <!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
 
-# Native operational and expression evidence
+# Architectural evidence and coverage
 
-Use execution history, definition coverage and static expression signals to
-identify the affected item, choose a corrective action and validate the result.
+The review collects metadata from the Fabric and Power BI APIs. It does not depend
+on FUAM or FCA, and it does not replace them.
 
-## Where to find the evidence
+## Evidence collected
 
-| Experience | Audience and purpose | Evidence |
-| --- | --- | --- |
-| Governance report | Central review team; estate-wide investigation | **Execution history**, **Dataflow Gen2** and **DAX objects** pages; pipeline dependency findings in **Architecture** |
-| Workspace Owner report | Approved workspace administrators; restricted to their authorized workspaces | Curated findings and technical details, plus **Executions** and **Coverage** pages |
-| Fabric app | Central review team; investigation within the selected review and scope | **Native evidence** lenses: **Observed executions**, **Dataflow Gen2**, **Calculated DAX objects**; pipeline defects in **Findings** |
-| Central Data Agent | Central review team; questions over approved review tables | Queries for execution observations, collection gaps, Dataflow signals, typed DAX objects and affected pipelines |
-| Workspace Owner Agent | Approved owners; questions over the secured owner model | Curated findings, technical evidence, execution observations and coverage for authorized workspaces |
+| Evidence | Used by |
+| --- | --- |
+| Workspaces, items, principals, roles and workspace state | ARCH-001, ARCH-002, ARCH-006, ARCH-008, ARCH-009, ARCH-015, ARCH-017, ARCH-020, GOV-001, GOV-003, GOV-004, OPS-006, SEC-001, SEC-002, SEC-009, SEC-017, SEC-018 |
+| Tenant settings (names, state and group counts; never group names or IDs) | GOV-002, GOV-010, SEC-003, SEC-004, SEC-005, SEC-007, SEC-008, SEC-013, SEC-014, SEC-015, SEC-016, SEC-023 |
+| Capacity metadata (SKU, state, region, hosting, assigned workspaces) | ARCH-002, ARCH-007, ARCH-016, REL-001 and the capacity pages of the report |
+| Administrator scan: endorsement, sensitivity-label presence, upstream links, reports and their models, and counts of who can access each item | GOV-005, SEC-012, ARCH-014, ARCH-018, ARCH-019, REL-003, SEC-022 |
+| Semantic model storage modes | ARCH-003 and the storage pages of the report |
+| Semantic model row-level and object-level security: counts of roles, row filters and hidden tables and columns, and whether the definition could be inspected completely (the dataset's effective-identity roles flag is kept as corroboration). With the optional role detail setting, also each role's name, permission and per-role counts | SEC-024, SEC-025, SEC-026, SEC-027 and the Model security page of the report |
+| Pipeline and notebook structural summaries, including activity retry and timeout | ARCH-004, ARCH-005, ARCH-010, ARCH-011, ARCH-012, ARCH-013, REL-002, SEC-011 |
+| Git connection per workspace | OPS-001 |
+| Deployment pipeline stages, OneLake data access role counts and workspace network policy, firewall rule counts and managed private endpoint counts (declared production workspaces only) | OPS-010, SEC-020, SEC-021 |
+| Gateway clusters and versions | SEC-010 |
 
-The owner report uses its own secured model. Its access controls do not protect
-the central report, app, central Data Agent or Lakehouse. The separate
-[Workspace Owner Agent](workspace-owner-agent.md) uses only that secured owner model.
+Only rules that are enabled and applicable request their evidence. Definitions are
+reduced to sanitized structure before they are stored.
 
-In the app, use capacity, workspace and item filters to narrow the selected
-review. The **Review agent** chat does not inherit those page filters: name the
-workspace, item or review in the question. Current-state Agent queries use each
-workspace's latest review; history questions use execution observations.
+## Optional enrichment
 
-The app's **FAR review run** identifies one pipeline run, not a live monitoring
-session. **Collected in this FAR review** shows execution observations saved
-during that run; the executions themselves can have started earlier.
-**Collected across reviews up to this one** combines saved observations from
-that run and earlier reviews, keeping the latest observation of each execution.
-Neither option guarantees a complete execution log.
+When FUAM or FCA are connected, supported Lakehouse data is read through fixed,
+aggregating queries. Each record keeps its source module, table, observation time and
+freshness, so the **Evidence coverage** page shows what came from where. The data enables
+the FUAM and FCA rules below. It never replaces the architectural baseline that FUAM does
+not hold: without the module those rules are not applicable.
 
-## Choose the evidence
+**Read from FUAM first, completed by the API.** The review reads these from FUAM when it is
+connected and calls the API only for what FUAM does not cover:
 
-| Question | Open | What the evidence establishes |
-| --- | --- | --- |
-| Which refresh or job should I investigate? | Governance **Execution history** | Observed execution identity, status, timestamps and duration, with collection coverage |
-| Which Dataflow Gen2 query needs inspection? | Governance **Dataflow Gen2** | Available definition coverage and conservative static Power Query M signals |
-| Which calculated object needs inspection? | Governance **DAX objects** | Typed calculated columns, calculated tables and calculation items, with static signals |
-| Which measure needs inspection? | Governance **DAX Analyzer** | Measure-only static signals; non-measure objects do not inflate its counts |
-| Does a pipeline have a broken dependency graph? | Governance **Architecture** findings | Literal activity dependency problems attributable to the affected pipeline |
+- *Tenant settings.* State, title, group and delegation come from FUAM's latest
+  `tenant_settings` snapshot, and the admin API adds the security-group detail FUAM lacks
+  (including excluded groups). If the API is denied the FUAM values stand and the excluded
+  count is unknown. If the snapshot is older than `max_age_hours` plus one day, missing or
+  unreadable, the full admin API call is used instead, with the reason recorded.
+- *Workspace items and members.* Read per workspace from `active_items` and
+  `workspaces_scanned_users`. A workspace for which FUAM returns no items, or no members, is read
+  from the API rather than assumed empty, and every workspace is read from the API when the
+  snapshot is stale, missing or unreadable. Each workspace records its source and the run records
+  the FUAM snapshot time. FUAM holds a daily snapshot, so an item or member added since its last
+  transfer is not in it. The workspace list, capacity assignment, Git connections, model and
+  pipeline definitions and gateways are always read from the APIs.
 
-On Home, select **Native evidence & execution history**. The evidence pages
-link to each other and to the measure view. On a coverage table, select an item
-to filter its detail table. Use immutable IDs to distinguish identical display
-names.
+Every family is read independently. If one cannot be read (a missing table, an unexpected
+column set, a stale transfer) only the rules that need it report `missing_evidence`, with
+a reason code; error text is never stored.
 
-Native evidence grids retain workspace, item and review identifiers so rows with
-identical display names remain distinguishable. Scroll horizontally for the
-diagnostic identifiers.
+| Module | Table read | What is read | Used by |
+| --- | --- | --- | --- |
+| FUAM | `workspaces`, `active_items`, `capacities` | Workspace, item and capacity inventory for cross-checking coverage | Evidence coverage |
+| FUAM | `tenant_settings`, `tenant_settings_enabled_security_groups` | The latest snapshot of every setting (state, title, group, delegation) and how many groups each is limited to. Read before the admin API, which adds the group detail | Tenant-setting controls, Tenant settings page |
+| FUAM | `tenant_settings` | When each rule-relevant tenant setting last changed and how often in 90 days | Tenant settings page |
+| FUAM | `activities` | Per workspace: the date of the latest activity, and the earliest and latest date FUAM holds. No users or events | GOV-007 |
+| FUAM | `active_items` | Per workspace: item count and how many were last modified before `stale_item_days` | GOV-008 |
+| FUAM | `workspaces` | Per workspace: whether it has a domain | GOV-006 |
+| FUAM | `capacity_metrics_by_item_by_operation_by_day` | Per item over `window_days`: operations, failed operations and compute (CU); per capacity: total compute | OPS-002, OPS-003, OPS-007 |
+| FUAM | `capacity_metrics_by_item_kind_by_day` | Per capacity: days observed and days with throttling | OPS-004 |
+| FUAM | `widelyshared_publishtoweb`, `active_items` | Items in the latest transfer of published-to-web items, joined to their workspace. No sharer identity | SEC-006 |
+| FUAM | `widelyshared_organization_links`, `active_items` | Items in the latest transfer of organization-wide sharing links, joined to their workspace. No sharer identity | SEC-019 |
+| FUAM | `capacity_metrics_by_item_by_operation_by_day` | Per semantic model over `window_days`: `Query` and `XMLA Read` operations only | ARCH-019 |
+| FUAM | `active_items` | Whether a semantic model that a report points at exists in another workspace (IDs only) | ARCH-018 |
+| FUAM | `capacity_refreshable_details` | Per item over `window_days`: completed and failed refreshes. No item names or request identifiers | OPS-005 |
+| FUAM | `active_items`, `workspaces_scanned_users` | Items (ID, name, type, description) and members (type, role, identifier) per workspace; read before the per-workspace API calls, which fill the gaps | Workspace inventory |
+| FCA | `resources` | Azure region and placement of mapped capacities | Capacity coverage |
+| FCA | `focus` | Only `ResourceId` and the `Tags` text of mapped capacities. Tag names are kept; values and every cost column are not read or stored | GOV-009 |
 
-Non-measure DAX detail and coverage rows resolve missing workspace names by
-workspace ID from the same run's workspace or scanner inventory. A collected
-name is preserved; an unknown workspace ID stays unnamed rather than borrowing
-a name from another workspace or an older run. Identical model display names
-never determine workspace identity.
+A result is accepted only when the data is no older than the connection's `max_age_hours`
+(daily metrics may lag by one more day). FUAM's activity history is kept for a configurable
+period, so GOV-007 reports `missing_evidence` when FUAM holds less history than `inactive_workspace_days`.
 
-## Workspace review scope
+## Reading coverage
 
-FAR excludes observed Pro/shared workspaces (`isOnDedicatedCapacity=false`),
-PPU workspaces (including capacity SKU `PP3`), deleted/inactive workspaces,
-and built-in workspaces typed `AdminWorkspace`. Explicit `WORKSPACE_IDS`
-cannot override exclusions. Excluded resources receive no item, model,
-refresh/job-history, capacity workload, or refreshable probes, and their
-known identities are filtered from review evidence and Gold.
+- `collected` evidence was read completely.
+- `partial` evidence was incomplete; dependent results are `unknown` or
+  `missing_evidence`, never a pass.
+- A configured module that cannot be read is shown as an evidence gap.
 
-Workspace/capacity identity discovery and tenant settings remain available.
-`excludedWorkspaces` retains each excluded ID plus available policy fields:
-`type`, `state`, `capacityId`, `capacitySku`, `isOnDedicatedCapacity`, and
-`isOnPremiumPerUserCapacity`. Capacity inventory retains excluded records in
-`excludedCapacities`; `review_scope.json` preserves discovered policy metadata.
-These identities also filter historical raw evidence without rewriting it.
-Required discovery failures are reported as incomplete, not as empty success.
-Power BI workspace discovery exhausts `$top`/`$skip` pages before policy
-filtering or child probes; failed or repeated pages are not complete evidence.
-Fresh capacity assignments invalidate cached capacity-derived exclusions,
-including after a PPU-to-Fabric migration. Missing assignment metadata does
-not erase previously observed exclusions.
+## Audiences
 
-Real Fabric/dedicated capacities remain supported. Missing metadata, workspace
-names, and users' Pro licenses never establish exclusions. Personal workspaces
-observed on shared capacity are excluded before probing; otherwise existing
-personal-workspace handling still applies. An `AdminWorkspace` may supply
-operational Capacity Metrics App evidence **only if it is not shared, PPU, or
-inactive**. That exception does not make its items review targets and cannot
-override capacity exclusions, even with explicit Metrics App source IDs.
-
-## Read execution history correctly
-
-FAR observes the **recent history retained by the native APIs** when a review
-runs. It does not install continuous monitoring or promise every event since
-the previous review. API retention, permissions, paging limits and collection
-failures can leave gaps. Running FAR weekly does not guarantee a complete week
-of execution history.
-
-FAR requests up to **10 refresh-history records per semantic model** and bounds
-Fabric job collection to **five pages / 1,000 records per item**. Power BI's
-refresh-history API excludes OneDrive refresh history. Inspect collection
-coverage rather than treating these bounds as a complete time window.
-
-An execution coverage row without an item ID describes an inventory gap, not an
-execution. The app retains these gaps so missing inventory remains visible.
-Pipeline/notebook inventory warnings identify the workspace and service error
-code. Items from successful pages remain usable when a later page fails;
-`WorkspaceTypeNotSupported` in an otherwise eligible workspace remains an
-explicit coverage gap, not an empty workspace. Observed `AdminWorkspace` types
-are excluded instead of producing such a warning. The failed-job count includes
-only retained `Failed` executions within
-the configured window, filtered locally rather than relying on an undocumented
-server-side filter.
-
-- `run_timestamp` is the FAR observation time; `start_time` and `end_time`
-  describe the observed execution.
-- `duration_ms` is milliseconds. The report's longest-duration card converts
-  this to seconds. Neither value represents CU, cost or individual DAX timing.
-- The same `execution_key` can appear in several review snapshots. The report
-  counts distinct execution identities, while the detail table retains the
-  observations. A distinct-ID count alone does not resolve status changes across
-  snapshots. For historical status totals, select the **latest observation
-  per execution key**, with a deterministic review-ID tie-break.
-- Failed, cancelled, active and unknown executions are different outcomes.
-  Missing history is not zero failures; an unavailable end time is not a
-  zero-duration execution.
-- Select a review in the execution page's optional snapshot slicer to inspect
-  what that review observed. Other native static-evidence pages open on the
-  latest review run, which may cover only a targeted subset of workspaces.
-
-Start with the coverage row, then open the identified refresh or job in Fabric
-to inspect its detailed diagnostics. Confirm changes against representative
-runs before claiming an improvement.
-
-## Interpret static evidence
-
-**Dataflow Gen2 uses Power Query M, not DAX.** A buffering or explicit
-folding-barrier signal identifies code to examine. It does not prove that a
-query should fold, that folding failed, or that removing the step is safe.
-Check source support, query dependencies and refresh behavior in the authoring
-experience. Unsupported or partial definitions remain coverage gaps.
-
-`DFLOW-001` is informational even when syntax signals are present; it does not
-score them as measured failures. `DFLOW-002` reports collection/inspection
-coverage. `inspected` means selected lexical checks completed, not full M
-validation. `inventory_unavailable` rows have no dataflow ID and describe an
-inventory gap, not a Dataflow artifact.
-
-**Non-measure DAX objects keep their real types.** For calculated columns and
-tables, investigate processing time and model size. For calculation items,
-test representative consuming queries. Do not apply a measure rewrite blindly
-to a calculated table or column. Report visual calculations are not collected.
-Format-string expressions and other unsupported expression surfaces are not
-included. `complete` describes extraction coverage for supported object types,
-not semantic validation or runtime health. `DAX-001` and `DAX-002` keep their
-measure-only scoring; non-measure detail and coverage are presented separately.
-
-**Pipeline dependency checks are structural.** Duplicate names within an
-activity scope, missing literal dependency targets, self-dependencies and
-cycles can justify a finding. A dynamic or unresolved dependency is not proof
-of a broken pipeline. These checks do not execute the pipeline or infer its
-runtime performance.
-
-## Data, permissions and access
-
-The normal collection identity needs access to the relevant inventory,
-definitions and native history endpoints. Tenant inventory visibility alone
-does not guarantee access to every item's definition or history. Check
-[authentication and permissions](auth-setup.md) and the
-[source contracts](data-safety.md) before collection.
-
-Execution observations, static Gen2 queries and non-measure DAX objects each
-have separate detail and coverage tables in central Gold. Evidence is identified
-by review, workspace and item IDs, not display names; measure-only counts remain
-separate.
-
-The Gen2 and non-measure DAX evidence tables exclude raw expressions and
-connection literals. Existing raw model, pipeline and notebook definitions,
-measure expression previews and central metadata remain sensitive.
-
-Republish the central Data Agent after deploying this evidence.
-**Central Agent/Lakehouse access is not protected by owner-model RLS.**
-Give workspace consumers only the separate
-[owner experience](workspace-owner-report.md), never access to central raw
-tables as a shortcut.
-
-## Deploy and validate
-
-1. Follow [deployment upgrade steps](../fabric/DEPLOYMENT.md#upgrading), with
-   schedules paused and existing runs finished.
-2. Deploy the updated governance model/report and collection stages. Run a
-   scoped normal FAR review through successful **04 Gold**.
-3. If using owner reporting, configure its fixed-identity connection and follow
-   the [owner access validation](workspace-owner-report.md#live-fabric-acceptance).
-   Do not bypass an incompatible-model warning.
-4. When owner reporting is enabled, run **07_OwnerAccessSync** for the owner
-   model and maintain its separate daily schedule. If using targeted review, rebind through **06** before
-   resuming schedules or notifications.
-5. Republish the standalone **05 Agent** after the new tables are available.
-   Test questions about coverage, execution duration, M signals and typed DAX
-   objects. A central Agent answer is not an owner-isolation test.
-6. If owner chat is enabled, deploy it separately through **08_OwnerAgent** and
-   complete its [actual-reader acceptance](workspace-owner-agent.md) before sharing.
-
-Before rollout, compare representative execution, Gen2 and typed DAX evidence
-with the source. Confirm coverage gaps remain visible, repeated snapshots are
-not counted as new executions, and identically named items stay distinct.
+Central teams use the Power BI report, the Data Agent and the optional ontology.
+Approved workspace owners can use a restricted owner report and Agent. See the
+[owner report guide](workspace-owner-report.md).

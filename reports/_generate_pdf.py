@@ -11,7 +11,7 @@ configurable via the REPORT_LOGO / REPORT_BRAND environment variables (or the
 Usage:
     python reports/_generate_pdf.py \
         --input output/report.md \
-        --output output/fabric-arch-review.pdf \
+        --output output/far/far-review.pdf \
         --title "Fabric Architecture Review"
 """
 from __future__ import annotations
@@ -428,7 +428,7 @@ def generate_pdf(
 
 
 def main() -> None:
-    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env.far")
     default_title = os.environ.get("ENGAGEMENT_NAME") or "Fabric Architecture Review"
     client = os.environ.get("CLIENT_NAME") or "Contoso"
     default_footer = os.environ.get("FOOTER_LABEL") or f"{client} \u2014 {default_title}"

@@ -1,0 +1,56 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Deployment environment: how the review authenticates in Fabric.
+#
+# WHERE TO CHANGE IT
+#   Fabric  Edit the "<prefix>_Environment" Variable Library created by setup
+#           (variable names are "<group>__<key>", e.g. identity__key_vault).
+#           Setup never overwrites values you have changed.
+#   Local   Not used. Local runs authenticate with the settings in .env.far
+#           (see .env.example and docs/auth-setup.md).
+#
+# DEFAULT: run as the identity of the notebook (leave everything empty).
+#
+# UNATTENDED SERVICE PRINCIPAL (optional)
+#   Use this when scheduled runs must not depend on a person. Set all four values;
+#   setting only some is rejected so the review never silently falls back to a
+#   different identity.
+#   1. Create an app registration and grant it the permissions in docs/auth-setup.md.
+#   2. Store its client secret in an Azure Key Vault secret.
+#   3. Allow the notebook identity to read that secret (Key Vault Secrets User).
+#   4. Fill the values below. The secret itself is never stored here.
+
+identity:
+  tenant_id: ""                     # Example: "33333333-3333-3333-3333-333333333333"
+  service_principal_client_id: ""   # Example: "44444444-4444-4444-4444-444444444444"
+  key_vault: ""                     # Vault name or URI. Example: "contoso-far-kv"
+  secret_name: ""                   # Example: "far-collector-secret"
+
+# TEMPORARY WORKSPACE ACCESS (optional, off by default)
+#   Reading the row-level and object-level security of a semantic model needs read and write
+#   on that model, and the Fabric Administrator role does not grant it. When enabled, the review
+#   identity must itself be a Fabric administrator, and the review then:
+#     1. reads each model you declared in policy__rls_required_model_ids / policy__ols_required_model_ids;
+#     2. only for a workspace where that read was refused and the identity has no role yet, adds the
+#        identity to the workspace (admin API), reads the refused models, and removes the identity again;
+#     3. never changes or removes a role the identity already had, and removes only what it added.
+#   Every grant and removal is written to a ledger kept outside the review output. A removal that fails
+#   fails the run, and the next run removes anything left behind even if this setting is turned off.
+#   enabled  "true" or "false".
+#   role     "auto" tries Contributor first and escalates to Member only if the read is still refused;
+#            or "Contributor" / "Member" to try only that role.
+access_grant:
+  enabled: "false"
+  role: "auto"
+
+# SEMANTIC MODEL ROLE DETAIL (optional, off by default)
+#   By default the review keeps only counts of a model's row-level and object-level security. When enabled
+#   it also keeps one record per role: the role NAME, its permission, how many tables have a row filter,
+#   how many tables and columns are hidden, and whether the filter is dynamic (uses the signed-in user's
+#   identity) or static. Filter text, table names, column names and role members are never kept.
+#   Role names then appear in the central report's "Model roles" page, the workspace owner report and the
+#   agents, so enable it only where those audiences may see them.
+#   role_detail  "true" or "false".
+model_security:
+  role_detail: "false"

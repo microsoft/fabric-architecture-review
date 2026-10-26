@@ -20,11 +20,12 @@ Auth: runs as the signed-in user (delegated). Requires Fabric Administrator
 or Power BI Administrator on the client tenant — these endpoints have no
 workspace-scoped substitute.
 
-DATA SAFETY: every "extra detail" query parameter is forced OFF so the
-response contains only workspace + item METADATA. No credentials, no DAX/M
-code, no column schemas, no user PII beyond owner GUIDs:
-    lineage=false, datasourceDetails=false, getArtifactUsers=false,
-    datasetSchema=false, datasetExpressions=false.
+DATA SAFETY: the response contains only workspace + item METADATA. No
+credentials, no DAX/M code, no column schemas:
+    datasourceDetails=false, datasetSchema=false, datasetExpressions=false.
+getArtifactUsers=true returns who can access each item, so it is reduced to
+counts (``accessSummary``) before anything is written; no principal ID, name
+or address is kept.
 
 Rate limits (per tenant): 16 getInfo calls/hour, 500 scanStatus/scanResult/hour.
 When the getInfo budget is exhausted the API returns HTTP 429 with a
@@ -52,9 +53,9 @@ from collectors.auth import POWERBI_SCOPE, get_default_provider
 
 BASE = "https://api.powerbi.com/v1.0/myorg/admin"
 GET_INFO_PARAMS = {
-    "lineage": "false",
+    "lineage": "true",
     "datasourceDetails": "false",
-    "getArtifactUsers": "false",
+    "getArtifactUsers": "true",
     "datasetSchema": "false",
     "datasetExpressions": "false",
 }
@@ -115,8 +116,37 @@ def _fetch_scan_result(headers: Headers, scan_id: str) -> Dict[str, Any]:
     return r.json()
 
 
+def _access_summary(users: List[Any], members: set[str]) -> Dict[str, int]:
+    """Counts of who can reach an item. A direct grant is a principal that is not a workspace role assignment."""
+    rows = [row for row in users if isinstance(row, dict)]
+    identities = lambda row: {str(row.get(key) or "").lower() for key in ("graphId", "identifier")} - {""}
+    direct = [row for row in rows if not identities(row) & members]
+    rights = lambda row: " ".join(str(value) for key, value in row.items() if key.endswith("AccessRight")).lower()
+    kind = lambda row: str(row.get("principalType") or "")
+    guest = lambda row: str(row.get("userType") or "").lower() == "guest" or any(
+        "#ext#" in str(row.get(key) or "").lower() for key in ("identifier", "emailAddress"))
+    return {
+        "principalCount": len(rows), "directGrantCount": len(direct),
+        "directReshareCount": sum("reshare" in rights(row) for row in direct),
+        "directGroupCount": sum(kind(row) == "Group" for row in direct),
+        "directAppCount": sum(kind(row) in {"App", "ServicePrincipal", "ServicePrincipalProfile"} for row in direct),
+        "directGuestCount": sum(kind(row) == "User" and guest(row) for row in direct),
+    }
+
+
+def reduce_artifact_users(workspace: Dict[str, Any]) -> Dict[str, Any]:
+    """Replace every item's access list with its counts, using the workspace roles as the baseline."""
+    members = {str(user.get(key) or "").lower() for user in workspace.get("users") or []
+               if isinstance(user, dict) for key in ("graphId", "identifier")} - {""}
+    for value in workspace.values():
+        for artifact in value if isinstance(value, list) else []:
+            if isinstance(artifact, dict) and isinstance(artifact.get("users"), list):
+                artifact["accessSummary"] = _access_summary(artifact.pop("users"), members)
+    return workspace
+
+
 @record_collection_failure("scanner.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     provider = get_default_provider()
     def headers() -> Dict[str, str]:
         return {**provider.headers(scope=POWERBI_SCOPE), "Content-Type": "application/json"}
@@ -165,7 +195,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         observed = result.get("workspaces") or []
         combined["excludedWorkspaces"].extend(excluded_workspace_identities(observed))
         combined["workspaces"].extend(
-            w for w in observed if not is_excluded_workspace(w)
+            reduce_artifact_users(w) for w in observed if not is_excluded_workspace(w)
             and str(w.get("id") or "").lower() not in excluded_ids
         )
         combined["datasourceInstances"].extend(result.get("datasourceInstances") or [])
@@ -194,7 +224,8 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     target = out / "scanner.json"
-    target.write_text(json.dumps(combined, indent=2, ensure_ascii=False), encoding="utf-8")
+    from collectors.definition_safety import metadata_only
+    target.write_text(json.dumps(metadata_only(combined), indent=2, ensure_ascii=False), encoding="utf-8")
     if failed_batches:
         print(
             f"Wrote {target} ({len(combined['workspaces'])} workspaces) "
@@ -208,7 +239,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

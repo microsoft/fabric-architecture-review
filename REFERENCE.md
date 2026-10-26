@@ -4,78 +4,52 @@
 
 Use this reference for configuration, individual stages and extension points.
 For a first run, follow [Local review](docs/local-review.md) or
-[Fabric deployment](fabric/DEPLOYMENT.md). The [README](README.md) maps supported
-tasks to their guides.
+[Fabric deployment](fabric/DEPLOYMENT.md).
 
-## 🔒 Data safety — read this first
+## Data safety
 
-FAR collects metadata, configuration, source definitions and operational metrics,
-not customer business rows. Definitions, workspace identities and access metadata
-can still be sensitive. Store and share the results accordingly.
+The review collects metadata, configuration, sanitized structural summaries of item
+definitions and inventory, not customer business rows. Workspace identities and
+access metadata can still be sensitive; store and share results accordingly. See
+[data safety](docs/data-safety.md) for the collection boundaries and
+[authentication](docs/auth-setup.md) for required access.
 
-Optional monitoring queries and aggregate cardinality probes have separate
-opt-in controls. See [data safety](docs/data-safety.md) for the collection
-boundaries and [authentication](docs/auth-setup.md) for required access.
-
-## 🧩 How it works
+## How it works
 
 The local flow is **Collect -> Analyze -> Report**. Fabric adds **Gold** for
 historical reporting and conversational access.
 
 | Stage | Input | Output |
 | --- | --- | --- |
-| Collect | Fabric/Power BI APIs and enabled monitoring sources | Raw evidence per collector |
-| Analyze | Raw evidence, checklist and thresholds | Findings and a run manifest |
+| Collect | Fabric/Power BI APIs, optional FUAM/FCA Lakehouses | Raw evidence per collector and `collection_plan.json` |
+| Analyze | Raw evidence, the [rule catalogue](config/review-checklist.yaml) and frozen configuration | Findings and a run manifest |
 | Report | Merged findings and supporting evidence | Markdown and, locally, PDF |
-| Gold (Fabric) | The completed review | Lakehouse tables for reports, the app and Agents |
+| Gold (Fabric) | The completed review | Lakehouse tables for the report, the app, the Agents and the ontology |
 
-Each finding includes its rule ID, dimension, severity, outcome, evidence and
-recommendation. Outcomes are `pass`, `fail`, `info`, `not_applicable`, `unknown`
-or `missing_evidence`. Missing evidence is not a pass; static DAX and source-code
-signals are not measurements of runtime cost.
+Each finding has a rule ID, dimension, severity, status, evidence and recommendation.
+Statuses are `pass`, `fail`, `info`, `not_applicable`, `unknown` or `missing_evidence`.
+Missing evidence is not a pass. See [methodology](docs/methodology.md) for scoring.
 
-Unexpected stage failures stop the run. Supported-but-unavailable evidence is
-recorded explicitly so findings can distinguish gaps from successful empty
-results. See [methodology](docs/methodology.md) for scoring and interpretation.
+An unexpected stage failure stops the run. Supported-but-unavailable evidence is
+recorded explicitly so findings can distinguish gaps from successful empty results.
 
-<a id="interactive-far-app"></a>
-
-## 🏙️ Interactive FAR app
+## Interactive app
 
 The [optional app](fabric/app/README.md) provides estate navigation, findings,
-technical evidence and central Data Agent chat. Its preview uses synthetic data.
-Live mode reads the FAR governance model.
-
-The app, central report and central Agent are for the review team. Owner-model
-RLS does not secure these surfaces. Use the separate
-[owner report](docs/workspace-owner-report.md) and
+evidence and central Data Agent chat. Its preview is empty; live mode
+reads the governance model. The app, central report and central Agent are for the
+review team. Use the separate [owner report](docs/workspace-owner-report.md) and
 [owner Agent](docs/workspace-owner-agent.md) for approved workspace owners.
 
-## 🚀 Getting started
+## Getting started
 
-### Prerequisites
+Local reviews need Python 3.11+, a virtual environment and an identity with the
+[required access](docs/auth-setup.md). PDF generation also needs Node.js and
+Puppeteer; Markdown does not. Follow the [local installation steps](docs/local-review.md#1-prepare).
 
-Local reviews require Python 3.11+, a virtual environment, and an identity with
-the [required tenant/workspace access](docs/auth-setup.md). PDF generation also
-needs a working Node.js/Puppeteer installation; Markdown does not.
+## Running the review
 
-### Install
-
-Follow the [local installation steps](docs/local-review.md#1-prepare).
-For a Fabric-hosted review, use the [deployment guide](fabric/DEPLOYMENT.md)
-instead; no workstation installation is required.
-
-### Configure
-
-Copy [.env.example](.env.example) to `.env`, set the tenant and review labels,
-and start with one explicit `WORKSPACE_IDS` value. Keep credentials and collected
-outputs out of source control.
-
-## ▶️ Running the review
-
-### Locally (PowerShell — Windows)
-
-From the repository root with the virtual environment active:
+### Locally (PowerShell, Windows)
 
 ```powershell
 .\scripts\powershell\01_collect.ps1
@@ -83,210 +57,177 @@ From the repository root with the virtual environment active:
 .\scripts\powershell\03_report.ps1
 ```
 
-### Locally (bash — Linux / macOS)
+### Locally (bash, Linux or macOS)
 
 ```bash
 bash scripts/bash/01_collect.sh
 bash scripts/bash/02_analyze.sh
+python -m reports.render_report --findings output/far/findings.json --out output/far/report.md --raw-dir output/far/raw
 ```
 
-Use the [Markdown route](docs/local-review.md#4-run-in-order) where the PDF
-renderer is unavailable. The PDF stage requires a nonempty PDF to succeed;
-an HTML fallback is not a successful PDF-stage run.
+The PDF stage requires a nonempty PDF to succeed; an HTML fallback is not a
+successful PDF-stage run. See the [Markdown route](docs/local-review.md#4-run-in-order).
 
-### Inside Fabric (no workstation)
+### Inside Fabric
 
 Setup provisions artifacts; a review run populates them. Follow
-[Fabric deployment](fabric/DEPLOYMENT.md) for the core pipeline, optional owner
-reporting, targeted reviews and notifications. Refer to
-[Fabric parameters and features](fabric/REFERENCE.md) for advanced settings.
+[Fabric deployment](fabric/DEPLOYMENT.md) for the core pipeline, owner reporting,
+targeted reviews and notifications, and the [Fabric reference](fabric/REFERENCE.md)
+for the report, Agent and ontology.
 
 ### Running a single stage
 
-Individual Python modules can run against an existing evidence directory:
+Each stage can run against an existing evidence directory. Collection and analysis
+need the frozen configuration that `orchestration.review_config` writes:
 
 ```powershell
-python -m collectors.tenant_settings --output-dir output/raw
-python -m analyzers.tenant_settings_review --raw-dir output/raw --checklist config/review-checklist.yaml --out output/findings_tenant_settings.json
-python -m reports.render_report --findings output/findings.json --out output/report.md
+python -m orchestration.review_config --out-dir output/far --replace
+$env:FAR_CONFIG_SNAPSHOT = (Resolve-Path output/far/review_config.json)
+python -m collectors.far_collection --output-dir output/far/raw
+python -m analyzers.far_review --raw-dir output/far/raw --out-dir output/far
+python -m analyzers.merge_findings --out-dir output/far
+python -m reports.render_report --findings output/far/findings.json --out output/far/report.md --raw-dir output/far/raw
 ```
 
-The report command reads **merged** findings. After rerunning an analyzer, rerun
-the Analyze stage to validate and merge results before reporting.
+The report command reads **merged** findings. After rerunning the analyzer, rerun
+the merge before reporting.
 
-## 🔑 Permissions & roles
+## Permissions and roles
 
-Collection uses the configured execution identity. Tenant administrator roles
-enable admin APIs but do not automatically grant every workspace, item or source
-permission. Optional probes may require Build, XMLA or Azure access.
-
+Collection uses the configured execution identity. Tenant administrator roles enable
+the admin APIs but do not automatically grant every workspace or item permission.
 Use the [authentication guide](docs/auth-setup.md) to configure and verify the
-identity for the selected collectors. Collection permissions are separate from
-the [owner-consumer access workflow](docs/workspace-owner-report.md).
+identity. Collection permissions are separate from the
+[owner-consumer access workflow](docs/workspace-owner-report.md).
 
-## ⚙️ Configuration reference
+## Configuration reference
 
-Local settings live in `.env`. Fabric setup flags and pipeline parameters are
-documented in the [Fabric reference](fabric/REFERENCE.md).
+Every setting has a commented file under [config/](config) and a matching Fabric
+location. See [Configure the review](docs/far-policy-configuration.md).
+
+| What | Local | Fabric |
+| --- | --- | --- |
+| Identity | `.env.far` | `<prefix>_Environment` Variable Library |
+| FUAM/FCA connections | [sources.yaml](config/sources.yaml) | `<prefix>_Connections` Variable Library |
+| Thresholds | [thresholds.yaml](config/thresholds.yaml) | `<prefix>_Thresholds` Variable Library |
+| Scope and policy declarations | [policy.yaml](config/policy.yaml) | `<prefix>_Thresholds` Variable Library |
+| Scope and report labels | `.env.far` | Pipeline parameters |
+
+Local `.env.far` settings:
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `TENANT_ID` | Tenant to review | Set for the intended tenant |
-| `CLIENT_NAME`, `ENGAGEMENT_NAME`, `REVIEWER_NAME` | Report labels | `Contoso` / `Fabric Architecture Review` / empty |
-| `OUTPUT_DIR` | Local evidence, findings and reports | `output` |
-| `WORKSPACE_IDS` | Comma/whitespace-separated workspace GUIDs | Empty: no workspace filter within the identity's access |
-| `ACTIVITY_DAYS_LOG` | Activity lookback, 1–28 days; `ACTIVITY_LOG_DAYS` is a legacy alias | `7` |
-| `REPORT_BRAND`, `REPORT_LOGO` | Optional PDF organization label and PNG logo | Empty |
-| `FOOTER_LABEL` | PDF footer label | Client and engagement names |
-| `CAPACITY_METRICS_APP_INSTALLED` | Opt in to Capacity Metrics App queries | `false` |
-| `CAPACITY_AUTO_PAUSE_CONFIGURED` | Opt in to Azure ARM pause/resume detection | `false` |
-| `VERTIPAQ_STATS_READ_DATA` | Fabric-only aggregate column cardinality probe | `false` |
+| `CLIENT_ID`, `CLIENT_SECRET` | Optional service principal | Empty: your own sign-in |
+| `CLIENT_NAME`, `ENGAGEMENT_NAME`, `REVIEWER_NAME` | Report labels | `Contoso` / `FAR Architecture Review` / empty |
+| `OUTPUT_DIR` | Local evidence, findings and reports | `output/far` |
+| `WORKSPACE_IDS` | Comma/whitespace-separated workspace GUIDs | Empty: no filter within the identity's access |
+| `REPORT_BRAND`, `REPORT_LOGO`, `FOOTER_LABEL` | Optional PDF branding | Empty |
 
-Microsoft does not support
-[custom consumption of the Capacity Metrics App semantic model](https://learn.microsoft.com/fabric/enterprise/metrics-app#considerations-and-limitations).
-That opt-in collector is schema-dependent; targeted reviews use FUAM instead.
-Azure ARM pause/resume detection is local-only.
+Rule thresholds are never environment variables, so a stray variable cannot change a
+review. Each run freezes its configuration and records its hash.
 
-### Tuning pass/fail thresholds
+### Scoping and isolation
 
-Numeric boundaries are defined in [config/thresholds.yaml](config/thresholds.yaml).
-Precedence is **environment override -> threshold file -> built-in default**.
-See [methodology](docs/methodology.md#applicability-outcomes-and-thresholds) before
-changing review thresholds.
+- `WORKSPACE_IDS` filters workspace collection. Setting `OUTPUT_DIR=output/far/<client>`
+  separates local engagements.
+- Workspace selection does not label an environment as production or grant access to results.
 
-### Scoping & isolation
+### Customizing the PDF
 
-- `WORKSPACE_IDS` filters workspace collection; tenant-level collectors still
-  return tenant-level facts.
-- Set `OUTPUT_DIR=output/<client>` to separate local engagements.
-- Workspace selection does not label an environment as production or grant
-  access to results.
-
-### Customizing the PDF & branding
-
-Set `REPORT_BRAND`, `REPORT_LOGO` and `FOOTER_LABEL` in `.env`, or override them
+Set `REPORT_BRAND`, `REPORT_LOGO` and `FOOTER_LABEL` in `.env.far`, or override them
 for one report:
 
 ```powershell
-python reports/_generate_pdf.py --input output/report.md --output output/fabric-arch-review.pdf --title "Fabric Architecture Review" --brand "Contoso" --logo path/to/logo.png
+python reports/_generate_pdf.py --input output/far/report.md --output output/far/review.pdf --title "Architecture Review" --brand "Contoso" --logo path/to/logo.png
 ```
 
 No organization branding is rendered unless configured. See
 [report images](reports/images/README.md) for logo handling.
 
-## 📤 Outputs & reports
+## Outputs
 
 | Local artifact | Contents |
 | --- | --- |
-| `output/raw/*.json` | Collected evidence per collector |
-| `output/findings_<dimension>.json` | Analyzer findings |
-| `output/findings.json` | Validated merged findings |
-| `output/run_manifest.json` | Review identity, counts and artifact/configuration hashes |
-| `output/report.md` | Executive summary, findings and recommendations |
-| `output/fabric-arch-review.pdf` | PDF, when the renderer is available |
+| `raw/*.json` | Collected evidence per collector, with provenance |
+| `raw/collection_plan.json` | Which collectors ran, for which rules and workspaces |
+| `review_config.json` | The frozen configuration |
+| `findings_architecture.json`, `findings.json` | Analyzer and validated merged findings |
+| `run_manifest.json` | Review identity, counts and artifact/configuration hashes |
+| `report.md` | Findings and architectural inventory |
 
-Reports include diagrams when supporting evidence is available. Raw evidence and
-outputs are gitignored. The [sample report](samples/report.md) and
-[sample PDF](samples/fabric-arch-review-sample.pdf) are synthetic snapshots, not
-proof of live feature coverage or owner access isolation.
+All under `OUTPUT_DIR` (default `output/far`). Raw evidence and outputs are
+gitignored. The [sample report](samples/report.md) is a synthetic snapshot, not proof
+of live feature coverage or owner access isolation.
 
-## 📋 Rule catalog & status
+## Rule catalogue
 
-[Checklist reference](docs/checklist-reference.md) describes the rules and their
-Microsoft Learn references. [Methodology](docs/methodology.md) explains outcomes,
-applicability and scoring. [Native evidence](docs/native-evidence.md) explains
-execution history, Dataflow Gen2 and typed DAX evidence.
-
-### Workspace classification and production scope
-
-FAR infers workload archetype from item composition and environment from
-workspace-name markers. Unresolved applicability remains `unknown`.
-Use immutable workspace IDs in [config/workspaces.yaml](config/workspaces.yaml)
-to supply authoritative profiles or rule overrides:
+The [rule reference](docs/checklist-reference.md) describes the 70 rules,
+[methodology](docs/methodology.md) explains scoring, and
+[architectural evidence](docs/native-evidence.md) lists what is collected for each rule.
+Production and purpose are declared in [policy.yaml](config/policy.yaml), never
+inferred from names:
 
 ```yaml
 workspaces:
   - id: 12345678-1234-1234-1234-123456789abc
     profile:
-      archetype: warehouse_analytics
       environment: production
     rule_overrides:
-      OPS-002:
-        applicability: applicable
-        reason: "Production finance workspace."
+      ARCH-003:
+        reason: "Serving models use Direct Lake."
+        policy:
+          required: true
+          allowed_storage_modes: [DirectLake]
 ```
 
-Capacity profiles use immutable capacity IDs in the same file.
-`WORKSPACE_IDS` selects scope; it does not assign production status.
-
-## 🧱 Extending the framework
+## Extending the framework
 
 1. Add a metadata-only collector and document its data-safety boundary.
-2. Implement rule evaluation in an analyzer. Put rule metadata in
-   [review-checklist.yaml](config/review-checklist.yaml) and numeric thresholds in
-   [thresholds.yaml](config/thresholds.yaml).
-3. Register the analyzer in [analyzer-registry.yaml](config/analyzer-registry.yaml)
-   and wire required stages into the PowerShell, Bash and Fabric entry points.
-4. Add focused tests and update the synthetic fixture only for intended behavior
-   changes. Preserve explicit missing-evidence outcomes.
+2. Add the rule to [review-checklist.yaml](config/review-checklist.yaml), its kind to
+   `analyzers/far_profile.py`, and its evaluation to `analyzers/far_review.py`.
+   Thresholds go in [thresholds.yaml](config/thresholds.yaml), policy fields in
+   `orchestration/rule_policy.py`.
+3. Register the rule in [analyzer-registry.yaml](config/analyzer-registry.yaml), add
+   the collector's demand to `collectors/far_collection.py`, and regenerate the app
+   contract with `python -m reports.app_contract`.
+4. Add focused tests. Preserve explicit missing-evidence outcomes.
 
-Checklist metadata alone does not execute a rule. See
-[Contributing](CONTRIBUTING.md) for the required workflow and validation.
+Catalogue metadata alone does not execute a rule. See [Contributing](CONTRIBUTING.md)
+for the required workflow and validation.
 
-## 🧪 Testing
+## Testing
 
 ```powershell
 python -m pytest -q
 ```
 
-Tests use synthetic evidence and cover analyzer outcomes, collection,
-orchestration, reporting and access contracts. To update synthetic artifacts
-after an intentional behavior change:
+Tests use synthetic evidence and cover analysis, collection, orchestration, reporting
+and access contracts. Local tests do not certify live Fabric connections, permissions
+or RLS. See [required validation](CONTRIBUTING.md#required-validation) for Python and
+app checks.
 
-```powershell
-python -m tests.build_fixture
-python -m tests.gen_golden
-python -m tests.gen_sample_report
-```
-
-Review generated changes rather than accepting new golden results automatically.
-See [required validation](CONTRIBUTING.md#required-validation) for Python and app
-checks. Local tests do not certify live Fabric connections, permissions or RLS.
-
-## 🗂️ Repository layout
+## Repository layout
 
 | Directory | Purpose |
 | --- | --- |
 | `collectors/`, `analyzers/`, `config/` | Evidence collection, rule evaluation and configuration |
-| `orchestration/`, `scripts/` | Fabric deployment/targeting and local stage runners |
-| `reports/` | Report generation, Gold, models, Agents and owner access |
+| `orchestration/`, `scripts/` | Fabric deployment, targeting and local stage runners |
+| `reports/` | Report generation, Gold, models, Agents, ontology and owner access |
 | `fabric/` | Setup and stage notebooks; optional app |
 | `docs/` | Task guides and operating references |
-| `tests/`, `samples/` | Tests, synthetic fixtures and sample reports |
+| `tests/`, `samples/` | Tests and a synthetic sample report |
 | `output/` | Ignored local review artifacts |
 
-## 📚 Documentation
+## Contributing, security and license
 
-Use the [README task index](README.md#choose-your-task) to find the appropriate
-guide rather than reading every reference before a first run.
-
-## 🤝 Contributing
-
-Follow [Contributing](CONTRIBUTING.md) and the
-[Code of Conduct](CODE_OF_CONDUCT.md).
-
-## 🛡️ Security
-
-Report vulnerabilities privately using [SECURITY.md](SECURITY.md).
-For setup help and other questions, see [Support](SUPPORT.md).
-
-## ™️ Trademarks
+Follow [Contributing](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+Report vulnerabilities privately using [SECURITY.md](SECURITY.md); for help see
+[Support](SUPPORT.md).
 
 Use of Microsoft trademarks must follow
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general)
-and must not imply Microsoft sponsorship. Third-party trademarks remain subject
-to their owners' policies.
-
-## 📄 License
+and must not imply Microsoft sponsorship. Third-party trademarks remain subject to
+their owners' policies.
 
 Licensed under [MIT](LICENSE.TXT), provided as-is without a Microsoft support SLA.

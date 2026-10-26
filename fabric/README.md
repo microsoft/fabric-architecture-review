@@ -1,54 +1,59 @@
 <!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
 
-# FAR in Microsoft Fabric
+# Fabric Architecture Review in Microsoft Fabric
 
-Review Fabric metadata, configuration and metrics without reading customer
-business rows. No workstation installation is needed.
+Review workspace boundaries, hosting, storage, static dependencies, promotion,
+access design and evidence coverage. Results are available in a Power BI report,
+a Data Agent and an optional estate ontology.
 
-## Start here
+## Get started
 
-**Follow [Deploy FAR](DEPLOYMENT.md) from step 1.** It is the installation checklist.
+1. Follow the [deployment guide](DEPLOYMENT.md).
+2. Import and run the [setup notebook](setup.ipynb).
+3. Edit the configuration in the workspace: authentication identity in the
+   Environment Variable Library, optional FUAM/FCA Lakehouses in the Connections
+   library, and thresholds plus the production scope and allowed values in the
+   Thresholds library. See [Configure the review](../docs/far-policy-configuration.md).
+4. Run the review pipeline with the workspace IDs you want to assess.
+5. Open the report. Deploy the Agent after the curated result tables are populated.
 
 ```text
-Import setup -> Run setup -> Run a scoped FAR review -> Open the results
+Setup -> Configure -> Collect -> Analyze -> Report -> Gold -> Explore results
 ```
 
-Setup deploys a Lakehouse, stage notebooks and the FAR pipeline. The pipeline runs
-**Collect -> Analyze -> Report -> Gold**. Governance reporting is enabled by default;
-owner reporting and FUAM targeting are optional.
+Setup creates the Lakehouse, stage notebooks, review pipeline
+and three Variable Libraries (Environment, Connections, Thresholds). Owner reporting, targeted selection and
+notifications are optional.
 
-## Choose what you need
+## Collection
 
-| Goal | What to do |
+- The baseline collects the metadata required by the architectural review.
+- Configured FUAM/FCA Lakehouses provide additional supported metadata.
+- Missing optional modules do not trigger API collection of their monitoring,
+  optimizer or financial data.
+- A configured source that cannot be read produces a visible error or coverage
+  gap. Missing evidence is not a passing architectural result.
+- Notebook and pipeline definitions are reduced to sanitized structural evidence;
+  customer business rows and raw source literals are not stored.
+
+## Optional experiences
+
+| Goal | Entry point |
 | --- | --- |
-| Review workspaces you choose | Run the normal FAR pipeline with explicit `WORKSPACE_IDS` |
-| Let FUAM choose the top workspaces | Configure **06**, then run its targeted parent pipeline |
-| Give workspace administrators a restricted report | Enable owner reporting in setup, connect its model, run **07**, then approve readers |
-| Notify those administrators | Configure Outlook in the targeted parent **after** report access is tested |
-| Ask questions about the central review | Run **05_Agent** after Gold; [agent instructions](REFERENCE.md#-ask-the-data-agent-conversational-qa) |
-| Let approved owners ask about their findings | Owner reporting provisions **08_OwnerAgent**; run it manually after Gold and **07**, then [approve owner chat](../docs/workspace-owner-agent.md) |
+| Select workspaces using FUAM consumption | **06** targeted setup and its parent pipeline |
+| Give approved workspace administrators a restricted report | Owner reporting, **07** access synchronization and reader approval |
+| Ask questions about central results | **05_Agent** |
+| Give approved owners a restricted chat experience | **08_OwnerAgent** and the secured owner model |
+| Send result notifications | Outlook configuration in the targeted parent |
 
-**06 configures a pipeline; it does not run a review.**
-**07 synchronizes owner access; it does not collect findings or share the report.**
-When owner reporting is bound, the targeted parent runs 07 after FAR and before
-email. The normal FAR pipeline does not. Keep a separate daily 07 schedule.
+**06** configures orchestration; **07** synchronizes access. Neither runs a review
+or shares a report. Test owner access before enabling notifications.
 
-## Three boundaries to keep clear
+## Access and operations
 
-- **Scope:** normal FAR with blank `WORKSPACE_IDS` reviews everything the execution
-  identity can access. Targeted FAR with no FUAM candidates skips the review.
-- **Audience:** the governance report, FAR app and central Data Agent are
-  central-team tools. The separate owner report and owner Agent use the secured
-  `WorkspaceOwner` model.
-- **Access:** give approved owners report/model Read plus `WorkspaceOwner`
-  membership, not FAR workspace membership or raw Lakehouse/SQL access.
+The central report and Agent are central-team tools. Owner tools use a separate
+secured model. Approved owners need report/model Read and the `WorkspaceOwner`
+role, not access to the raw Lakehouse or review workspace.
 
-## Already deployed?
-
-- [Upgrade safely](DEPLOYMENT.md#upgrading) or
-  [recover an owner-model mismatch](DEPLOYMENT.md#existing-owner-model-mismatch).
-  **Do not delete tables to fix a model compatibility error.**
-- [Owner access, connection setup and acceptance tests](../docs/workspace-owner-report.md).
-- [FUAM parameters and notification operations](../docs/targeted-review.md).
-- [Full technical reference](REFERENCE.md): parameters, Gold, reports, optional
-  features and troubleshooting.
+See the [technical reference](REFERENCE.md), [owner access guide](../docs/workspace-owner-report.md)
+and [targeted-review operations](../docs/targeted-review.md).

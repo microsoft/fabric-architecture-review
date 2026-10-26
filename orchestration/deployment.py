@@ -47,8 +47,9 @@ CHILD_RUN_VARIABLE = "FAR_CHILD_RUN_ID"
 EMAILS_VARIABLE = "FAR_OWNER_EMAILS"
 SELECTION_OUTPUT = f"json(activity('{SELECT_ACTIVITY}').output.result.exitValue)"
 RUNTIME_MODULES = (
+    "project.py",
     "__init__.py", "completion.py", "deployment.py", "fabric_api.py",
-    "ranking.py", "runtime.py", "setup.py", "sources.py",
+    "ranking.py", "runtime.py", "setup.py", "sources.py", "review_config.py",
 )
 RUNTIME_COLLECTOR_MODULES = ("__init__.py", "_http.py", "workspace_scope.py")
 
@@ -105,6 +106,7 @@ def stamp_parameters(notebook: dict[str, Any], values: dict[str, str]) -> dict[s
 def runtime_notebook(
     bundle_path: str, workspace_id: str, lakehouse_id: str, *,
     stage: str = "selection", child_pipeline_id: str | None = None,
+    connections_library: str = "",
 ) -> dict[str, Any]:
     if stage not in ("selection", "notifications"):
         raise ValueError("Unknown targeted-review notebook stage.")
@@ -112,6 +114,8 @@ def runtime_notebook(
         raise ValueError("Runtime notebook requires fixed child pipeline wiring.")
     child_pipeline_id = guid(child_pipeline_id)
     names = SELECTION_PARAMETERS if stage == "selection" else NOTIFICATION_PARAMETERS
+    if connections_library and stage == "selection":
+        names = tuple(name for name in names if name not in {"FUAM_WORKSPACE_ID", "FUAM_LAKEHOUSE_ID"})
     names = (*names, "PARENT_RUN_ID")
     if stage == "notifications":
         names = (*names, "CHILD_RUN_ID")
@@ -127,6 +131,11 @@ def runtime_notebook(
         f"config['CHILD_WORKSPACE_ID'] = {json.dumps(guid(workspace_id))}\n",
     ]
     code.append(f"config['CHILD_PIPELINE_ID'] = {json.dumps(child_pipeline_id)}\n")
+    if connections_library and stage == "selection":
+        code.extend([
+            "from orchestration.review_config import targeting_source\n",
+            f"config.update(targeting_source(notebookutils.variableLibrary.getLibrary, {json.dumps(connections_library)}))\n",
+        ])
     code.extend([
         f"result = run_{stage}(config)\n",
         "notebookutils.notebook.exit(json.dumps(result))\n",
@@ -173,6 +182,7 @@ def build_parent_pipeline(
     email_connection_id: str | None = None,
     email_from: str = "",
     email_state: str | None = None,
+    connections_library: str = "",
 ) -> dict[str, Any]:
     child_parameters = copy.deepcopy(child["properties"]["parameters"])
     if "WORKSPACE_IDS" not in child_parameters:
@@ -209,6 +219,13 @@ def build_parent_pipeline(
     parameters = {**child_parameters, **{
         key: {"type": "string", "defaultValue": value} for key, value in options.items()
     }}
+    selection_parameters = SELECTION_PARAMETERS
+    if connections_library:
+        for key in ("FUAM_WORKSPACE_ID", "FUAM_LAKEHOUSE_ID"):
+            parameters.pop(key, None)
+        selection_parameters = tuple(
+            key for key in SELECTION_PARAMETERS if key not in {"FUAM_WORKSPACE_ID", "FUAM_LAKEHOUSE_ID"}
+        )
     policy = {
         "timeout": "0.12:00:00", "retry": 0, "retryIntervalInSeconds": 120,
         "secureInput": True, "secureOutput": True,
@@ -236,7 +253,7 @@ def build_parent_pipeline(
             },
         }
 
-    selection = notebook_activity(SELECT_ACTIVITY, notebook_id, SELECTION_PARAMETERS)
+    selection = notebook_activity(SELECT_ACTIVITY, notebook_id, selection_parameters)
     prepare = notebook_activity(PREPARE_ACTIVITY, notification_notebook_id, NOTIFICATION_PARAMETERS)
     prepare["typeProperties"]["parameters"]["CHILD_RUN_ID"] = notebook_parameter(
         f"@variables('{CHILD_RUN_VARIABLE}')"
@@ -410,6 +427,7 @@ def deploy(
     name: str,
     defaults: dict[str, str],
     owner_access_notebook_id: str | None = None,
+    connections_library: str = "",
 ) -> dict[str, str]:
     if owner_access_notebook_id is not None:
         owner_access_notebook_id = guid(owner_access_notebook_id)
@@ -440,6 +458,7 @@ def deploy(
     bundle = package_runtime(repo_dir, Path("/lakehouse/default/Files/far-orchestration/runtime"))
     notebook = runtime_notebook(
         str(bundle), workspace_id, lakehouse_id, child_pipeline_id=child_pipeline_id,
+        connections_library=connections_library,
     )
     notebook_id = client.upsert_item(workspace_id, name + " - Runner", "Notebook", {
         "format": "ipynb", "parts": [definition_part("notebook-content.ipynb", notebook)],
@@ -455,6 +474,7 @@ def deploy(
         child, workspace_id=workspace_id, pipeline_id=child_pipeline_id,
         notebook_id=notebook_id, notification_notebook_id=completion_id, defaults=options,
         owner_access_notebook_id=owner_access_notebook_id,
+        **({"connections_library": connections_library} if connections_library else {}),
         **email_settings,
     )
     if matches and client.pipeline_definition(workspace_id, guid(matches[0]["id"])) != existing:

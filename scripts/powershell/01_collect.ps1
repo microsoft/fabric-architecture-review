@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 try {
-    $envFile = Join-Path $PWD ".env"
+    $envFile = Join-Path $PWD ".env.far"
     if (Test-Path $envFile) {
         Get-Content $envFile | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
             $k, $v = $_ -split '=', 2
@@ -14,11 +14,10 @@ try {
         }
     }
 
-    # Keep skipped snapshots fresh without installing Fabric-only dependencies.
-    $env:VERTIPAQ_STATS_SKIP = "true"
-    $env:BEST_PRACTICES_SKIP = "true"
-
-    $outDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output" }
+    $outDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output\far" }
+    & python -m orchestration.review_config --out-dir $outDir --replace
+    if ($LASTEXITCODE -ne 0) { throw "Invalid review configuration; collection did not start." }
+    $env:FAR_CONFIG_SNAPSHOT = (Resolve-Path (Join-Path $outDir "review_config.json")).Path
     $rawDir = Join-Path $outDir "raw"
     New-Item -ItemType Directory -Force -Path $rawDir | Out-Null
     Write-Host "Raw output directory: $rawDir" -ForegroundColor Gray
@@ -34,26 +33,7 @@ try {
         }
     }
 
-    Invoke-Collector "collectors.tenant_settings"      "Tenant settings (Fabric Admin)"
-    Invoke-Collector "collectors.scanner_api"          "Workspace + item metadata (Scanner API)"
-    Invoke-Collector "collectors.workspace_inventory"  "Workspace inventory (REST fallback / complement)"
-    Invoke-Collector "collectors.git_integration"      "Git integration per workspace"
-    Invoke-Collector "collectors.capacity_metrics"     "Capacity inventory + refreshables + workloads"
-    Invoke-Collector "collectors.capacity_metrics_app" "Capacity Metrics App semantic model (DAX via executeQueries — opt-in via CAPACITY_METRICS_APP_INSTALLED)"
-    Invoke-Collector "collectors.azure_capacity_automation" "Azure-side Pause/Resume automation (opt-in via CAPACITY_AUTO_PAUSE_CONFIGURED)"
-    Invoke-Collector "collectors.semantic_models"      "Semantic models + refresh history"
-    Invoke-Collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
-    Invoke-Collector "collectors.dax_analysis"       "Static DAX metadata normalization (no query execution)"
-    Invoke-Collector "collectors.dataflows"          "Dataflow Gen2 inventory and static Power Query evidence"
-    Invoke-Collector "collectors.vertipaq_stats"       "VertiPaq Analyzer (skipped locally; Fabric-only)"
-    Invoke-Collector "collectors.best_practices"       "Semantic Link BPA and health analysis (skipped locally; Fabric-only)"
-    Invoke-Collector "collectors.lakehouse_warehouse"  "Lakehouses + Warehouses + table metadata"
-    Invoke-Collector "collectors.pipelines_notebooks"  "Pipelines + Notebooks + recent job runs"
-    Invoke-Collector "collectors.pipeline_definitions" "Pipeline + Notebook definitions (getDefinition)"
-    Invoke-Collector "collectors.deployment_pipelines" "Fabric / Power BI deployment pipelines"
-    Invoke-Collector "collectors.gateways"             "Data gateways (on-prem / VNet / personal)"
-    Invoke-Collector "collectors.realtime_intelligence" "Real-Time Intelligence + Mirrored Databases"
-    Invoke-Collector "collectors.activity_logs"        "Admin activity log (last 7 days)"
+    Invoke-Collector "collectors.far_collection" "Demand-driven architectural metadata (shared local/Fabric plan)"
 
     if ($collectorFailures.Count -gt 0) {
         throw "Collection incomplete. Failed collectors: $($collectorFailures -join ', ')"

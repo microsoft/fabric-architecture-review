@@ -67,6 +67,8 @@ class Agent:
         self.publish_calls = 0
         self.drop_instructions = False
         self.fail_publish = False
+        self.enable_preview_runtime = False
+        self.drop_runtime = False
 
     def get_datasources(self):
         return self.sources
@@ -75,12 +77,14 @@ class Agent:
         self.added.append((artifact_name_or_id, workspace_id_or_name, type))
         self.sources.append(Source())
 
-    def update_configuration(self, instructions=None):
+    def update_configuration(self, instructions=None, enable_preview_runtime=None):
         if not self.drop_instructions:
             self.instructions = instructions
+        if not self.drop_runtime and enable_preview_runtime is not None:
+            self.enable_preview_runtime = enable_preview_runtime
 
     def get_configuration(self):
-        return SimpleNamespace(instructions=self.instructions)
+        return SimpleNamespace(instructions=self.instructions, enable_preview_runtime=self.enable_preview_runtime)
 
     def publish(self, description=None, to_m365=False):
         assert to_m365 is False
@@ -157,9 +161,46 @@ def environment(monkeypatch):
     return SimpleNamespace(agent=agent, client=client, creates=creates, opens=opens)
 
 
-def deploy(env):
+def deploy(env, **kwargs):
     return deploy_owner_agent(client=env.client, workspace_id=WORKSPACE, model_id=MODEL,
-                              agent_name=NAME, version="2026.09.2")
+                              agent_name=NAME, version="2026.09.2", **kwargs)
+
+
+@pytest.mark.parametrize("runtime,preview", [("standard", False), ("preview", True)])
+def test_owner_runtime_selection_preserves_source_and_security_contract(environment, runtime, preview):
+    env = environment
+    original = copy.deepcopy(env.client.model)
+    env.agent.enable_preview_runtime = not preview
+    assert deploy(env, runtime=runtime) == AGENT
+    assert env.agent.enable_preview_runtime is preview
+    assert env.agent.publish_calls == 1
+    assert env.client.model == original
+    assert env.agent.added == [(UUID(MODEL), UUID(WORKSPACE), "semanticmodel")]
+    selected = {e["name"] for e in env.agent.sources[0].config["elements"] if e["is_selected"]}
+    assert selected == OWNER_AGENT_TABLES
+
+
+def test_owner_default_runtime_is_standard(environment):
+    environment.agent.enable_preview_runtime = True
+    deploy(environment)
+    assert environment.agent.enable_preview_runtime is False
+
+
+def test_invalid_owner_runtime_fails_before_any_agent_or_model_operations(environment):
+    with pytest.raises(ValueError, match="runtime"):
+        deploy(environment, runtime="invalid")
+    assert not environment.client.requests
+    assert not environment.creates and not environment.opens
+    assert environment.agent.publish_calls == 0
+
+
+@pytest.mark.parametrize("runtime,previous", [("standard", True), ("preview", False)])
+def test_owner_runtime_mismatch_blocks_publication(environment, runtime, previous):
+    environment.agent.enable_preview_runtime = previous
+    environment.agent.drop_runtime = True
+    with pytest.raises(ValueError, match="runtime could not be verified"):
+        deploy(environment, runtime=runtime)
+    assert environment.agent.publish_calls == 0
 
 
 def test_deploy_and_compatible_rerun_preserve_model_and_only_select_owner_tables(environment):
@@ -366,7 +407,7 @@ def test_dax_examples_only_reference_actual_owner_columns():
     model = build_bim("Owner", "server", "db")["model"]
     schema = {table["name"]: {column["name"] for column in table["columns"]}
               for table in model["tables"]}
-    assert len(OWNER_AGENT_EXAMPLES) == 7
+    assert len(OWNER_AGENT_EXAMPLES) == 4
     for query in OWNER_AGENT_EXAMPLES.values():
         assert query.count("EVALUATE") == 1
         assert "owner_access" not in query and "REMOVEFILTERS" not in query
@@ -383,9 +424,9 @@ def test_dax_examples_only_reference_actual_owner_columns():
 def test_instructions_preserve_security_and_evidence_boundaries():
     instructions = owner_instructions("2026.09.2")
     assert len(instructions) <= 15000
-    for phrase in ("not authorization controls", "Do not query owner_access", "PER\nWORKSPACE",
-                   "deduplicate by execution_key", "duration_ms", "static investigation signals",
-                   "not semantic-model few-shots", "not measured latency"):
+    for phrase in ("independent table RLS", "Do not query owner_access", "PER WORKSPACE",
+                   "unknown/missing evidence", "not scored failures", "Never mix profile",
+                   "Never recommend FAR workspace membership"):
         assert phrase in instructions
 
 
@@ -400,6 +441,8 @@ def test_owner_notebook_has_no_outputs_and_uses_pinned_sdk():
             code += source
     assert "fabric-data-agent-sdk==0.1.30a0" in code
     assert "deploy_owner_agent(" in code
+    assert 'OWNER_AGENT_RUNTIME = "standard"' in code
+    assert "runtime=OWNER_AGENT_RUNTIME" in code
     assert "deploy_agent(" not in code
     assert "getToken(\"pbi\")" in code
     assert "except Exception" not in code

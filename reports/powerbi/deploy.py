@@ -54,8 +54,42 @@ def wait_for_sql_endpoint(
     )
 
 
-def model_definition(model_name: str, sql_endpoint: str, database_id: str) -> Dict[str, Any]:
-    bim = build_model_bim_json(model_name, sql_endpoint, database_id)
+_PBI = "https://api.powerbi.com/v1.0/myorg"
+_FINISHED = {"Completed", "Failed", "Disabled", "Cancelled", "Canceled"}
+
+
+def refresh_model(
+    http: Any, headers: Dict[str, str], workspace_id: str, model_id: str, *, wait_seconds: int = 180, poll_seconds: int = 5,
+) -> str:
+    """Frame a Direct Lake model once, so a table added by this release can be queried straight away.
+
+    Direct Lake follows changes to tables it already knows. A table that a new release adds to the model stays
+    "not refreshed" until the model is refreshed once, and every page that reads it fails until then. Best effort:
+    it reports the outcome and never raises, because the next pipeline run frames the tables anyway.
+    ``http`` is the ``requests`` module (or anything with ``post`` and ``get``).
+    """
+    base = f"{_PBI}/groups/{workspace_id}/datasets/{model_id}/refreshes"
+    try:
+        started = http.post(base, headers=headers, json={"type": "full"}, timeout=60)
+    except Exception as exc:  # network failure, not an answer from the service
+        return f"Model refresh not started ({type(exc).__name__}). Refresh the model once in the Fabric portal."
+    if started.status_code not in (200, 202):
+        return (f"Model refresh not started (HTTP {started.status_code}). "
+                "Refresh the model once in the Fabric portal if a report page says it has not been refreshed.")
+    location = (getattr(started, "headers", None) or {}).get("Location")
+    deadline = time.monotonic() + wait_seconds
+    while location and time.monotonic() < deadline:
+        time.sleep(poll_seconds)
+        try:
+            state = http.get(location, headers=headers, timeout=60).json()
+        except Exception:
+            continue
+        status = state.get("status")
+        if status in _FINISHED:
+            return "Model refreshed." if status == "Completed" else f"Model refresh ended as {status}. Refresh the model in the Fabric portal."
+    return "Model refresh started." if location else "Model refresh requested."
+
+
 def model_definition(model_name: str, sql_endpoint: str, database_id: str) -> Dict[str, Any]:
     bim = build_model_bim_json(model_name, sql_endpoint, database_id)
     pbism = json.dumps({"version": "1.0", "settings": {}}, indent=2)

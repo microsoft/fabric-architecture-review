@@ -5,32 +5,39 @@
 // </copyright>
 //-----------------------------------------------------------------------
 
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ArrowUp, Bot, CheckCircle2, CircleDashed, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import { useDataAgent } from "@/hooks/use-data-agent";
+import { suggestedDataAgentQuestions, type DataAgentPhase } from "@/lib/data-agent-factory";
 
-const suggestedPrompts = [
-    "What should we fix first?",
-    "Which workspaces need an owner?",
-    "Where can we reduce capacity cost?",
-    "Show refresh and job execution coverage for each workspace's latest review.",
-    "Which Dataflow Gen2 queries have syntax signals or coverage gaps?",
-    "Rank calculated DAX objects separately from measures.",
-    "Show ARCH-016 structural defects with workspace and item IDs.",
-];
+const phaseLabels: Record<DataAgentPhase, string> = {
+    authenticating: "Signing in to Microsoft",
+    connecting: "Connecting to the published Data Agent",
+    querying: "Waiting for the Data Agent's answer",
+    retrying: "Retrying a short-lived connection or service failure",
+};
 
 export function AgentPanel() {
     const questionId = useId();
     const [question, setQuestion] = useState("");
     const [submittedQuestion, setSubmittedQuestion] = useState<string | null>(null);
-    const { answer, ask, error, missingConfiguration, status } = useDataAgent();
+    const { answer, ask, error, missingConfiguration, status, phase } = useDataAgent();
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const isConfigured = status !== "unconfigured";
+
+    useEffect(() => {
+        if (status !== "querying") return;
+        const startedAt = Date.now();
+        const timer = window.setInterval(() => setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1_000)), 1_000);
+        return () => window.clearInterval(timer);
+    }, [status]);
 
     const submitQuestion = async (value: string) => {
         const nextQuestion = value.trim();
         if (!nextQuestion || status === "querying") return;
         setSubmittedQuestion(nextQuestion);
         setQuestion("");
+        setElapsedSeconds(0);
         await ask(nextQuestion);
     };
 
@@ -49,12 +56,12 @@ export function AgentPanel() {
                     </div>
                     <span className="inline-flex items-center gap-100 rounded-full border border-agent-border px-200 py-100 text-100 text-agent-muted">
                         {status === "querying" ? <LoaderCircle className="icon-size-100 animate-spin" aria-hidden="true" /> : <CircleDashed className="icon-size-100" aria-hidden="true" />}
-                        {status === "unconfigured" ? "Setup needed" : status === "querying" ? "Querying" : "MCP connected"}
+                        {status === "unconfigured" ? "Setup needed" : status === "querying" ? "In progress" : status === "answered" ? "Response received" : status === "error" ? "Request failed" : "Ready to connect"}
                     </span>
                 </div>
                 <div className="flex items-center gap-200 rounded-lg bg-agent-highlight px-300 py-200 text-200 text-agent-muted">
                     {isConfigured ? <CheckCircle2 className="icon-size-200 text-agent-positive" aria-hidden="true" /> : <CircleDashed className="icon-size-200" aria-hidden="true" />}
-                    {isConfigured ? "Semantic model and Data Agent connected" : "No live semantic model or Data Agent connected"}
+                    {isConfigured ? "Central Data Agent configured; each request uses your permissions" : "No Data Agent configured"}
                 </div>
             </div>
 
@@ -80,9 +87,10 @@ export function AgentPanel() {
                             <p className="mb-200 text-100 font-semibold uppercase text-agent-muted">
                                 {status === "querying" ? "Consulting Fabric" : status === "answered" ? "Grounded answer" : status === "error" ? "Query failed" : "Connection required"}
                             </p>
-                            {status === "querying" && <p className="text-300 leading-300 text-agent-muted">Discovering the published tool and inspecting the review data...</p>}
+                            {status === "querying" && <p className="text-300 leading-300 text-agent-muted">{phaseLabels[phase]} ({elapsedSeconds}s).{phase === "authenticating" ? " Complete the Microsoft sign-in window; allow pop-ups if it does not appear." : " Fabric can take several minutes. A timeout or service failure will be reported here."}</p>}
                             {answer && <p className="whitespace-pre-wrap text-300 leading-300">{answer}</p>}
                             {error && <p className="text-300 leading-300">{error}</p>}
+                            {status === "error" && <button className="mt-300 rounded-lg border border-agent-border px-300 py-200 text-200" onClick={() => void submitQuestion(submittedQuestion)} type="button">Retry question</button>}
                             {!isConfigured && (
                                 <p className="text-300 leading-300">
                                     Configure the public OAuth client, tenant, and published Data Agent ID. The source workspace defaults to the connected review model.
@@ -94,14 +102,14 @@ export function AgentPanel() {
                     <div>
                         <p className="mb-300 text-200 font-semibold text-agent-muted">Try asking</p>
                         <div className="flex flex-col gap-200">
-                            {suggestedPrompts.map((prompt) => (
+                            {suggestedDataAgentQuestions.map((prompt) => (
                                 <button
                                     className="rounded-lg border border-agent-border bg-transparent px-300 py-200 text-left text-300 transition-colors hover:bg-agent-highlight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-agent-accent"
-                                    key={prompt}
-                                    onClick={() => void submitQuestion(prompt)}
+                                    key={prompt.label}
+                                    onClick={() => void submitQuestion(prompt.question)}
                                     type="button"
                                 >
-                                    {prompt}
+                                    {prompt.label}
                                 </button>
                             ))}
                         </div>
@@ -128,7 +136,7 @@ export function AgentPanel() {
                         className="min-h-600 flex-1 resize-none bg-transparent px-200 py-100 text-300 outline-none placeholder:text-agent-muted"
                         id={questionId}
                         onChange={(event) => setQuestion(event.target.value)}
-                        placeholder="Ask about risk, cost, or design..."
+                        placeholder="Ask about architecture, access, storage, or evidence..."
                         rows={2}
                         value={question}
                     />

@@ -61,16 +61,10 @@ def test_labels_accept_nullable_text_without_retaining_prior_values(monkeypatch,
 
 
 @pytest.mark.parametrize("scope", [None, "", "aaaaaaaa-0000-4000-8000-000000000001"])
-def test_collection_scope_and_optional_defaults(monkeypatch, capsys, scope):
+def test_collection_scope_is_the_only_run_scope_parameter(monkeypatch, capsys, scope):
     monkeypatch.setattr(os, "environ", {"WORKSPACE_IDS": "previous"})
-    export_parameters("01_collect.ipynb", {
-        "WORKSPACE_IDS": scope, "ACTIVITY_DAYS_LOG": None,
-        "CAPACITY_METRICS_APP_INSTALLED": None, "VERTIPAQ_STATS_READ_DATA": None,
-    })
+    export_parameters("01_collect.ipynb", {"WORKSPACE_IDS": scope})
     assert os.environ["WORKSPACE_IDS"] == (scope or "")
-    assert os.environ["ACTIVITY_DAYS_LOG"] == "7"
-    assert os.environ["CAPACITY_METRICS_APP_INSTALLED"] == "false"
-    assert os.environ["VERTIPAQ_STATS_READ_DATA"] == "false"
     output = capsys.readouterr().out
     assert ("Workspace scope: no filter" in output) == (not scope)
 
@@ -83,13 +77,11 @@ def test_invalid_scope_is_rejected_without_broadening(monkeypatch, value):
     assert os.environ["WORKSPACE_IDS"] == "previous"
 
 
-@pytest.mark.parametrize("value", [None, "", "   ", "0.75", 0])
-def test_threshold_null_or_blank_clears_stale_override(monkeypatch, value):
-    monkeypatch.setattr(os, "environ", {"GOV_ENDORSEMENT_MIN_RATIO": "0.9"})
-    export_parameters("02_analyze.ipynb", {"GOV_ENDORSEMENT_MIN_RATIO": value})
-    expected = str(value).strip() if value is not None else ""
-    assert os.environ.get("GOV_ENDORSEMENT_MIN_RATIO") == (expected or None)
-    assert "None" not in os.environ.values()
+def test_thresholds_are_never_read_from_the_environment(monkeypatch):
+    monkeypatch.setattr(os, "environ", {"GOV_MIN_ADMINS": "9"})
+    export_parameters("02_analyze.ipynb", {})
+    from orchestration.review_config import local_configuration
+    assert local_configuration()["thresholds"]["governance"]["min_admins"] == 2
 
 
 def test_optional_string_logs_null_without_echoing_values(capsys):

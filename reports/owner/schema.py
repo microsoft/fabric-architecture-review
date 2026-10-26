@@ -8,11 +8,7 @@ part of this contract. Access is a separately refreshed, expiring snapshot.
 """
 from reports.powerbi.schema import Column, Table
 
-OWNER_CONTRACT_VERSION = 2
-DEFAULT_OWNER_MODEL_NAME = "Fabric Arch Review - Workspace Owner Model"
-DEFAULT_OWNER_REPORT_NAME = "Fabric Arch Review - Workspace Owner"
-
-
+OWNER_CONTRACT_VERSION = 3
 def _c(name: str, kind: str = "string") -> Column:
     return Column(name, kind)
 
@@ -20,6 +16,7 @@ def _c(name: str, kind: str = "string") -> Column:
 _REVIEW = [
     _c("review_key"), _c("workspace_id"), _c("run_id"),
     _c("run_timestamp", "dateTime"),
+    _c("profile_id"), _c("profile_sha256"), _c("configuration_sha256"),
 ]
 
 OWNER_TABLES = [
@@ -38,31 +35,24 @@ OWNER_TABLES = [
         _c("item_id"), _c("item_name"), _c("item_type"),
         _c("title"), _c("recommendation"), _c("signal_codes"),
         _c("affected_count", "int64"), _c("notice"),
-    ], "Reconstructed technical findings and native failures, not copies of multi-workspace governance findings."),
+        _c("rule_kind"), _c("is_scored", "int64"), _c("review_suggested"),
+        _c("status_meaning"), _c("next_action"), _c("why_it_matters"), _c("how_to_fix"), _c("configure"),
+    ], "Explicitly ID-scoped authoritative architectural outcomes; no heuristic re-scoring."),
     Table("owner_details", [
         *_REVIEW, _c("detail_key"), _c("detail_type"),
         _c("item_id"), _c("item_name"), _c("item_type"),
-        _c("table_name"), _c("measure_name"), _c("signal_codes"),
-        _c("metric_name"), _c("metric_value", "int64"), _c("detail"),
+        _c("signal_codes"), _c("detail"),
         _c("notice"),
     ], "Approved per-item counters and pattern codes; no source or freeform evidence."),
     Table("owner_access", [
         _c("workspace_id"), _c("principal_object_id"),
         _c("refreshed_at", "dateTime"), _c("expires_at", "dateTime"),
     ], "Current direct-user workspace-admin entitlements, replaced by independent access sync."),
-    Table("owner_executions", [
-        *_REVIEW, _c("execution_key"), _c("execution_id"),
-        _c("item_id"), _c("item_name"), _c("item_type"),
-        _c("execution_type"), _c("status"),
-        _c("start_time", "dateTime"), _c("end_time", "dateTime"),
-        _c("duration_ms", "int64"), _c("source"), _c("notice"),
-    ], "Native observed runs, not DAX query timings or consumption. Keys are stable across reviews."),
     Table("owner_coverage", [
         *_REVIEW, _c("coverage_key"), _c("item_id"), _c("item_name"),
         _c("item_type"), _c("evidence_type"), _c("collection_status"),
-        _c("observed_count", "int64"), _c("flagged_count", "int64"),
-        _c("oldest_start_time", "dateTime"), _c("newest_start_time", "dateTime"),
-        _c("history_scope"), _c("source"), _c("notice"),
+        _c("source"), _c("source_contract"), _c("observed_at", "dateTime"),
+        _c("freshness_status"), _c("notice"),
     ], "Explicit collection scope and incomplete evidence; zero rows never implies success."),
 ]
 

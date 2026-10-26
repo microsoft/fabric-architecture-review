@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from analyzers._common import load_raw
+from tests._raw import load_raw
 from collectors import workspace_inventory
 from collectors._common import load_complete_raw, load_workspace_inventory
 from collectors._http import HttpError
@@ -93,8 +93,17 @@ def _write(path, name, payload):
     (path / name).write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _current_manifest(path):
+    from analyzers.far_profile import PROFILE_ID, PROFILE_SHA256
+    _write(path, "run_manifest.json", {
+        "profile_id": PROFILE_ID, "profile_sha256": PROFILE_SHA256,
+        "configuration_sha256": "synthetic-policy",
+    })
+
+
 @pytest.mark.parametrize("native_state", ["unavailable", "partial", "missing"])
-def test_gold_preserves_owner_executions_without_dataflows(tmp_path, native_state):
+def test_gold_preserves_inventory_but_never_owner_executions(tmp_path, native_state):
+    _current_manifest(tmp_path)
     scanner_workspace = {
         "id": WORKSPACES[0], "name": "Scanned workspace",
         "datasets": [{"id": MODEL, "name": "Model"}],
@@ -132,9 +141,9 @@ def test_gold_preserves_owner_executions_without_dataflows(tmp_path, native_stat
         assert set(workspaces) == set(WORKSPACES[:2])
         assert workspaces[WORKSPACES[1]]["item_count"] is None
     owner = build_owner_gold(tables)
-    assert len(owner["owner_executions"]) == 1
-    assert owner["owner_executions"][0]["workspace_id"] == WORKSPACES[0]
-    assert owner["owner_executions"][0]["duration_ms"] == 1000
+    assert "owner_executions" not in owner
+    assert "gold_item_executions" not in tables
+    assert "refresh-1" not in json.dumps([tables, owner])
     assert owner["owner_coverage"]
     assert {r["run_id"] for r in owner["owner_reviews"]} == {"current-run"}
     assert all(r["workspace_id"] in workspaces for r in owner["owner_coverage"])
@@ -145,6 +154,7 @@ def test_native_only_item_inventory_is_known_without_scanner(tmp_path, inventory
         [], HttpError("Synthetic missing roles", status_code=404), [],
     ]
     workspace_inventory.collect(tmp_path)
+    _current_manifest(tmp_path)
     tables = build_gold([], tmp_path, run_id="current-run", run_timestamp=NOW, check_remote=False)
     assert [r["admin_count"] for r in tables["gold_workspaces"]] == [0, None, 0]
     assert [r["item_count"] for r in tables["gold_workspaces"]] == [0, 0, 0]
@@ -153,11 +163,13 @@ def test_native_only_item_inventory_is_known_without_scanner(tmp_path, inventory
 def test_unknown_item_inventory_is_not_an_empty_workspace(tmp_path, inventory):
     inventory[1].side_effect = HttpError("Synthetic item access denied", status_code=403)
     workspace_inventory.collect(tmp_path)
+    _current_manifest(tmp_path)
     tables = build_gold([], tmp_path, run_id="current-run", run_timestamp=NOW, check_remote=False)
     assert all(r["item_count"] is None for r in tables["gold_workspaces"])
-    assert all(r["archetype"] == "unknown" for r in tables["gold_workspaces"])
+    assert all("archetype" not in r for r in tables["gold_workspaces"])
     for row in tables["gold_workspace_risk"]:
-        assert row["status"] == "grey"
+        assert row["status"] == "unknown"
+        assert row["risk_score"] is None
         assert all(row[key] is None for key in (
             "item_count", "semantic_model_count", "report_count",
             "notebook_count", "pipeline_count", "lakehouse_count",
@@ -166,6 +178,7 @@ def test_unknown_item_inventory_is_not_an_empty_workspace(tmp_path, inventory):
 
 
 def test_inventory_deduplicates_scanner_and_native_by_id_not_name(tmp_path):
+    _current_manifest(tmp_path)
     _write(tmp_path, "scanner.json", {"workspaces": [
         {"id": WORKSPACES[0].upper(), "name": "Same name", "datasets": [{"id": MODEL}]},
         {"id": WORKSPACES[1], "name": "Same name", "datasets": []},
@@ -260,7 +273,7 @@ def test_collect_notebook_reports_gaps_and_attempts_every_collector(
     _write(tmp_path, incomplete_path.name, {} if failed else payload)
 
     def import_collector(name):
-        affected = name == "collectors.workspace_inventory"
+        affected = name == "collectors.far_collection"
         return SimpleNamespace(collect=Mock(
             return_value=incomplete_path if affected else complete_path,
             side_effect=payload if affected and failed else None,
@@ -278,10 +291,11 @@ def test_collect_notebook_reports_gaps_and_attempts_every_collector(
         exit_notebook.assert_not_called()
     else:
         exec(compile(source, "collect-notebook", "exec"), {"RAW_DIR": str(tmp_path)})
-        assert "incomplete=collectors.workspace_inventory" in exit_notebook.call_args.args[0]
+        assert "incomplete=collectors.far_collection" in exit_notebook.call_args.args[0]
     output = capsys.readouterr().out
     assert f"{collector_count - 1} complete, {int(not failed)} incomplete, {int(failed)} failed" in output
     assert [call.args[0] for call in import_module.call_args_list] == collectors
+    assert collectors == ["collectors.far_collection"]
     assert "collectors succeeded" not in output
 
 

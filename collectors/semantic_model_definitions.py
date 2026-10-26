@@ -1,10 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Fetch TMDL/BIM definitions for semantic models via the Fabric
-``getDefinition`` API, so the storage-mode analyzer can audit each model for
-DirectLake-migration blockers (M-based partitions, calculated columns,
-unsupported types, missing lakehouse-table binding).
+"""Inspect TMDL/BIM definitions in memory for architectural model summaries.
 
 Endpoints (Long Running Operation):
   POST https://api.fabric.microsoft.com/v1/workspaces/{ws}/semanticModels/{id}/getDefinition
@@ -16,29 +13,19 @@ Docs:
   - https://learn.microsoft.com/rest/api/fabric/articles/long-running-operation
   - https://learn.microsoft.com/fabric/get-started/direct-lake-overview
 
-Why this exists:
-  ``semantic_models.json`` only carries catalog metadata + `targetStorageMode`
-  (Import / Abf / PremiumFiles). It cannot tell us *why* a model is in Import
-  mode, or whether it could be moved to DirectLake. Reading the TMDL parts
-  reveals the partition `mode`, the M source connectors, calculated
-  columns/tables, and the column data types — the exact information a
-  DirectLake-feasibility review needs.
-
 Scoping:
-    By default the collector fetches all in-scope definitions so metadata-only
-    DAX analysis covers Direct Lake and Import models. Set
-    ``SEMANTIC_MODEL_DEF_ALL=0`` to limit collection to non-DirectLake models.
+    Fetch all demanded in-scope model definitions, including Direct Lake.
 
 DATA SAFETY:
-  TMDL/BIM definitions are *model metadata* (table names, column types,
-  partition expressions, DAX). They do not contain row data. M expressions
-  may embed connection strings / parameters but not credentials.
+  Persist only storage modes, allowlisted feature flags, GUID identities and row/object-level security
+  counts (see collectors.model_security). Role names, permissions and per-role counts are added only when
+  model_security__role_detail is enabled. Raw/base64 definitions, DAX, M, role filters, source literals and
+  connection details never leave memory. Summary completeness is conservative; candidate fingerprints
+  alone cannot authorize checkpoint reuse.
 """
 from __future__ import annotations
 
 import argparse
-import base64
-import binascii
 import hashlib
 import json
 import os
@@ -47,38 +34,16 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from collectors._http import Headers, HttpError, request
-from collectors._common import load_complete_raw, record_collection_failure
+from collectors._common import get_scope_workspace_ids, load_complete_raw, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
 
 LRO_MAX_POLLS = int(os.environ.get("SEMANTIC_MODEL_DEF_LRO_MAX_POLLS", "20"))
 LRO_DEFAULT_RETRY_AFTER = int(os.environ.get("SEMANTIC_MODEL_DEF_LRO_RETRY_AFTER", "3"))
+LRO_FIRST_POLL_DELAY = 2
 CHECKPOINT_INTERVAL = max(1, int(os.environ.get("SEMANTIC_MODEL_DEF_CHECKPOINT_INTERVAL", "10")))
 MODEL_DELAY_SECONDS = max(0.0, float(os.environ.get("SEMANTIC_MODEL_DEF_MODEL_DELAY_SECONDS", "0")))
-
-# Storage modes that warrant a definition fetch (anything that *could* be
-# migrated to DirectLake but currently isn't).
-NON_DIRECTLAKE_MODES = {"abf", "premiumfiles", "import", "push", "pushstreaming", ""}
-
-
-def _truthy(value: Optional[str]) -> bool:
-    return (value or "").strip().lower() in ("1", "true", "yes", "y", "on")
-
-
-def _decode_part(payload: str, payload_type: str) -> Optional[str]:
-    """Decode a TMDL/BIM part. Returns the decoded text or ``None``."""
-    if not payload or (payload_type or "").lower() != "inlinebase64":
-        return None
-    try:
-        raw = base64.b64decode(payload, validate=False)
-    except (binascii.Error, ValueError):
-        return None
-    try:
-        return raw.decode("utf-8-sig", errors="replace")
-    except UnicodeDecodeError:
-        return None
-
 
 def _get_definition(
     headers: Headers,
@@ -94,7 +59,7 @@ def _get_definition(
     try:
         return _get_definition_impl(headers, workspace_id, dataset_id)
     except HttpError as exc:
-        return None, f"http_error:{exc}"
+        return None, f"http_{exc.status_code or 'error'}"
 
 
 def _get_definition_impl(
@@ -119,9 +84,10 @@ def _get_definition_impl(
     if not op_url:
         return None, "lro_missing_location"
     retry_after = int(r.headers.get("Retry-After") or LRO_DEFAULT_RETRY_AFTER)
+    delay = min(retry_after, LRO_FIRST_POLL_DELAY)
 
     for _ in range(LRO_MAX_POLLS):
-        time.sleep(max(1, retry_after))
+        time.sleep(max(1, delay))
         pr = request("GET", op_url, headers)
         if pr.status_code in (401, 403):
             return None, f"http_{pr.status_code}"
@@ -138,9 +104,8 @@ def _get_definition_impl(
                 return body, None
             return None, "lro_result_unavailable"
         if status in ("failed", "canceled"):
-            err = body.get("error") or {}
-            return None, f"lro_{status}:{err.get('errorCode') or err.get('code') or ''}"
-        retry_after = int(pr.headers.get("Retry-After") or retry_after)
+            return None, f"lro_{status}"
+        delay = int(pr.headers.get("Retry-After") or retry_after)
 
     return None, "lro_timeout"
 
@@ -157,23 +122,31 @@ def _normalise(
         "workspaceName": dataset.get("workspaceName"),
         "targetStorageMode": dataset.get("targetStorageMode"),
     }
+    from collectors.definition_safety import model_summary
+    from collectors.model_security import model_security, role_detail_enabled
     if error:
         rec["error"] = error
-        return rec
-
-    parts_in = ((definition or {}).get("definition") or {}).get("parts") or []
-    parts_out: List[Dict[str, Any]] = []
-    for p in parts_in:
-        path = p.get("path") or ""
-        decoded = _decode_part(p.get("payload") or "", p.get("payloadType") or "")
-        out_part: Dict[str, Any] = {"path": path, "payloadType": p.get("payloadType")}
-        if decoded is not None:
-            out_part["text"] = decoded
-        else:
-            out_part["payload"] = p.get("payload")
-        parts_out.append(out_part)
-    rec["parts"] = parts_out
+    rec.update(model_summary(None if error else definition))
+    # Counts and an inspection status only; filter expressions, names and membership are never kept. Role names,
+    # permissions and per-role counts are added only when model_security__role_detail is on.
+    rec["security"] = model_security(None if error else definition, error, keep_roles=role_detail_enabled())
+    flag = dataset.get("isEffectiveIdentityRolesRequired")
+    rec["effectiveIdentityRolesRequired"] = flag if isinstance(flag, bool) else None
     return rec
+
+
+def refetch_model(row: Dict[str, Any], headers: Headers | None = None) -> Dict[str, Any]:
+    """Read one model's definition again and return its normalized record (used after a temporary access grant)."""
+    if headers is None:
+        provider = get_default_provider()
+        headers = lambda: provider.headers(scope=FABRIC_SCOPE)
+    dataset = {
+        "id": row.get("id"), "name": row.get("name"), "workspaceId": row.get("workspaceId"),
+        "workspaceName": row.get("workspaceName"), "targetStorageMode": row.get("targetStorageMode"),
+        "isEffectiveIdentityRolesRequired": row.get("effectiveIdentityRolesRequired"),
+    }
+    definition, error = _get_definition(headers, str(row.get("workspaceId")), str(row.get("id")))
+    return _normalise(dataset, definition, error)
 
 
 def _candidate_fingerprint(candidates: List[Dict[str, Any]]) -> str:
@@ -196,6 +169,7 @@ def _write_progress(
         "errors": errors,
         "candidate_fingerprint": fingerprint,
         "status": status,
+        "collectionComplete": status == "completed" and errors == 0,
     }
     temporary = target.with_suffix(target.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -203,7 +177,7 @@ def _write_progress(
 
 
 @record_collection_failure("semantic_model_definitions.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     target = raw_dir / "semantic_model_definitions.json"
@@ -211,20 +185,14 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     src = raw_dir / "semantic_models.json"
     catalog = load_complete_raw(src)
     datasets = catalog.get("datasets") or []
-    fetch_all_setting = os.environ.get("SEMANTIC_MODEL_DEF_ALL")
-    fetch_all = fetch_all_setting is None or _truthy(fetch_all_setting)
-
-    if fetch_all:
-        candidates = datasets
-    else:
-        candidates = [
-            d for d in datasets
-            if (d.get("targetStorageMode") or "").strip().lower() in NON_DIRECTLAKE_MODES
-        ]
+    scope = get_scope_workspace_ids()
+    candidates = [d for d in datasets if not scope or (
+        str(d.get("workspaceId") or d.get("groupId") or "").lower() in scope
+    )]
 
     if not candidates:
         print("Semantic model definitions: no datasets in scope - nothing to fetch.")
-        target.write_text(json.dumps({"models": []}, indent=2), encoding="utf-8")
+        target.write_text(json.dumps({"models": [], "collectionComplete": True}, indent=2), encoding="utf-8")
         return target
 
     provider = get_default_provider()
@@ -233,15 +201,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
     print(f"Semantic model definitions: fetching getDefinition for {len(candidates)} model(s)...")
 
     models_out: List[Dict[str, Any]] = []
-    if target.exists():
-        try:
-            previous = json.loads(target.read_text(encoding="utf-8-sig"))
-            if previous.get("status") == "in_progress" and previous.get("candidate_fingerprint") == fingerprint:
-                models_out = [model for model in previous.get("models") or [] if not model.get("error")]
-                if models_out:
-                    print(f"  resuming {len(models_out)} successful model definition(s) from checkpoint")
-        except (json.JSONDecodeError, OSError, AttributeError):
-            models_out = []
+    # Candidate equality is not a full-capture watermark. Never reuse old parts.
     completed = {
         (model.get("workspaceId"), model.get("id"))
         for model in models_out
@@ -251,6 +211,8 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         wsid = ds.get("workspaceId") or ds.get("groupId")
         did = ds.get("id")
         if not (wsid and did):
+            models_out.append(_normalise(ds, None, "missing_item_identity"))
+            errors += 1
             continue
         if (wsid, did) in completed:
             continue
@@ -273,7 +235,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

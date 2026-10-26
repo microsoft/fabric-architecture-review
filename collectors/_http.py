@@ -153,9 +153,13 @@ def collect_workspace_groups(url: str, headers: Headers) -> List[Dict[str, Any]]
     groups: List[Dict[str, Any]] = []
     seen: set[str] = set()
     top = 5000
+    admin = url.rstrip("/").endswith("/admin/groups")
     while True:
         try:
-            payload = get_json(url, headers, params={"$top": top, "$skip": len(groups)})
+            params: Dict[str, Any] = {"$top": top, "$skip": len(groups)}
+            if admin:
+                params["$expand"] = "datasets,reports"
+            payload = get_json(url, headers, params=params)
         except HttpError as exc:
             if groups:
                 raise HttpError(
@@ -181,4 +185,8 @@ def collect_workspace_groups(url: str, headers: Headers) -> List[Dict[str, Any]]
             seen.add(identity.lower())
         groups.extend(page)
         if len(page) < top:
+            if not admin:
+                for group in groups:
+                    for kind in ("datasets", "reports"):
+                        group[kind] = collect_value(f"{url.rstrip('/')}/{group['id']}/{kind}", headers)
             return groups

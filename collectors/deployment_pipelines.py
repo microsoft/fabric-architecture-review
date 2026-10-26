@@ -1,20 +1,19 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Fabric / Power BI Deployment Pipelines inventory.
+"""Deployment pipelines and the reviewed workspaces assigned to a stage.
 
-Endpoints (Power BI REST, available to Fabric Admin / pipeline admin):
-  GET https://api.powerbi.com/v1.0/myorg/pipelines
-  GET https://api.powerbi.com/v1.0/myorg/pipelines/{id}/stages
-  GET https://api.powerbi.com/v1.0/myorg/pipelines/{id}/users    (best-effort)
+Preferred (administrator):
+  GET https://api.powerbi.com/v1.0/myorg/admin/pipelines?$expand=stages&$top=100&$skip=N
+Docs: https://learn.microsoft.com/rest/api/power-bi/admin/pipelines-get-pipelines-as-admin
+Fallback (pipelines the caller can see):
+  GET https://api.fabric.microsoft.com/v1/deploymentPipelines
+  GET https://api.fabric.microsoft.com/v1/deploymentPipelines/{pipelineId}/stages
 
-Falls back gracefully when the signed-in user has no pipeline visibility.
+The administrator listing is limited to 200 requests per hour; one request covers 100 pipelines.
 
-Docs:
-  https://learn.microsoft.com/rest/api/power-bi/pipelines
-
-DATA SAFETY: Pipeline name, description, stage->workspace bindings, and
-admin/contributor identifiers only. No item content is read.
+DATA SAFETY: Pipeline and workspace IDs and the stage order only. Names are not kept, and a stage
+whose workspace is not in the review scope is dropped.
 """
 from __future__ import annotations
 
@@ -24,113 +23,74 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-from collectors._http import Headers, collect_value, get_json
-from collectors._common import record_collection_failure
-from collectors.auth import POWERBI_SCOPE, get_default_provider
-from collectors.workspace_scope import filter_review_payload
+from collectors._common import filter_workspaces_by_scope, load_workspace_inventory, record_collection_failure
+from collectors._http import HttpError, collect_value, get_json
+from collectors.auth import FABRIC_SCOPE, POWERBI_SCOPE, get_default_provider
 
 PBI = "https://api.powerbi.com/v1.0/myorg"
+FAB = "https://api.fabric.microsoft.com/v1"
+PAGE = 100
 
 
-def _list_pipelines(headers: Headers) -> List[Dict[str, Any]]:
-    return collect_value(f"{PBI}/pipelines", headers)
+def _admin_pipelines(provider) -> List[Dict[str, Any]]:
+    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
+    pipelines: List[Dict[str, Any]] = []
+    while True:
+        payload = get_json(f"{PBI}/admin/pipelines", headers,
+                           params={"$expand": "stages", "$top": PAGE, "$skip": len(pipelines)})
+        page = payload.get("value") if isinstance(payload, dict) else None
+        if not isinstance(page, list) or any(not isinstance(row, dict) for row in page):
+            raise HttpError("The administrator pipeline listing returned an invalid page.")
+        pipelines.extend(page)
+        if len(page) < PAGE:
+            return pipelines
 
 
-def _stages(headers: Headers, pipeline_id: str) -> List[Dict[str, Any]]:
-    payload = get_json(f"{PBI}/pipelines/{pipeline_id}/stages", headers)
-    if not payload:
-        return []
-    return payload.get("value") or []
+def _visible_pipelines(provider) -> List[Dict[str, Any]]:
+    headers = lambda: provider.headers(scope=FABRIC_SCOPE)
+    pipelines = []
+    for pipeline in collect_value(f"{FAB}/deploymentPipelines", headers):
+        stages = collect_value(f"{FAB}/deploymentPipelines/{pipeline['id']}/stages", headers)
+        pipelines.append({"id": pipeline["id"], "stages": stages})
+    return pipelines
 
 
-def _users(headers: Headers, pipeline_id: str) -> List[Dict[str, Any]]:
-    payload = get_json(f"{PBI}/pipelines/{pipeline_id}/users", headers, allow=(200, 401, 403, 404))
-    if not payload:
-        return []
-    return payload.get("value") or []
-
-
-def _stage_artifacts(headers: Headers, pipeline_id: str, stage_order: int) -> List[Dict[str, Any]]:
-    """Per-stage artifact deploy state (best-effort).
-
-    GET /pipelines/{id}/stages/{order}/artifacts returns one block per artifact
-    type (datasets, reports, ...); each artifact carries its source/target object
-    ids and the last deployment time. A null ``targetArtifactId`` means the item
-    was never promoted to the next stage. Tolerate permission/availability gaps.
-    """
-    payload = get_json(
-        f"{PBI}/pipelines/{pipeline_id}/stages/{stage_order}/artifacts", headers,
-        allow=(200, 401, 403, 404),
-    )
-    if not payload:
-        return []
-    out: List[Dict[str, Any]] = []
-    for kind, items in payload.items():
-        if not isinstance(items, list):
-            continue
-        for a in items:
-            if not isinstance(a, dict):
-                continue
-            out.append({
-                "artifactType": kind,
-                "artifactName": a.get("artifactDisplayName") or a.get("artifactName"),
-                "sourceArtifactId": a.get("sourceArtifactId"),
-                "targetArtifactId": a.get("targetArtifactId"),
-                "lastDeploymentTime": a.get("lastDeploymentTime"),
-            })
-    return out
-
+def _reduce(pipelines: List[Dict[str, Any]], scope: set[str]) -> List[Dict[str, Any]]:
+    result = []
+    for pipeline in pipelines:
+        stages = [{"order": stage.get("order"), "workspaceId": str(stage["workspaceId"]).lower()}
+                  for stage in pipeline.get("stages") or []
+                  if isinstance(stage, dict) and str(stage.get("workspaceId") or "").lower() in scope]
+        if stages:
+            result.append({"id": pipeline.get("id"), "stages": stages})
+    return result
 
 
 @record_collection_failure("deployment_pipelines.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
+    raw_dir = Path(output_dir)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    scope = {str(w["id"]).lower() for w in filter_workspaces_by_scope(load_workspace_inventory(raw_dir)) if w.get("id")}
     provider = get_default_provider()
-    headers = lambda: provider.headers(scope=POWERBI_SCOPE)
-
-    print("Deployment pipelines: listing...")
-    pipelines = _list_pipelines(headers)
-    print(f"  {len(pipelines)} pipeline(s) visible.")
-
-    enriched: List[Dict[str, Any]] = []
-    for p in pipelines:
-        pid = p.get("id")
-        if not pid:
-            continue
-        stages = filter_review_payload({"stages": _stages(headers, pid)}, Path(output_dir))["stages"]
-        users = _users(headers, pid)
-        stage_artifacts: Dict[str, List[Dict[str, Any]]] = {}
-        for s in stages:
-            order = s.get("order")
-            if order is None:
-                continue
-            arts = _stage_artifacts(headers, pid, order)
-            if arts:
-                stage_artifacts[str(order)] = arts
-        enriched.append({
-            "id": pid,
-            "displayName": p.get("displayName") or p.get("name"),
-            "description": p.get("description"),
-            "stages": stages,
-            "stageCount": len(stages),
-            "stageArtifacts": stage_artifacts,
-            "users": users,
-            "assignedWorkspaceIds": [s.get("workspaceId") for s in stages if s.get("workspaceId")],
-        })
-
-    target = Path(output_dir)
-    target.mkdir(parents=True, exist_ok=True)
-    out = target / "deployment_pipelines.json"
-    out.write_text(json.dumps({
-        "pipelineCount": len(enriched),
-        "pipelines": enriched,
+    try:
+        pipelines, visibility = _admin_pipelines(provider), "tenant"
+    except HttpError as exc:
+        if exc.status_code not in (401, 403):
+            raise
+        print(f"Deployment pipelines: administrator listing returned HTTP {exc.status_code}; using the pipelines the caller can see.")
+        pipelines, visibility = _visible_pipelines(provider), "caller"
+    target = raw_dir / "deployment_pipelines.json"
+    target.write_text(json.dumps({
+        "pipelines": _reduce(pipelines, scope), "pipelineCount": len(pipelines), "visibility": visibility,
+        "collectionComplete": True,
     }, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"Wrote {out}.")
-    return out
+    print(f"Wrote {target} ({len(pipelines)} pipeline(s), visibility={visibility}).")
+    return target
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

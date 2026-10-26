@@ -1,326 +1,156 @@
-//-----------------------------------------------------------------------
-// <copyright company="Microsoft Corporation">
-//        Copyright (c) Microsoft Corporation.  All rights reserved.
-//        Licensed under the MIT license. See LICENSE file in the project root for full license information.
-// </copyright>
-//-----------------------------------------------------------------------
-
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 import type { QueryTable } from "@microsoft/fabric-app-data";
-import { readPipelineEvidence } from "@/lib/pipeline-evidence";
-import type { AssessmentDimension, DaxMeasureRisk, EstateHealth, EstateItem, EstateItemType, FindingSeverity, ReviewData, ReviewDimension } from "@/lib/review-data";
+import {
+    activeArchitectureRules, architectureProfile, architectureProfileHash, dimensionOrder, previewReviewData,
+    type AssessmentDimension, type CapacityDetail, type DimensionScore, type EstateHealth, type EstateItem, type EstateItemType,
+    type ModelRole, type ModelSecurity, type ReviewData, type ReviewFinding, type ReviewMetric, type RoleFilterKind, type SecurityState, type WorkspaceRisk, type WorkspaceRoom,
+} from "@/lib/review-data";
 
 export interface LiveReviewTables {
-    daxModels: QueryTable;
-        capacities: QueryTable;
-        capacityItems: QueryTable;
-    daxMeasures: QueryTable;
-    dimensionSummary: QueryTable;
-    estateNodes: QueryTable;
-    findingTargets: QueryTable;
-    findings: QueryTable;
-    notebookSmells: QueryTable;
-    modelColumns: QueryTable;
-    modelTables: QueryTable;
-    runSummary: QueryTable;
-    semanticModels: QueryTable;
-    tenantSettingChanges: QueryTable;
-    workspaceRisk: QueryTable;
+    findings: QueryTable; runSummary: QueryTable; semanticModels: QueryTable; workspaceRisk: QueryTable; coverage: QueryTable;
+    capacities: QueryTable; findingItems: QueryTable; dimensions: QueryTable; workspaces: QueryTable; capacityItems: QueryTable;
+    tenantSettings: QueryTable;
+    modelSecurity?: QueryTable | null;
+    modelRoles?: QueryTable | null;
 }
-
-type RecordValue = string | number | boolean | null | undefined;
-type QueryRecord = Record<string, RecordValue>;
-
-function records(table: QueryTable): QueryRecord[] {
-    const names = table.columns.map((column) => column.name.replace(/^\[|\]$/g, ""));
-    return table.rows.map((row) => Object.fromEntries(names.map((name, index) => [name, row[index] as RecordValue])));
+type Row = Record<string, unknown>;
+function records(table: QueryTable): Row[] {
+    const names = table.columns.map(c => c.name.replace(/.*\[/, "").replace(/\]$/, ""));
+    return table.rows.map(row => Object.fromEntries(names.map((name, i) => [name, row[i]])));
 }
-
-function text(value: RecordValue) {
-    return value == null ? "" : String(value);
-}
-
-function number(value: RecordValue) {
-    const result = Number(value ?? 0);
-    return Number.isFinite(result) ? result : 0;
-}
-
-function boolean(value: RecordValue) {
-    return value === true || value === 1 || text(value).toLowerCase() === "true";
-}
-
-function dimension(value: RecordValue): ReviewDimension {
-    const normalized = text(value).toLowerCase();
-    if (normalized === "architecture") return "Architecture";
-    if (normalized === "performance") return "Performance";
-    if (normalized === "cost") return "Cost";
-    if (normalized === "security") return "Security";
-    if (normalized === "notebook_code") return "Notebook";
-    return "Governance";
-}
-
-function assessmentDimension(value: RecordValue): AssessmentDimension {
-    const normalized = text(value).toLowerCase();
-    if (normalized === "operational_excellence") return "Operational excellence";
-    if (normalized === "tenant_settings") return "Tenant settings";
-    if (normalized === "best_practices") return "Best practices";
-    return dimension(value);
-}
-
-function severity(value: RecordValue): FindingSeverity {
-    const normalized = text(value).toLowerCase();
-    return normalized === "critical" || normalized === "high" || normalized === "medium" || normalized === "info" ? normalized : "low";
-}
-
-function itemType(value: RecordValue): EstateItemType | null {
-    const normalized = text(value).toLowerCase();
-    // Estate-graph container nodes are not workspace items.
-    if (normalized === "capacity" || normalized === "workspace" || normalized === "owner") return null;
-    if (normalized === "semanticmodel") return "model";
-    if (normalized === "datapipeline") return "pipeline";
-    if (normalized === "lakehouse" || normalized === "warehouse" || normalized === "report" || normalized === "notebook" || normalized === "pipeline") return normalized;
-    if (normalized === "app" || normalized === "appbackend") return "app";
-    return "component";
-}
-
-function health(issueCount: number, riskScore = 0): EstateHealth {
-    if (riskScore >= 60 || issueCount >= 5) return "risk";
-    if (riskScore >= 25 || issueCount > 0) return "warning";
-    return "healthy";
-}
-
-function formatBytes(value: number) {
-    if (value <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const unit = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
-    return `${(value / 1024 ** unit).toFixed(unit > 1 ? 1 : 0)} ${units[unit]}`;
+function compatible(row: Row) { return row.profile_id === architectureProfile && row.profile_sha256 === architectureProfileHash; }
+const text = (value: unknown) => value == null ? "" : String(value);
+const number = (value: unknown) => value == null || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+const dimensionLabels: Record<string, AssessmentDimension> = Object.fromEntries(dimensionOrder.map(d => [d.toLowerCase(), d]));
+const dimensionOf = (value: unknown): AssessmentDimension => dimensionLabels[text(value).toLowerCase()] ?? "Architecture";
+const securityState = (value: unknown): SecurityState => value === "present" || value === "absent" ? value : "unknown";
+const filterKinds: readonly RoleFilterKind[] = ["none", "constant", "static", "dynamic", "mixed", "unknown", "not_applicable"];
+const filterKind = (value: unknown): RoleFilterKind => filterKinds.find(kind => kind === value) ?? "unknown";
+const count = (value: unknown) => number(value) ?? 0;
+const itemTypes: Record<string, EstateItemType> = {
+    Lakehouse: "lakehouse", Warehouse: "warehouse", SemanticModel: "model", Dataset: "model", Report: "report",
+    PaginatedReport: "report", Notebook: "notebook", DataPipeline: "pipeline", App: "app",
+};
+const environmentLabels: Record<string, string> = { production: "Production", nonproduction: "Non-production" };
+// An unknown risk is shown as a warning: it must not look healthy, and it is not a confirmed failure.
+const health = (status: string): EstateHealth => status === "critical" ? "risk" : status === "healthy" ? "healthy" : "warning";
+const riskColour = (status: string): WorkspaceRisk["status"] => status === "critical" ? "red" : status === "healthy" ? "green" : "amber";
+const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
+function groupBy<T>(rows: T[], key: (row: T) => string) {
+    const groups = new Map<string, T[]>();
+    for (const row of rows) groups.set(key(row), [...(groups.get(key(row)) ?? []), row]);
+    return groups;
 }
 
 export function buildLiveReviewData(tables: LiveReviewTables): ReviewData {
-    const summary = records(tables.runSummary)[0] ?? {};
-    const targetRows = records(tables.findingTargets);
-    const workspaceIdsByRule = new Map<string, string[]>();
-    targetRows.forEach((row) => {
-        const ruleId = text(row.rule_id);
-        const workspaceId = text(row.workspace_id);
-        if (workspaceId) workspaceIdsByRule.set(ruleId, [...(workspaceIdsByRule.get(ruleId) ?? []), workspaceId]);
-    });
-    const findingRows = records(tables.findings);
-    const findings = findingRows.map((row) => {
-        const pipelineEvidence = text(row.rule_id) === "ARCH-016" ? readPipelineEvidence(text(row.pipeline_evidence)) : undefined;
-        return {
-            id: text(row.rule_id),
-            dimension: assessmentDimension(row.dimension),
-            severity: severity(row.severity),
-            title: text(row.title),
-            affected: text(row.affected),
-            recommendation: text(row.recommendation),
-            pipelineEvidence,
-            workspaceIds: pipelineEvidence
-                ? pipelineEvidence.status === "ready" ? [...new Set(pipelineEvidence.items.filter((item) => item.signals.length).map((item) => item.workspaceId))] : []
-                : [...new Set(workspaceIdsByRule.get(text(row.rule_id)) ?? [])],
-        };
-    });
-    const targetIds = new Map<string, string[]>();
-    targetRows.forEach((row) => {
-        if (text(row.rule_id) === "ARCH-016") return;
-        const workspaceId = text(row.workspace_id);
-        targetIds.set(workspaceId, [...(targetIds.get(workspaceId) ?? []), text(row.rule_id)]);
-    });
-    findings.filter((finding) => finding.id === "ARCH-016").forEach((finding) => {
-        finding.workspaceIds.forEach((id) => targetIds.set(id, [...(targetIds.get(id) ?? []), finding.id]));
-    });
-    const tableStatsByModel = new Map<string, QueryRecord[]>();
-    records(tables.modelTables).forEach((row) => {
-        const modelId = text(row.model_id);
-        tableStatsByModel.set(modelId, [...(tableStatsByModel.get(modelId) ?? []), row]);
-    });
-    const columnStatsByModel = new Map<string, QueryRecord[]>();
-    records(tables.modelColumns).forEach((row) => {
-        const modelId = text(row.model_id);
-        columnStatsByModel.set(modelId, [...(columnStatsByModel.get(modelId) ?? []), row]);
-    });
-    const modelRows = new Map(records(tables.semanticModels).map((row) => [text(row.model_id), row]));
-    const smellRows = records(tables.notebookSmells);
-    const smellsByNotebook = new Map<string, QueryRecord[]>();
-    smellRows.forEach((row) => {
-        const key = `${text(row.workspace_name)}\u0000${text(row.notebook_name)}`;
-        smellsByNotebook.set(key, [...(smellsByNotebook.get(key) ?? []), row]);
-    });
-    const itemsByWorkspace = new Map<string, EstateItem[]>();
-    records(tables.estateNodes).forEach((row) => {
-        const type = itemType(row.node_type);
-        const workspaceId = text(row.workspace_id);
-        if (!type || !workspaceId) return;
-        const id = text(row.node_id);
-        const issues = number(row.issue_count);
-        const model = modelRows.get(id);
-        const modelTables = tableStatsByModel.get(id) ?? [];
-        const modelColumns = columnStatsByModel.get(id) ?? [];
-        const smells = smellsByNotebook.get(`${text(row.workspace_name)}\u0000${text(row.node_name)}`) ?? [];
-        const item: EstateItem = {
-            id,
-            name: text(row.node_name),
-            type,
-            status: health(issues),
-            findingIds: type === "notebook" ? [...new Set(smells.map((smell) => text(smell.rule_id)))] : findings.filter((finding) =>
-                finding.pipelineEvidence?.status === "ready" && finding.pipelineEvidence.items.some((item) =>
-                    item.workspaceId === workspaceId && item.itemId === id && item.signals.length > 0)).map((finding) => finding.id),
-            ...(model ? { modelProfile: {
-                storageMode: text(model.storage_mode) || "Unknown",
-                totalSize: formatBytes(number(model.total_size)),
-                tables: number(model.table_count),
-                columns: number(model.column_count),
-                calculatedColumns: number(model.calc_column_count),
-                tableStats: modelTables.map((table) => ({
-                    name: text(table.table_name),
-                    rows: number(table.row_count),
-                    totalSize: formatBytes(number(table.total_size)),
-                    totalSizeBytes: number(table.total_size),
-                    dictionarySize: formatBytes(number(table.dictionary_size)),
-                    columns: number(table.column_count),
-                })),
-                columnStats: modelColumns.map((column) => ({
-                    tableName: text(column.table_name),
-                    name: text(column.column_name),
-                    dataType: text(column.data_type),
-                    encoding: text(column.encoding),
-                    cardinality: number(column.cardinality),
-                    totalSize: formatBytes(number(column.total_size)),
-                    totalSizeBytes: number(column.total_size),
-                    dictionarySize: formatBytes(number(column.dictionary_size)),
-                    calculated: Boolean(column.is_calculated),
-                })),
-            } } : {}),
-            ...(smells.length ? { notebookProfile: {
-                smellCount: smells.length,
-                affectedCells: [...new Set(smells.flatMap((smell) => text(smell.cells).split(",").map((cell) => cell.trim())).filter(Boolean))].join(", "),
-                notebookUrl: text(smells[0].notebook_url),
-                smells: smells.map((smell) => ({
-                    ruleId: text(smell.rule_id),
-                    description: text(smell.rule_description),
-                    severity: severity(smell.severity),
-                    affectedCells: text(smell.cells),
-                })),
-            } } : {}),
-        };
-        itemsByWorkspace.set(workspaceId, [...(itemsByWorkspace.get(workspaceId) ?? []), item]);
-    });
-    const workspaceRows = records(tables.workspaceRisk);
-    const rooms = workspaceRows.map((row) => {
-        const workspaceId = text(row.workspace_id);
-        const riskScore = number(row.risk_score);
-        const findingIds = [...new Set(targetIds.get(workspaceId) ?? [])];
-        return {
-            id: workspaceId,
-            name: text(row.workspace_name),
-            domain: text(row.capacity_name) || "Unassigned capacity",
-            capacityName: text(row.capacity_name) || "Unassigned capacity",
-            floor: "ground" as const,
-            status: health(number(row.issue_count), riskScore),
-            riskScore,
-            owner: text(row.owner) || undefined,
-            items: itemsByWorkspace.get(workspaceId) ?? [],
-            findingIds,
-        };
-    });
-    const workspaceRisks = workspaceRows.map((row) => {
-        const riskScore = number(row.risk_score);
-        return {
-            name: text(row.workspace_name),
-            domain: text(row.capacity_name) || "Unassigned capacity",
-            riskScore,
-            issues: number(row.issue_count),
-            status: riskScore >= 60 ? "red" as const : riskScore >= 25 ? "amber" as const : "green" as const,
-        };
-    });
-    const dimensionScores = records(tables.dimensionSummary).map((row) => ({
-        dimension: assessmentDimension(row.dimension),
-        score: Math.round(number(row.score)),
-        change: 0,
+    const everyRun = records(tables.runSummary).sort((a, b) => text(b.run_timestamp).localeCompare(text(a.run_timestamp)));
+    const runs = everyRun.filter(compatible);
+    const current = runs[0];
+    const latestRunId = current ? text(current.run_id) : undefined;
+    const currentRows = (table: QueryTable) => records(table).filter(r => compatible(r) && latestRunId && r.run_id === latestRunId);
+    const findings: ReviewFinding[] = currentRows(tables.findings).filter(r => activeArchitectureRules.has(text(r.rule_id))).map(r => ({
+        id: text(r.rule_id), dimension: r.rule_kind === "coverage" ? "Source coverage" : dimensionOf(r.dimension),
+        severity: ["critical", "high", "medium", "low", "info"].includes(text(r.severity)) ? text(r.severity) as ReviewFinding["severity"] : "info",
+        title: text(r.title), affected: text(r.affected), recommendation: text(r.recommendation),
+        statusMeaning: text(r.status_meaning), nextAction: text(r.next_action), whyItMatters: text(r.why_it_matters),
+        howToFix: text(r.how_to_fix), configure: text(r.configure),
+        workspaceIds: text(r.affected).split(", ").filter(Boolean), workspaceName: text(r.workspace_name), status: text(r.status),
+        disposition: text(r.rule_kind), scored: (r.is_scored === 1 || r.is_scored === true) && !["signal", "coverage"].includes(text(r.rule_kind)),
     }));
-    const highRisk = number(summary.critical_fail) + number(summary.high_fail);
-    const score = summary.score == null ? "N/E" : String(Math.round(number(summary.score)));
-    const coverage = Math.round(number(summary.assessment_coverage));
-    const evidenceGaps = number(summary.unknown_count) + number(summary.missing_evidence_count);
-    const daxMeasures: DaxMeasureRisk[] = records(tables.daxMeasures).map((row) => {
-        const level = text(row.risk_level).toLowerCase();
+    const items = currentRows(tables.findingItems).filter(r => activeArchitectureRules.has(text(r.rule_id))).map(r => ({ruleId: text(r.rule_id),
+        workspaceId: text(r.workspace_id), itemId: text(r.item_id), itemName: text(r.item_name) || text(r.item_id),
+        itemType: text(r.item_type), reason: text(r.reason)}));
+    const score = number(current?.score);
+
+    const failing = new Set(findings.filter(f => f.status === "fail" && f.scored).map(f => f.id));
+    const rulesByItem = groupBy(items, i => i.itemId);
+    const storageModes = new Map(currentRows(tables.semanticModels).map(m => [text(m.model_id), text(m.storage_mode)]));
+    const rolesByModel = groupBy(tables.modelRoles ? currentRows(tables.modelRoles) : [], r => text(r.model_id));
+    const modelSecurity: ModelSecurity[] = tables.modelSecurity ? currentRows(tables.modelSecurity).map(r => ({
+        workspaceId: text(r.workspace_id), workspaceName: text(r.workspace_name), capacityName: text(r.capacity_name),
+        modelId: text(r.model_id), modelName: text(r.model_name) || text(r.model_id),
+        rls: securityState(r.rls_status), ols: securityState(r.ols_status),
+        rlsRequired: r.rls_required === true, olsRequired: r.ols_required === true,
+        rlsOutcome: text(r.rls_outcome), olsOutcome: text(r.ols_outcome),
+        inspection: text(r.security_inspection) || "unavailable", inspectionReason: text(r.inspection_reason),
+        // No role_detail value, or no roles table in an older deployed model, means role detail was not collected.
+        roleDetail: tables.modelRoles ? text(r.role_detail) || "not_collected" : "not_collected",
+        roles: (rolesByModel.get(text(r.model_id)) ?? []).map((role): ModelRole => ({
+            name: text(role.role_name), permission: text(role.role_permission), readsData: role.reads_data === true,
+            filterKind: filterKind(role.filter_kind), rowFilterTables: count(role.row_filter_table_count),
+            dynamicFilterTables: count(role.dynamic_filter_table_count), constantFilterTables: count(role.constant_filter_table_count),
+            hiddenTables: count(role.ols_table_count), hiddenColumns: count(role.ols_column_count),
+        })).sort((a, b) => a.name.localeCompare(b.name)),
+    })) : [];
+    const securityByModel = new Map(modelSecurity.map(m => [m.modelId, {rls: m.rls, ols: m.ols}]));
+    const inventory = new Map(currentRows(tables.workspaces).map(w => [text(w.workspace_id), w]));
+    const estateItems = groupBy(currentRows(tables.capacityItems), r => text(r.workspace_id));
+    const risks = currentRows(tables.workspaceRisk);
+    const rooms: WorkspaceRoom[] = risks.map(w => {
+        const id = text(w.workspace_id);
+        const known = inventory.get(id);
         return {
-            capacityId: text(row.capacity_id),
-            capacityName: text(row.capacity_name) || "Unassigned capacity",
-            workspaceId: text(row.workspace_id),
-            workspaceName: text(row.workspace_name),
-            modelId: text(row.model_id),
-            modelName: text(row.model_name),
-            tableName: text(row.table_name),
-            measureName: text(row.measure_name),
-            riskLevel: level === "high" || level === "medium" || level === "low" ? level : "none",
-            riskScore: number(row.risk_score),
-            expressionLength: number(row.expression_length),
-            expressionPreview: text(row.expression_preview),
-            signalCodes: text(row.signal_codes),
+            id, name: text(w.workspace_name), domain: environmentLabels[text(known?.environment)] ?? "Environment not declared",
+            capacityName: text(w.capacity_name) || "No capacity", floor: "ground", status: health(text(w.status)),
+            riskScore: number(w.risk_score) ?? 0, adminCount: number(known?.admin_count),
+            findingIds: findings.filter(f => f.workspaceIds.includes(id)).map(f => f.id),
+            items: (estateItems.get(id) ?? []).map((i): EstateItem => {
+                const rules = [...new Set((rulesByItem.get(text(i.item_id)) ?? []).map(l => l.ruleId))];
+                const fabricType = text(i.item_type);
+                return {
+                    id: text(i.item_id), name: text(i.item_name), type: itemTypes[fabricType] ?? "component", fabricType,
+                    status: rules.some(rule => failing.has(rule)) ? "risk" : rules.length ? "warning" : "healthy",
+                    findingIds: rules, storageMode: storageModes.get(text(i.item_id)) || undefined,
+                    ...(securityByModel.has(text(i.item_id)) ? { security: securityByModel.get(text(i.item_id)) } : {}),
+                };
+            }),
         };
     });
-    const daxModels = records(tables.daxModels);
-    const availableModelCount = daxModels.filter((row) => text(row.definition_status).toLowerCase() === "available").length;
-    const daxSummary = {
-        measureCount: daxModels.reduce((total, row) => total + number(row.measure_count), 0),
-        flaggedMeasureCount: daxModels.reduce((total, row) => total + number(row.flagged_measure_count), 0),
-        modelCount: daxModels.length,
-        availableModelCount,
-        definitionCoverage: daxModels.length ? Math.round((availableModelCount / daxModels.length) * 100) : 0,
-    };
-    const capacityItems = records(tables.capacityItems);
-    const capacities = records(tables.capacities).map((row) => ({
-        id: text(row.capacity_id),
-        name: text(row.capacity_name),
-        sku: text(row.sku),
-        kind: text(row.kind),
-        state: text(row.state),
-        region: text(row.region),
-        assignedWorkspaceCount: row.assigned_workspace_count == null ? null : number(row.assigned_workspace_count),
-        observedWorkspaceCount: number(row.observed_workspace_count),
-        observedItemCount: number(row.observed_item_count),
-        workspaceScopeLimited: boolean(row.workspace_scope_limited),
-        items: capacityItems.filter((item) => text(item.capacity_id) === text(row.capacity_id)).map((item) => ({
-            id: text(item.item_id),
-            name: text(item.item_name),
-            type: text(item.item_type),
-            workspaceId: text(item.workspace_id),
-            workspaceName: text(item.workspace_name),
-        })),
+    const workspaceRisks: WorkspaceRisk[] = risks.filter(w => number(w.risk_score) != null).map(w => ({
+        name: text(w.workspace_name), domain: text(w.capacity_name) || "No capacity", riskScore: number(w.risk_score) ?? 0,
+        issues: number(w.issue_count) ?? 0, status: riskColour(text(w.status)),
     }));
-    const tenantSettingChanges = records(tables.tenantSettingChanges).map((row) => ({
-        id: text(row.event_id),
-        eventTime: text(row.event_time),
-        actor: text(row.actor),
-        operation: text(row.operation),
-        settingName: text(row.setting_name),
-        oldValue: text(row.old_value),
-        newValue: text(row.new_value),
-        details: text(row.change_details),
-        auditWindowDays: number(row.audit_window_days),
-    }));
-    return {
-        latestRunId: text(summary.run_id),
-        metrics: [
-            { label: "Best-practice score", value: score, delta: "Latest review run", trend: "steady", intent: "score" },
-            { label: "Critical + high", value: String(highRisk), delta: "Live findings", trend: "steady", intent: "risk" },
-            { label: "Workspaces at risk", value: String(workspaceRisks.filter((workspace) => workspace.status !== "green").length), delta: `of ${workspaceRisks.length} workspaces`, trend: "steady", intent: "neutral" },
-            { label: "Assessment coverage", value: `${coverage}%`, delta: `${evidenceGaps} evidence gap${evidenceGaps === 1 ? "" : "s"}`, trend: "steady", intent: coverage >= 90 ? "success" : "neutral" },
-        ],
-        dimensionScores,
-        daxSummary,
-        findings,
-        workspaceRisks,
-        estate: {
-            name: `${text(summary.client_name) || "Fabric"} estate`,
-            region: "Fabric tenant",
-            capacity: `${new Set(workspaceRows.map((row) => text(row.capacity_name)).filter(Boolean)).size} capacities`,
-            rooms,
-        },
-        daxMeasures,
-        capacities,
-        tenantSettingChanges,
-        source: "live",
+
+    const capacityItems = groupBy(currentRows(tables.capacityItems), r => text(r.capacity_id));
+    const capacities: CapacityDetail[] = currentRows(tables.capacities).map(r => ({id: text(r.capacity_id), name: text(r.capacity_name), sku: text(r.sku),
+        kind: text(r.kind), state: text(r.state), region: text(r.region), assignedWorkspaceCount: number(r.assigned_workspace_count),
+        observedWorkspaceCount: number(r.observed_workspace_count) ?? 0, observedItemCount: number(r.observed_item_count) ?? 0,
+        workspaceScopeLimited: r.workspace_scope_limited === true, adminCount: number(r.admin_count), missingTags: text(r.missing_tags),
+        items: (capacityItems.get(text(r.capacity_id)) ?? []).map(i => ({id: text(i.item_id), name: text(i.item_name), type: text(i.item_type),
+            workspaceId: text(i.workspace_id), workspaceName: text(i.workspace_name)}))}));
+
+    const dimensionScores: DimensionScore[] = currentRows(tables.dimensions)
+        .map(r => ({dimension: dimensionOf(r.dimension), score: number(r.score), failed: number(r.fail_count) ?? 0,
+            assessed: number(r.assessed_count) ?? 0, total: number(r.total_findings) ?? 0}))
+        .sort((a, b) => (dimensionOrder as readonly string[]).indexOf(a.dimension) - (dimensionOrder as readonly string[]).indexOf(b.dimension));
+
+    const unresolved = (number(current?.unknown_count) ?? 0) + (number(current?.missing_evidence_count) ?? 0);
+    const atRisk = rooms.filter(r => r.status === "risk").length;
+    const coverage = number(current?.assessment_coverage);
+    const metrics: ReviewMetric[] = !current ? [] : [
+        {label: "Review score", value: score == null ? "Not assessed" : String(score), trend: "steady", intent: "score",
+            delta: `${number(current.assessed_count) ?? 0} controls assessed`},
+        {label: "Critical + high", value: String((number(current.critical_fail) ?? 0) + (number(current.high_fail) ?? 0)), trend: "steady", intent: "risk",
+            delta: `${number(current.fail_count) ?? 0} failed controls in total`},
+        {label: "Workspaces at risk", value: String(atRisk), trend: "steady", intent: "risk", delta: `of ${rooms.length} reviewed`},
+        {label: "Assessment coverage", value: coverage == null ? "Not assessed" : `${coverage}%`,
+            trend: "steady", intent: "neutral", delta: `${unresolved} checks unknown or missing evidence`},
+    ];
+
+    const regions = [...new Set(capacities.map(c => c.region).filter(Boolean))];
+    return { ...previewReviewData, source: "live", latestRunId, profileId: current ? architectureProfile : undefined,
+        profileHash: current ? architectureProfileHash : undefined, configurationHash: text(current?.configuration_sha256),
+        dataProfileHash: everyRun[0] ? text(everyRun[0].profile_sha256) : undefined,
+        score, scoreStatus: score == null ? "no_assessable_controls" : "assessed", findings, metrics, dimensionScores, workspaceRisks,
+        estate: { name: text(current?.engagement_name) || "Fabric estate", region: regions.join(", "),
+            capacity: `${capacities.length} ${capacities.length === 1 ? "capacity" : "capacities"} · ${sum(capacities.map(c => c.observedItemCount))} items`, rooms },
+        coverage: currentRows(tables.coverage).map(r => ({workspaceId: text(r.workspace_id), workspaceName: text(r.workspace_name), family: text(r.evidence_family),
+            status: text(r.collection_status), source: text(r.source_contract), observedAt: text(r.observed_at),
+            freshness: text(r.freshness_status), notice: text(r.notice)})),
+        items, capacities, modelSecurity, modelSecurityAvailable: Boolean(tables.modelSecurity),
+        tenantSettings: currentRows(tables.tenantSettings).map(r => ({name: text(r.setting_name), title: text(r.title), group: text(r.setting_group),
+            ruleId: text(r.rule_id), status: text(r.status), posture: text(r.posture), enabled: typeof r.enabled === "boolean" ? r.enabled : null,
+            changeCount: number(r.change_count)})),
     };
 }

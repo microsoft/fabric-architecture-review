@@ -3,12 +3,9 @@
 
 """Report consumers share normalized, scoped workspace evidence (synthetic only)."""
 import json
-import re
 
 import pytest
 
-from reports.diagrams import _capacity_workspace_topology, _count_items, _workspace_items_table
-from reports.execution_history import _inventory, build_execution_evidence
 from reports.gold_layer import build_gold
 from reports.powerbi.schema import GOLD_TABLES_BY_NAME
 from reports.render_report import _environment_overview
@@ -20,18 +17,13 @@ NOW = "2026-09-24T12:00:00Z"
 
 
 def write(path, filename, payload):
+    if filename == "workspace_inventory.json":
+        payload.setdefault("workspaceListComplete", True)
     (path / filename).write_text(json.dumps(payload), encoding="utf-8")
 
 
 def gold(path):
     return build_gold([], path, run_id="synthetic", run_timestamp=NOW, check_remote=False)
-
-
-def metric(report, label):
-    return re.search(
-        rf'<div class="env-num">([^<]*)</div><div class="env-label">{re.escape(label)}</div>',
-        report,
-    ).group(1)
 
 
 @pytest.fixture
@@ -70,18 +62,13 @@ def mixed(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_mixed_report_counts_topology_and_raw_stability(mixed):
+def test_mixed_report_counts_and_raw_stability(mixed):
     before = {file.name: file.read_bytes() for file in mixed.iterdir()}
     overview = _environment_overview(mixed, [])
-    assert metric(overview, "Workspaces") == "2"
-    assert metric(overview, "Fabric items") == "7"
-    assert metric(overview, "Notebooks") == "2"
-    assert metric(overview, "Principals with access") == "1"
-    topology = _capacity_workspace_topology(mixed)
-    assert "REST only" in topology and "Shared" in topology
-    table = _workspace_items_table(mixed)
-    assert "| Shared | 1 | 1 | 1 | 1 | 0 | 1 | 1 |" in table
-    assert "| REST only | 0 | 0 | 0 | 0 | 0 | 1 | 0 |" in table
+    assert f"| {WA} | Shared | cap | 6 |" in overview
+    assert f"| {WB} | REST only | cap | 1 |" in overview
+    assert "Architectural inventory" in overview
+    assert "DAX" not in overview
     assert before == {file.name: file.read_bytes() for file in mixed.iterdir()}
 
 
@@ -97,23 +84,11 @@ def test_gold_merged_counts_graph_and_role_dedup(mixed):
     nodes = [row for row in tables["gold_graph_nodes"] if row["workspace_id"] and row["node_type"] != "Workspace"]
     assert len(nodes) == 7
     assert {row["node_type"] for row in nodes} == {
-        "SemanticModel", "Report", "Notebook", "Pipeline", "Lakehouse", "Warehouse",
+        "SemanticModel", "Report", "Notebook", "DataPipeline", "Lakehouse", "Warehouse",
     }
     assert next(row for row in nodes if row["node_type"] == "SemanticModel")["node_name"] == "Detailed model"
     assert len([edge for edge in tables["gold_graph_edges"] if edge["relationship"] == "feeds"]) == 1
     assert len(tables["gold_capacity_items"]) == 7
-
-
-def test_execution_inventory_covers_pascalcase_flat_and_deduplicated_items(mixed):
-    items, names = _inventory(mixed)
-    assert names == {WA: "Shared", WB: "REST only"}
-    assert len(items) == 4
-    assert {kind for kind, _ in items} == {"SemanticModel", "Notebook", "DataPipeline"}
-    assert next(item for kind, item in items if kind == "SemanticModel")["tables"] == [{"name": "T"}]
-    result = build_execution_evidence(mixed, "synthetic", NOW)
-    covered = [row for row in result["gold_execution_coverage"] if row["item_id"]]
-    assert len(covered) == 4
-    assert all(row["collection_status"] == "not_collected" for row in covered)
 
 
 @pytest.mark.parametrize("missing", ["absent", "unavailable"])
@@ -126,10 +101,10 @@ def test_missing_components_are_unknown_not_empty(tmp_path, missing):
     tables = gold(tmp_path)
     assert tables["gold_workspaces"][0]["item_count"] is None
     assert tables["gold_workspaces"][0]["admin_count"] is None
-    assert tables["gold_workspace_risk"][0]["status"] == "grey"
+    assert tables["gold_workspace_risk"][0]["status"] == "unknown"
+    assert tables["gold_workspace_risk"][0]["risk_score"] is None
     overview = _environment_overview(tmp_path, [])
-    assert metric(overview, "Fabric items") == metric(overview, "Principals with access") == "Unknown"
-    assert "| Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown | Unknown |" in _workspace_items_table(tmp_path)
+    assert f"| {WA} | Unknown |  | Unknown |" in overview
 
 
 def test_collected_empty_components_are_zero(tmp_path):
@@ -137,7 +112,7 @@ def test_collected_empty_components_are_zero(tmp_path):
         {"id": WA, "name": "Empty", "users": [], "items": []},
     ]})
     overview = _environment_overview(tmp_path, [])
-    assert metric(overview, "Fabric items") == metric(overview, "Principals with access") == "0"
+    assert f"| {WA} | Empty |  | 0 |" in overview
     row = gold(tmp_path)["gold_workspaces"][0]
     assert row["item_count"] == row["admin_count"] == 0
 
@@ -152,8 +127,7 @@ def test_component_completeness_is_independent(tmp_path, missing):
         "workspaces": [workspace],
     })
     overview = _environment_overview(tmp_path, [])
-    assert metric(overview, "Fabric items") == ("Unknown" if missing == "items" else "0")
-    assert metric(overview, "Principals with access") == ("Unknown" if missing == "users" else "0")
+    assert f"| {WA} | Partial |  | {'Unknown' if missing == 'items' else '0'} |" in overview
     row = gold(tmp_path)["gold_workspaces"][0]
     assert row["item_count"] == (None if missing == "items" else 0)
     assert row["admin_count"] == (None if missing == "users" else 0)
@@ -196,9 +170,7 @@ def test_incomplete_scanner_does_not_invalidate_successful_rest_children(tmp_pat
     rows = {row["workspace_id"]: row for row in gold(tmp_path)["gold_workspaces"]}
     assert rows[WA]["item_count"] == rows[WA]["admin_count"] == 1
     assert rows[WB]["item_count"] is rows[WB]["admin_count"] is None
-    assert metric(_environment_overview(tmp_path, []), "Fabric items") == "1"
-    items, _ = _inventory(tmp_path)
-    assert [item["id"] for _, item in items] == ["known"]
+    assert f"| {WA} | Shared |  | 1 |" in _environment_overview(tmp_path, [])
 
 
 @pytest.mark.parametrize("users", [
@@ -221,19 +193,10 @@ def test_known_items_do_not_hide_workspace_with_unknown_items(mixed):
     data["workspaces"].append({"id": "unknown-ws", "name": "Unknown items",
                                "items": None, "itemsCollectionStatus": "unavailable"})
     write(mixed, path.name, data)
-    assert "Unknown items" in _capacity_workspace_topology(mixed)
-    assert metric(_environment_overview(mixed, []), "Fabric items") == "Unknown"
+    assert "| unknown-ws | Unknown items |  | Unknown |" in _environment_overview(mixed, [])
 
 
 def test_shared_scope_filters_all_report_consumers(mixed):
     write(mixed, "review_scope.json", {"workspaces": [{"id": WB, "type": "AdminWorkspace"}]})
-    assert "REST only" not in _capacity_workspace_topology(mixed)
-    assert metric(_environment_overview(mixed, []), "Workspaces") == "1"
+    assert "REST only" not in _environment_overview(mixed, [])
     assert {row["workspace_id"].lower() for row in gold(mixed)["gold_workspaces"]} == {WA}
-    assert set(_inventory(mixed)[1]) == {WA}
-
-
-def test_type_aliases_deduplicate_ids():
-    workspace = {"id": WA, "Dataflow2": [{"id": "FLOW"}],
-                 "items": [{"id": "flow", "type": "DataflowGen2"}]}
-    assert _count_items(workspace, "dataflows") == 1

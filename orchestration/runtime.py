@@ -72,7 +72,7 @@ def select_workspaces(
         rows, top_n=int(config["TOP_N"]), allowlist=allowlist,
         excluded_workspace_ids=(config["CHILD_WORKSPACE_ID"], config["FUAM_WORKSPACE_ID"]),
     )
-    print("FUAM selection excludes the FAR hosting workspace and the configured FUAM workspace.")
+    print("FUAM selection excludes Capacity Metrics app workspaces, the FAR hosting workspace and the configured FUAM workspace before top-N.")
     print(
         f"FUAM selection: source_rows={len(rows)}, "
         f"allowlist={'set' if allowlist.strip() else 'blank'}, selected_workspaces={len(selected)}."
@@ -157,7 +157,7 @@ def prepare_notifications(
     if marker.exists():
         raise RuntimeError("Email preparation already attempted; automatic replay is disabled.")
 
-    # Retain the legacy marker name so interrupted pre-migration runs cannot replay.
+    # Created exclusively before any email is prepared, so an interrupted run can never replay.
     with marker.open("x", encoding="utf-8") as stream:
         json.dump({"child_run_id": child_run_id}, stream)
         stream.flush()

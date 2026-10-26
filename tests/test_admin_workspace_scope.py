@@ -7,13 +7,11 @@ from unittest.mock import Mock
 
 import pytest
 
-from analyzers._common import load_raw
+from tests._raw import load_raw
 from collectors import (
-    capacity_metrics_app, dataflows, git_integration, lakehouse_warehouse,
-    pipelines_notebooks, realtime_intelligence, scanner_api, semantic_models, workspace_inventory,
+    git_integration, pipelines_notebooks, scanner_api, semantic_models, workspace_inventory,
 )
 from collectors._common import filter_workspaces_by_scope, load_complete_raw, load_workspace_inventory
-from collectors.dax_analysis import build_analysis
 from collectors.workspace_scope import excluded_workspace_ids, filter_review_payload
 from reports.gold_layer import build_gold
 
@@ -70,19 +68,14 @@ def test_all_native_entrypoints_exclude_observed_admin_even_from_legacy_inventor
     assert [w["id"] for w in load_workspace_inventory(tmp_path)] == [NORMAL]
     assert pipelines_notebooks._load_workspaces(tmp_path) == [(NORMAL, "Admin monitoring")]
     assert git_integration._load_workspaces(tmp_path) == [(NORMAL, "Admin monitoring")]
-    assert lakehouse_warehouse._load_workspaces(tmp_path) == [(NORMAL, "Admin monitoring")]
-    assert [w["id"] for w in realtime_intelligence._list_workspace_ids(tmp_path)] == [NORMAL]
 
 
-def test_dataflow_explicit_scope_does_not_reintroduce_excluded_id(tmp_path, monkeypatch):
-    write_json(tmp_path / "workspace_inventory.json", {"workspaces": ROWS[:2]})
-    monkeypatch.setenv("WORKSPACE_IDS", ADMIN)
-    provider = Mock(side_effect=AssertionError("Excluded scope must not authenticate"))
-    monkeypatch.setattr(dataflows, "get_default_provider", provider)
-    result = json.loads(dataflows.collect(tmp_path).read_text())
-    assert result["workspaces"] == result["dataflows"] == []
-    assert result["collectionComplete"] is True
-    provider.assert_not_called()
+def test_git_collection_honors_the_planner_workspace_scope(tmp_path, monkeypatch):
+    write_json(tmp_path / "workspace_inventory.json", {"workspaces": ROWS[:2] + [ROWS[2]]})
+    monkeypatch.setenv("WORKSPACE_IDS", PERSONAL)
+    assert git_integration._load_workspaces(tmp_path) == [
+        (row["id"], row.get("name") or "") for row in ROWS if row["id"] == PERSONAL
+    ]
 
 
 def test_scanner_resolves_type_before_submitting_scan(tmp_path, monkeypatch):
@@ -113,7 +106,7 @@ def test_scanner_explicit_admin_at_workspace_5001_is_never_submitted(tmp_path, m
     scan = Mock(side_effect=AssertionError("Must not scan AdminWorkspace"))
     monkeypatch.setattr(scanner_api, "_start_scan", scan)
     result = json.loads(scanner_api.collect(tmp_path).read_text())
-    assert get.call_args.kwargs["params"] == {"$top": 5000, "$skip": 5000}
+    assert get.call_args.kwargs["params"] == {"$top": 5000, "$skip": 5000, "$expand": "datasets,reports"}
     assert result["collectionComplete"] is True
     assert result["_meta"]["workspaces_eligible"] == 0
     assert result["excludedWorkspaces"] == [{"id": ADMIN, "type": "AdminWorkspace"}]
@@ -132,7 +125,7 @@ def test_scanner_missing_policy_identity_is_incomplete_not_unknown_type(tmp_path
 
 
 @pytest.mark.parametrize("admin_mode", [False, True])
-def test_semantic_catalog_excludes_admin_before_refresh_or_definitions(tmp_path, monkeypatch, admin_mode):
+def test_semantic_catalog_excludes_admin_before_definitions(tmp_path, monkeypatch, admin_mode):
     monkeypatch.setattr(semantic_models, "get_default_provider", Mock())
     calls = []
 
@@ -147,14 +140,10 @@ def test_semantic_catalog_excludes_admin_before_refresh_or_definitions(tmp_path,
 
     monkeypatch.setattr(semantic_models, "collect_value", listing)
     monkeypatch.setattr(semantic_models, "collect_workspace_groups", listing)
-    refresh = Mock(return_value=[])
-    monkeypatch.setattr(semantic_models, "_refresh_history", refresh)
     if not admin_mode:
         monkeypatch.setenv("WORKSPACE_IDS", f"{ADMIN},{NORMAL}")
     result = json.loads(semantic_models.collect(tmp_path).read_text())
     assert [d["id"] for d in result["datasets"]] == [NORMAL]
-    assert refresh.call_count == 1
-    assert refresh.call_args.args[1] == NORMAL
     assert all(f"/groups/{ADMIN}/" not in url for url in calls)
 
 
@@ -185,18 +174,10 @@ def test_gold_excludes_admin_native_rows_and_coverage_without_name_blacklist(tmp
     ]
     write_json(tmp_path / "semantic_models.json", {"datasets": models})
     write_json(tmp_path / "semantic_model_definitions.json", {"models": models})
-    write_json(tmp_path / "dax_analysis.json", build_analysis({"models": models}))
     write_json(tmp_path / "pipelines_notebooks.json", {
         "pipelines": [], "notebooks": [], "executionEvidence": [
             {"workspaceId": ADMIN, "itemType": "DataPipeline", "collectionStatus": "error",
              "noticeCode": "WorkspaceTypeNotSupported"},
-        ],
-    })
-    write_json(tmp_path / "dataflows.json", {
-        "schemaVersion": 1, "collectionComplete": True, "workspaces": ROWS[:2],
-        "dataflows": [
-            {"id": f"df-{i}", "workspaceId": row["id"], "definitionStatus": "inspected", "queries": []}
-            for i, row in enumerate(ROWS[:2])
         ],
     })
     before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
@@ -204,24 +185,12 @@ def test_gold_excludes_admin_native_rows_and_coverage_without_name_blacklist(tmp
     for table, records in tables.items():
         assert all(str(row.get("workspace_id", "")).lower() != ADMIN for row in records), table
     assert [row["workspace_name"] for row in tables["gold_workspaces"]] == ["Admin monitoring"]
-    assert [row["model_id"] for row in tables["gold_dax_object_coverage"]] == ["model-1"]
-    assert all(row["workspace_name"] == "Admin monitoring" for row in tables["gold_dax_objects"])
+    assert [row["model_id"] for row in tables["gold_semantic_models"]] == ["model-1"]
+    assert "gold_dax_object_coverage" not in tables and "gold_dax_objects" not in tables
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
-def test_operational_metrics_source_in_admin_workspace_is_still_discoverable(monkeypatch):
-    monkeypatch.delenv("METRICS_APP_WORKSPACE_ID", raising=False)
-    monkeypatch.delenv("METRICS_APP_DATASET_ID", raising=False)
-    monkeypatch.setattr(capacity_metrics_app, "collect_workspace_groups", lambda *_, **kw: ROWS[:1])
-    monkeypatch.setattr(capacity_metrics_app, "collect_value", lambda url, *_, **kwargs:
-                       ROWS[:1] if url.endswith("/groups") else [
-                           {"id": "metrics", "workspaceId": ADMIN, "name": "Fabric Capacity Metrics"},
-                       ])
-    source = capacity_metrics_app._find_dataset({})
-    assert source["workspaceId"] == ADMIN
-
-
-def test_reference_filter_preserves_tenant_settings_and_operational_source(tmp_path):
+def test_reference_filter_preserves_operational_source(tmp_path):
     write_json(tmp_path / "workspace_inventory.json", {"workspaces": ROWS[:2]})
     payload = {
         "events": [{"WorkspaceId": ADMIN}, {"Operation": "UpdateTenantSetting"}],

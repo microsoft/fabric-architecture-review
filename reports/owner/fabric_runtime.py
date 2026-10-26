@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Callable
 from uuid import uuid4
+from analyzers.far_profile import PROFILE_ID, PROFILE_SHA256
+from reports.powerbi.schema import coerce_value
 
 
 _CONFLICTS = {
@@ -85,7 +87,7 @@ def _publish_owner_reviews(
                 USING (
                     SELECT {columns},
                         (ROW_NUMBER() OVER (
-                            PARTITION BY workspace_id
+                            PARTITION BY workspace_id, profile_id, profile_sha256
                             ORDER BY run_timestamp DESC, run_id DESC
                         ) = 1) AS is_latest
                     FROM (
@@ -99,11 +101,12 @@ def _publish_owner_reviews(
                 WHEN NOT MATCHED THEN INSERT *
                 WHEN NOT MATCHED BY SOURCE THEN DELETE
             """,
-            "owner_workspaces": """
+            "owner_workspaces": f"""
                 MERGE INTO owner_workspaces AS target
                 USING (
                     SELECT workspace_id, workspace_name
-                    FROM owner_reviews WHERE is_latest
+                    FROM owner_reviews WHERE is_latest AND profile_id = '{PROFILE_ID}'
+                        AND profile_sha256 = '{PROFILE_SHA256}'
                 ) AS source
                 ON target.workspace_id = source.workspace_id
                 WHEN MATCHED THEN UPDATE SET *
@@ -144,7 +147,7 @@ def _frame(spark: Any, table: Any, rows: list[dict[str, Any]]) -> Any:
                     value = value.replace(tzinfo=timezone.utc)
                 else:
                     value = value.astimezone(timezone.utc)
-            record.append(value)
+            record.append(coerce_value(column.kind, value, f"{table.name}.{column.name}"))
         values.append(tuple(record))
     return spark.createDataFrame(values, schema)
 
@@ -161,7 +164,7 @@ def _validate_owner_schemas(spark: Any, frames: dict[str, Any]) -> None:
     """Refuse schema drift before replacing any run; never overwrite a schema."""
     for name, frame in frames.items():
         if not spark.catalog.tableExists(name):
-            if name not in {"owner_executions", "owner_coverage"}:
+            if name != "owner_coverage":
                 raise ValueError(f"Missing owner table {name}; complete owner setup first.")
             (frame.limit(0).write.format("delta").mode("ignore").saveAsTable(name))
         expected = [(field.name, field.dataType) for field in frame.schema.fields]
@@ -205,7 +208,7 @@ def materialize_owner_gold(
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,256}", run_id):
         raise ValueError("Owner review IDs require 1-256 letters, digits, underscores, dots, colons or hyphens.")
     predicate = f"run_id = '{run_id}'"
-    for name in ("owner_findings", "owner_details", "owner_executions", "owner_coverage"):
+    for name in ("owner_findings", "owner_details", "owner_coverage"):
         _retry_delta(lambda: (
             frames[name].write.format("delta").mode("overwrite")
             .option("replaceWhere", predicate).saveAsTable(name)

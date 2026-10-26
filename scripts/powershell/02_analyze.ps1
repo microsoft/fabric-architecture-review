@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 try {
-    $envFile = Join-Path $PWD ".env"
+    $envFile = Join-Path $PWD ".env.far"
     if (Test-Path $envFile) {
         Get-Content $envFile | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
             $k, $v = $_ -split '=', 2
@@ -13,7 +13,12 @@ try {
         }
     }
 
-    $outDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output" }
+    $outDir = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output\far" }
+    $configPath = Join-Path $outDir "review_config.json"
+    if (-not (Test-Path $configPath -PathType Leaf)) {
+        throw "Review configuration not found. Run FAR collection first."
+    }
+    $env:FAR_CONFIG_SNAPSHOT = (Resolve-Path $configPath).Path
     $rawDir = Join-Path $outDir "raw"
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
     Write-Host "Output directory: $outDir" -ForegroundColor Gray
@@ -28,25 +33,14 @@ try {
         Write-Host "==> $label" -ForegroundColor Cyan
         $outPath = Join-Path $outDir $findingsName
         $expectedOutputs.Add($outPath)
-        & python -m $module --raw-dir $rawDir --out $outPath
+        & python -m $module --raw-dir $rawDir --out-dir $outDir
         if ($LASTEXITCODE -ne 0) {
             $analyzerFailures.Add("$module (exit $LASTEXITCODE)")
             Write-Host "    $module exited with code $LASTEXITCODE." -ForegroundColor Red
         }
     }
 
-    Invoke-Analyzer "analyzers.tenant_settings_review" "Tenant settings baseline" "findings_tenant_settings.json"
-    Invoke-Analyzer "analyzers.architecture_review"    "Architecture review"      "findings_architecture.json"
-    Invoke-Analyzer "analyzers.performance_review"     "Performance review"       "findings_performance.json"
-    Invoke-Analyzer "analyzers.dax_review"             "Metadata-only DAX review" "findings_dax.json"
-    Invoke-Analyzer "analyzers.dataflow_review"        "Dataflow Gen2 static M review" "findings_dataflows.json"
-    Invoke-Analyzer "analyzers.semantic_model_storage_review" "Semantic model storage-mode / DirectLake feasibility" "findings_storage_mode.json"
-    Invoke-Analyzer "analyzers.governance_review"      "Governance review"        "findings_governance.json"
-    Invoke-Analyzer "analyzers.operational_excellence_review" "Operational Excellence review" "findings_operational_excellence.json"
-    Invoke-Analyzer "analyzers.security_review"        "Security review"          "findings_security.json"
-    Invoke-Analyzer "analyzers.cost_review"            "Cost review"              "findings_cost.json"
-    Invoke-Analyzer "analyzers.notebook_code_review"   "Notebook code smells (heuristic)" "findings_notebook_code.json"
-    Invoke-Analyzer "analyzers.best_practices_review"  "Best practices (BPA / Direct Lake / Delta / capacity)" "findings_best_practices.json"
+    Invoke-Analyzer "analyzers.far_review" "FAR architectural profile" "findings_architecture.json"
 
     $invalidOutputs = [System.Collections.Generic.List[string]]::new()
     foreach ($path in $expectedOutputs) {

@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 Push-Location (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
 try {
-    $envFile = Join-Path $PWD ".env"
+    $envFile = Join-Path $PWD ".env.far"
     if (Test-Path $envFile) {
         Get-Content $envFile | Where-Object { $_ -match '^\s*[^#].*=' } | ForEach-Object {
             $k, $v = $_ -split '=', 2
@@ -13,11 +13,16 @@ try {
         }
     }
 
-    $outDir       = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output" }
+    $outDir       = if ($env:OUTPUT_DIR) { $env:OUTPUT_DIR } else { "output\far" }
+    $configPath = Join-Path $outDir "review_config.json"
+    if (-not (Test-Path $configPath -PathType Leaf)) {
+        throw "Review configuration not found. Run FAR collection first."
+    }
+    $env:FAR_CONFIG_SNAPSHOT = (Resolve-Path $configPath).Path
     $rawDir       = Join-Path $outDir "raw"
     $findingsPath = Join-Path $outDir "findings.json"
     $reportMd     = Join-Path $outDir "report.md"
-    $reportPdf    = Join-Path $outDir "fabric-arch-review.pdf"
+    $reportPdf    = Join-Path $outDir "far-review.pdf"
 
     if (-not (Test-Path $findingsPath)) {
         throw "$findingsPath not found. Run scripts/powershell/02_analyze.ps1 first."
@@ -34,7 +39,7 @@ try {
     }
 
     Write-Host "==> Generating PDF..." -ForegroundColor Cyan
-    # Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.
+    # Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.far.
     # Override per-run with --title and --footer-label if needed.
     & python reports/_generate_pdf.py `
         --input $reportMd `

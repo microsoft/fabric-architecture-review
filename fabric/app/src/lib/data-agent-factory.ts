@@ -14,8 +14,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { nativeAgentGrounding } from "@/lib/native-agent-grounding";
 
+export type DataAgentPhase = "authenticating" | "connecting" | "querying" | "retrying";
 interface DataAgentClient {
-    ask(question: string): Promise<string>;
+    ask(question: string, onProgress?: (phase: DataAgentPhase) => void): Promise<string>;
 }
 
 interface DataAgentTool {
@@ -32,17 +33,28 @@ interface DataAgentToolSelection {
 
 const fabricScopes = ["https://api.fabric.microsoft.com/.default"];
 const requestTimeoutMs = 300_000;
+export const suggestedDataAgentQuestions = [
+    {
+        label: "Show the latest review score.",
+        question: "Query only gold_run_summary. Return exactly one row: the latest compatible run_id, run_timestamp, score and assessment_coverage. Do not query other tables.",
+    },
+    {
+        label: "Show the latest Security dimension summary.",
+        question: "Query only gold_dimension_summary. Filter to the Security dimension and the latest compatible run_timestamp. Return exactly one row with run_id, dimension, score, assessed_count and fail_count. Do not query other tables.",
+    },
+    {
+        label: "Show up to five SEC-024 results.",
+        question: "Query only gold_findings. Filter to rule_id SEC-024 and the latest compatible run_timestamp in that table. Return at most five rows with run_id, workspace_name, status and recommendation. Do not query other tables. State that this is a limited result, not the complete finding set.",
+    },
+] as const;
 const reviewEvidenceDomains = [
     { pattern: /\b(?:governance|owners?|ownership|endorsement|sensitivity)\b/i, label: "governance findings" },
     { pattern: /\b(?:security|access|permissions?)\b/i, label: "security findings" },
     { pattern: /\b(?:architecture|lineage|inventory|lakehouses?|pipelines?|reports?|warehouses?|workspaces?)\b/i, label: "architecture findings and inventory" },
     { pattern: /\b(?:semantic models?|storage modes?|Direct Lake|Import|DirectQuery)\b/i, label: "semantic-model and storage evidence" },
-    { pattern: /\b(?:DAX|measure expressions?|iterator|CROSSJOIN|static risk)\b/i, label: "metadata-only DAX risk evidence" },
-    { pattern: /\b(?:performance|capacity|duration|latency)\b/i, label: "performance and capacity findings" },
-    { pattern: /\b(?:cost|spend|utilization|waste)\b/i, label: "cost and utilization findings" },
-    { pattern: /\b(?:best practices?|BPA(?:-\d+)?)\b/i, label: "best-practice findings" },
+    { pattern: /\bcapacity\b/i, label: "static capacity hosting metadata" },
     { pattern: /\b(?:tenant settings?|admin settings?)\b/i, label: "tenant-setting evidence" },
-    { pattern: /\b(?:notebooks?|code[ -]?smells?|NBCODE(?:-\d+)?)\b/i, label: "notebook findings and code-smell evidence" },
+    { pattern: /\b(?:notebooks?|code[ -]?smells?)\b/i, label: "notebook findings and code-smell evidence" },
 ] as const;
 
 function getPublicSetting(name: string): string {
@@ -67,25 +79,14 @@ function extractTextContent(content: unknown): string {
 
 export function groundDataAgentQuestion(question: string): string {
     const normalizedQuestion = question.trim();
-    const nativeGuidance = nativeAgentGrounding(normalizedQuestion);
+    const nativeGuidance = nativeAgentGrounding();
     const domains = reviewEvidenceDomains
         .filter(({ pattern }) => pattern.test(normalizedQuestion))
         .map(({ label }) => label);
     const referencesGeneralReview = /\b(?:findings?|review|risk|recommendations?|severity)\b/i.test(normalizedQuestion);
     if (domains.length === 0 && !referencesGeneralReview && nativeGuidance.length === 0) return normalizedQuestion;
 
-    const referencesNotebookSmells = /\bnotebooks?\b/i.test(normalizedQuestion)
-        && /\b(?:code[ -]?smells?|NBCODE(?:-\d+)?)\b/i.test(normalizedQuestion);
-    const evidenceTask = nativeGuidance.length
-        ? `Answer using recorded native evidence${domains.length ? ` and matching ${domains.join(", ")}` : ""}; follow the requested scope and time window.`
-        : referencesNotebookSmells
-        ? [
-            "For the latest completed architecture review, list every notebook code-smell finding.",
-            "Return the rule ID, notebook name, workspace name, severity, affected cells, and state explicitly when any field is unavailable.",
-        ].join(" ")
-        : [
-            `For the latest completed architecture review, list every matching row from ${domains.length ? domains.join(", ") : "review findings and inventory"}.`,
-        ].join(" ");
+    const evidenceTask = `Answer only from the latest compatible architectural review${domains.length ? ` and ${domains.join(", ")}` : ""}; disclose coverage and query bounds.`;
     return [
         evidenceTask,
         ...nativeGuidance,
@@ -96,7 +97,22 @@ export function groundDataAgentQuestion(question: string): string {
 
 function isTransientDataAgentError(error: unknown): boolean {
     const message = error instanceof Error ? error.message : String(error);
-    return /\b(?:internal error|network|timeout|timed out|fetch failed|ECONNRESET|ETIMEDOUT|429|5\d\d)\b/i.test(message);
+    if (/\b(?:timeout|timed out|ETIMEDOUT)\b/i.test(message)) return false;
+    return /\b(?:internal error|network|fetch failed|ECONNRESET|429|5\d\d)\b/i.test(message);
+}
+
+export function describeDataAgentError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/popup_window_error|empty_window_error|popup_window_timeout/.test(message)) {
+        return "The Microsoft sign-in window could not open or complete. Allow pop-ups for this app's fabricapps.net site and the Fabric portal, then retry in Edge or Chrome. Your question was not sent to the Data Agent.";
+    }
+    if (/\b(?:timeout|timed out|ETIMEDOUT)\b/i.test(message)) {
+        return `The Data Agent request timed out. Try a narrower question with a workspace or rule ID. The app has not started another long attempt. Details: ${message}`;
+    }
+    if (/internal error|-32603/i.test(message)) {
+        return `Fabric Data Agent could not complete the request. Try a narrower question or retry later. If it persists, retain the request ID below for support. Details: ${message}`;
+    }
+    return message;
 }
 
 function selectDataAgentTool(tools: DataAgentTool[]): DataAgentToolSelection {
@@ -173,25 +189,29 @@ export class RayfinDataAgentClient implements DataAgentClient {
         return response.accessToken;
     }
 
-    async ask(question: string): Promise<string> {
+    async ask(question: string, onProgress?: (phase: DataAgentPhase) => void): Promise<string> {
         const normalizedQuestion = question.trim();
         if (!normalizedQuestion || normalizedQuestion.length > 4_000) {
             throw new Error("Question must contain between 1 and 4,000 characters.");
         }
         const groundedQuestion = groundDataAgentQuestion(normalizedQuestion);
 
+        onProgress?.("authenticating");
         const token = await this.getAccessToken();
         for (let attempt = 0; attempt < 2; attempt += 1) {
+            const startedAt = Date.now();
             const transport = new StreamableHTTPClientTransport(
                 buildDataAgentEndpoint(this.workspaceId, this.dataAgentId),
                 { requestInit: { headers: { Authorization: `Bearer ${token}` } } },
             );
-            const client = new Client({ name: "fabric-architecture-review", version: "2026.9.2" });
+            const client = new Client({ name: "fabric-architecture-review", version: "2026.10.1" });
             try {
+                onProgress?.("connecting");
                 await client.connect(transport);
                 const tools = await client.listTools(undefined, { timeout: requestTimeoutMs });
                 const { tool, questionArgument } = selectDataAgentTool(tools.tools as DataAgentTool[]);
 
+                onProgress?.("querying");
                 const result = await client.callTool({
                     name: tool.name,
                     arguments: { [questionArgument]: groundedQuestion },
@@ -201,7 +221,9 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 if (!answer) throw new Error("The Data Agent returned an empty response.");
                 return answer;
             } catch (error) {
-                if (attempt === 1 || !isTransientDataAgentError(error)) throw error;
+                // Do not repeat a slow request and leave the reviewer waiting through another long attempt.
+                if (attempt === 1 || Date.now() - startedAt >= 10_000 || !isTransientDataAgentError(error)) throw error;
+                onProgress?.("retrying");
                 await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)));
             } finally {
                 await client.close();

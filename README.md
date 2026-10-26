@@ -1,93 +1,80 @@
 <!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
 
-# Fabric Architecture Review Accelerator
+# Fabric Architecture Review (FAR)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.TXT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
-FAR reviews Microsoft Fabric **metadata, configuration, source definitions and
-metrics** and turns them into prioritized findings. It does not read customer
-business rows.
+Assess the architecture, governance and security of your Microsoft Fabric estate.
+FAR reviews workspace design, configuration and access, then explains each finding
+and the next action to take. It does not query customer business rows.
 
-It covers architecture, performance, security, governance, operations, cost,
-tenant settings and best practices. DAX findings are **static investigation
-signals**, not measured query latency or CU consumption.
+Explore results in Power BI, the FAR app, a Data Agent or local Markdown/PDF reports.
+Optional workspace-owner reports restrict each reader to their authorized workspaces.
 
-Native refresh/job history, Dataflow Gen2 Power Query evidence and typed
-non-measure DAX objects help identify the next investigation step. See
-[where to find this evidence](docs/native-evidence.md#where-to-find-the-evidence)
-in the reports, app and Data Agent.
+## Get started
 
-## Choose your task
-
-| I want to... | Follow this guide | Success looks like |
-| --- | --- | --- |
-| Run FAR inside Fabric | [Fabric deployment](fabric/DEPLOYMENT.md), steps 1-3 | Pipeline completes and the governance report shows the scoped review |
-| Run FAR on my workstation | [Local review](docs/local-review.md) | Collected evidence, findings and a written report in the output folder |
-| Review the highest-CU workspaces each week | [Targeted reviews](fabric/DEPLOYMENT.md#5-optionally-enable-fuam-targeted-reviews) | Parent selects workspaces and waits for FAR to finish |
-| Give workspace administrators their own restricted report | [Owner report setup](fabric/DEPLOYMENT.md#4-optionally-finish-the-workspace-owner-report) | An actual approved reader sees only their authorized workspaces |
-| Let approved owners ask questions about their review | [Workspace Owner Agent](docs/workspace-owner-agent.md) | A separately published agent queries only the secured owner model |
-| Email those administrators after a review | [Outlook notifications](fabric/DEPLOYMENT.md#6-optionally-configure-native-outlook-owner-email) | Controlled test email arrives and opens an accessible report |
-| Try or deploy the interactive FAR app | [App guide](fabric/app/README.md) | Anonymous preview or a live Fabric-hosted app |
-| Ask the central review data questions | [Data Agent setup](fabric/REFERENCE.md#-ask-the-data-agent-conversational-qa) | Published agent answers from populated FAR data |
-| Understand a finding and decide what to change | [Interpret results](docs/methodology.md#use-the-results) | Evidence, affected item and a tested next action |
-| Investigate executions, Gen2 queries or calculated DAX objects | [Native evidence](docs/native-evidence.md) | Coverage, affected object and the right validation step |
-| Upgrade or recover setup | [Upgrade/recovery](fabric/DEPLOYMENT.md#upgrading) | Updated artifacts verified before schedules resume |
-
-**First timer:** choose **Fabric deployment** or **Local review**, not both.
-Get one scoped review working before adding targeting, owner sharing or email.
-
-## What you get
-
-- **Written review:** prioritized findings and supporting evidence in Markdown;
-  local runs can also render PDF when the renderer is installed.
-- **Fabric governance report:** Gold-backed overview, trends and technical
-  drilldowns for the central review team.
-- **Optional owner report:** a separate, RLS-protected technical subset.
-- **Optional owner Agent:** on-demand conversational access through that same secured model.
-- **Optional app and central Data Agent:** central-team exploration and conversational access.
-
-The core flow is **Collect -> Analyze -> Report**; Fabric adds **Gold**.
-Deployment creates artifacts. A review run populates their data.
-
-## Keep these boundaries clear
-
-- **Scope:** blank `WORKSPACE_IDS` on normal FAR means no workspace filter within
-  the execution identity's permissions. Use one explicit workspace for the first test.
-  An empty workspace selection skips the targeted review.
-  FAR excludes observed Pro/shared workspaces (`isOnDedicatedCapacity=false`),
-  PPU workspaces/capacities (including virtual SKU `PP3`), deleted/inactive
-  workspaces, and built-in `AdminWorkspace` review targets. Explicit IDs cannot
-  override these exclusions. Real Fabric/dedicated capacities remain supported;
-  missing metadata, workspace names, and a user's Pro license are not exclusions.
-  Workspace/capacity metadata discovery and tenant settings remain available;
-  excluded resources receive no item/model/workload/refreshable probes. Scope
-  identities are retained in raw metadata to filter historical evidence and Gold.
-  An eligible Admin monitoring workspace may still supply operational metrics.
-- **Access:** permissions determine evidence coverage. A missing-evidence result
-  is not a pass. Use the [access checklist](docs/auth-setup.md).
-- **Sharing:** central reports, the app and central Data Agent are not owner-isolated.
-  Owner consumers need the separate model, item Read and `WorkspaceOwner` membership;
-  owner chat also needs query-only access to the separate owner Agent. Never grant
-  them FAR workspace membership to use owner artifacts.
-- **Data handling:** metadata and source definitions can still be sensitive.
-  Read [data safety](docs/data-safety.md) before collection or sharing.
-
-## Reference and help
-
-| Need | Document |
+| Run in | Start here |
 | --- | --- |
-| Rule IDs and severity | [Checklist reference](docs/checklist-reference.md) |
-| Scoring, applicability and thresholds | [Methodology](docs/methodology.md) |
-| Local configuration, individual stages and extension points | [Review reference](REFERENCE.md) |
-| Fabric parameters, Gold and optional features | [Fabric reference](fabric/REFERENCE.md) |
-| Targeting sources, replay and notifications | [Targeted-review reference](docs/targeted-review.md) |
-| Owner RLS, access operations and acceptance tests | [Owner reference](docs/workspace-owner-report.md) |
-| Example output | [Synthetic sample report](samples/report.md) |
-| Changes in each version | [Changelog](CHANGELOG.md) |
-| Bugs, questions or setup help | [Support](SUPPORT.md) |
-| Contribute a change | [Contributing](CONTRIBUTING.md) |
-| Report a vulnerability privately | [Security policy](SECURITY.md) |
+| Microsoft Fabric | [Deploy FAR](fabric/DEPLOYMENT.md): import setup, configure the review and run the pipeline |
+| Your workstation | [Run a local review](docs/local-review.md): install dependencies, create `.env.far` and run the three stages |
 
-Licensed under [MIT](LICENSE.TXT). Contributions follow the
-[Microsoft Open Source Code of Conduct](CODE_OF_CONDUCT.md).
+Start with one test workspace. **An empty workspace scope includes all workspaces
+the review identity can access.**
+
+See the [2026.10.1 release notes](CHANGELOG.md#2026101) for this release.
+
+## What FAR reviews
+
+70 rules cover five dimensions. Only assessed controls affect the score.
+Signals highlight areas to investigate; missing evidence is never a pass.
+
+| Dimension | Examples |
+| --- | --- |
+| Architecture | Workspace boundaries, hosting, storage modes, pipeline/notebook contracts and dependencies |
+| Governance | Administrator continuity, naming, documentation, endorsement and sensitivity labels |
+| Operations | Source control, deployment pipelines, capacity state and optional activity signals |
+| Reliability | Production concentration, pipeline failure paths and dependencies on non-production |
+| Security | Sharing, direct access, tenant settings, network controls, OneLake roles and semantic-model RLS/OLS |
+
+Declare production workspaces and required policies before interpreting results.
+FAR does not infer your requirements from workspace names. See the
+[rule catalogue](docs/checklist-reference.md) and [scoring guide](docs/methodology.md).
+
+## Configure the review
+
+| Setting | Microsoft Fabric | Local |
+| --- | --- | --- |
+| Review identity | `FAR_Environment` Variable Library | `.env.far` |
+| Optional FUAM/FCA connections | `FAR_Connections` Variable Library | [sources.yaml](config/sources.yaml) |
+| Thresholds and policy | `FAR_Thresholds` Variable Library | [thresholds.yaml](config/thresholds.yaml), [policy.yaml](config/policy.yaml) |
+| Workspace scope and report labels | Pipeline parameters | `.env.far` |
+
+Setup preserves configured values. Follow the [FAR policy guide](docs/far-policy-configuration.md)
+for examples, semantic-model security checks and optional role details.
+
+## Optional capabilities
+
+- **FUAM and FCA:** enrich the review with activity, capacity and sharing evidence.
+  Without these connections, their rules are not applicable; FAR does not collect
+  replacement monitoring or financial data.
+- **Workspace-owner reporting:** provide a separate, secured view for approved
+  administrators. Follow the [owner access guide](docs/workspace-owner-report.md).
+- **Targeted reviews:** use FUAM to select workspaces and optionally notify their
+  administrators. See [targeted reviews](docs/targeted-review.md).
+- **Agents, app and ontology:** explore results conversationally or visually.
+  See [Fabric results](fabric/REFERENCE.md) and [app setup](fabric/app/README.md).
+
+## Use the results safely
+
+Start with the report's **Action plan**. Resolve evidence gaps, review failures,
+and use **Items to review** to identify affected items. Re-run the same scope after
+making changes. Compare results only when the review version and configuration match.
+
+The central report, app and Agent are for the review team, not an owner-only audience.
+Review metadata can be sensitive even though business rows, source code and filter
+expressions are not collected. Read the [permissions guide](docs/auth-setup.md) and
+[data-safety guidance](docs/data-safety.md) before deployment or sharing.
+
+Validate access with actual users before production use.
+For assistance, see [support](SUPPORT.md).

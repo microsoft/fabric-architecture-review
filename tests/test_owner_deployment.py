@@ -71,6 +71,24 @@ def test_actual_generated_owner_model_roundtrip_preserves_approved_members():
     client.upsert_item.assert_not_called()
 
 
+def test_a_deployed_model_that_lost_its_empty_format_strings_is_still_the_same_contract():
+    expected = build_bim("Owner", "host", LAKEHOUSE)
+    stored = copy.deepcopy(expected)
+    dropped = 0
+    for table in stored["model"]["tables"]:
+        for measure in table.get("measures", []):
+            if measure.get("formatString") == "":
+                del measure["formatString"]
+                dropped += 1
+    assert dropped, "the generated model should contain a measure without a format string"
+    client = existing_client(stored)
+    assert ensure_owner_model(client, WORKSPACE, "Owner", expected) == MODEL
+    client.upsert_item.assert_not_called()
+    stored["model"]["tables"][0]["measures"][0]["formatString"] = "0%"
+    with pytest.raises(ValueError, match="formatString"):
+        ensure_owner_model(existing_client(stored), WORKSPACE, "Owner", expected)
+
+
 def test_internal_contract_marker_is_required_and_compatible_model_is_reused():
     expected = build_bim("Owner", "host", LAKEHOUSE)
     existing = copy.deepcopy(expected)

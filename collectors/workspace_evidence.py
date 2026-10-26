@@ -102,11 +102,6 @@ def workspace_items_available(workspace: dict[str, Any]) -> bool:
     ) or any(_item_buckets(workspace))
 
 
-def item_metadata_available(item: dict[str, Any], *fields: str) -> bool:
-    """Basic REST item identity alone does not establish optional governance metadata."""
-    return bool(item.get("_scannerMetadata")) or any(field in item for field in fields)
-
-
 def workspace_roles_complete(workspace: dict[str, Any]) -> bool:
     users = workspace_users(workspace)
     return users is not None and all(

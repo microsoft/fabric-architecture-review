@@ -1,0 +1,77 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Fabric Architecture Review - what you declare about your estate.
+#
+# The review never guesses which workspaces are production or what is allowed in them:
+# you declare it here. Controls that need a declaration report "unknown" until you do.
+#
+# WHERE TO SET THESE
+#   Fabric  Edit the values in the "<prefix>_Thresholds" Variable Library created by setup
+#           (variable names are "<group>__<key>", e.g. scope__production_workspace_ids).
+#           Setup never overwrites values you have changed.
+#   Local   Edit this file.
+#
+# FORMAT
+#   Every value is text. A list is separated by commas, semicolons, spaces or new lines.
+#   The two lists that hold names with spaces (allowed_regions and required_capacity_tags)
+#   are separated by commas, semicolons or new lines only.
+#   Workspace, capacity, principal and admin identifiers are GUIDs (object IDs). Leave a
+#   value empty to declare nothing. Do not add or remove keys: they are fixed.
+#
+# Examples for a list of two workspaces:
+#     "11111111-1111-1111-1111-111111111111, 22222222-2222-2222-2222-222222222222"
+
+scope:
+  # Workspaces you declare as production. Unlocks the production-only controls
+  # ARCH-002 (shared ownership and approved capacity) and OPS-001 (Git source control).
+  production_workspace_ids: ""
+  # Workspaces you declare as non-production. They are reviewed but exempt from the
+  # production-only controls.
+  nonproduction_workspace_ids: ""
+  # Capacities whose workspaces are production / non-production. A workspace listed above
+  # always wins over its capacity's declaration.
+  production_capacity_ids: ""
+  nonproduction_capacity_ids: ""
+  # Optional. Lets a connected FCA add the capacity's Azure region and placement. One
+  # "<capacity-guid>=<azure-resource-id>" pair per capacity.
+  # Example: "33333333-3333-3333-3333-333333333333=/subscriptions/44444444-4444-4444-4444-444444444444/resourceGroups/rg-fabric/providers/Microsoft.Fabric/capacities/prodcap"
+  capacity_arm_resource_ids: ""
+
+policy:
+  # ARCH-001. Item types a workspace may hold. Example: "Lakehouse, Notebook, DataPipeline"
+  allowed_item_types: ""
+  # ARCH-002. Capacities production workspaces must run on (capacity GUIDs).
+  allowed_capacity_ids: ""
+  # ARCH-007. Azure regions workspaces' capacities must be in, for data residency.
+  # Names are compared without case or spaces. Example: "West Europe, North Europe"
+  allowed_regions: ""
+  # ARCH-003. Semantic model storage modes. Any of: Import, DirectQuery, DirectLake, Dual.
+  # Example: "DirectLake, Import"
+  allowed_storage_modes: ""
+  # GOV-001. Only these users count as independent administrators (user object IDs).
+  # Empty counts every individual administrator.
+  eligible_admin_ids: ""
+  # SEC-001. Principals allowed direct workspace access (object IDs).
+  allowed_principal_ids: ""
+  # SEC-002. Direct workspace roles allowed. Any of: Admin, Member, Contributor, Viewer.
+  # Example: "Admin, Member, Contributor"
+  allowed_roles: ""
+  # GOV-009. Azure tag names every capacity must carry (needs FCA and
+  # scope.capacity_arm_resource_ids). Example: "owner, cost-center"
+  required_capacity_tags: ""
+  # SEC-021. Network directions production workspaces must not leave open to public access.
+  # Any of: inbound, outbound. Empty reports the network policy without a recommendation.
+  # Example: "inbound"
+  restricted_network_directions: ""
+  # SEC-024. Semantic models (item GUIDs) that must enforce row-level security (RLS): at least one role that
+  # can read the model carries a row filter that restricts rows. Leave empty to declare no requirement.
+  # A model whose security cannot be inspected is reported as missing evidence, never as a pass.
+  # Example: "11111111-1111-1111-1111-111111111111, 22222222-2222-2222-2222-222222222222"
+  rls_required_model_ids: ""
+  # SEC-025. Semantic models (item GUIDs) that must enforce object-level security (OLS): at least one role
+  # that can read the model hides a table or column. A model may be listed here and in the RLS list.
+  ols_required_model_ids: ""
+  # Rules to switch off for every workspace and for the tenant-wide rules, with no
+  # exceptions. Example: "SEC-005, GOV-004"
+  disabled_rules: ""

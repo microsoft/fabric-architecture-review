@@ -67,7 +67,8 @@ def _security_shape(bim: dict[str, Any]) -> dict[str, Any]:
             "measures": sorted([{
                 "name": measure["name"],
                 "expression": _expression(measure["expression"]),
-                "formatString": measure.get("formatString"),
+                # Fabric stores an empty format string as absent, so both mean "no format".
+                "formatString": measure.get("formatString") or None,
                 "formatStringExpression": (
                     _expression(measure["formatStringDefinition"]["expression"])
                     if measure.get("formatStringDefinition") else None

@@ -13,9 +13,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from analyzers import security_review
 from collectors import auth, scanner_api, workspace_inventory
 from collectors._http import HttpError
+from tests._raw import load_raw
 from orchestration.notebook_parameters import optional_string
 
 
@@ -111,36 +111,8 @@ def test_member_role_assignments_are_normalized_for_security_review(monkeypatch,
     assert users[0]["graphId"] == "synthetic-user-0"
     assert users[0]["groupUserAccessRight"] == "Admin"
     assert users[0]["identifier"] == assignments[0]["principal"]["userDetails"]["userPrincipalName"]
-    (tmp_path / "workspace_inventory.json").write_text(
-        json.dumps({"workspaces": [{"id": "synthetic-workspace", "name": "Synthetic", "users": users}]}),
-        encoding="utf-8",
-    )
-    results = {f["rule_id"]: f["status"] for f in security_review.analyze(tmp_path)}
-    assert {key: results[key] for key in ("SEC-004", "SEC-005", "SEC-007")} == {
-        "SEC-004": "fail", "SEC-005": "fail", "SEC-007": "fail",
-    }
-
-
-def test_security_review_handles_historical_nested_role_assignments(tmp_path):
-    (tmp_path / "workspace_inventory.json").write_text(json.dumps({
-        "workspaces": [{
-            "id": "synthetic-workspace",
-            "users": [{
-                "role": "Admin",
-                "principal": {
-                    "id": "synthetic-user",
-                    "type": "User",
-                    "userDetails": {"userPrincipalName": "guest_example.com#EXT#@example.onmicrosoft.com"},
-                },
-            }],
-        }],
-    }), encoding="utf-8")
-    results = {f["rule_id"]: f for f in security_review.analyze(tmp_path)}
-    assert results["SEC-004"]["status"] == "fail"
-    assert results["SEC-007"]["status"] == "fail"
-    assert results["SEC-007"]["evidence"]["examples"][0]["externalUsers"] == [
-        "guest_example.com#EXT#@example.onmicrosoft.com",
-    ]
+    assert users[10]["groupUserAccessRight"] == "Viewer"
+    assert users[10]["graphId"] == "synthetic-user-10"
 
 
 @pytest.mark.parametrize("principal_type", ["Group", "ServicePrincipal", "EntireTenant"])
@@ -151,8 +123,6 @@ def test_non_user_fabric_principals_are_not_individual_admins(monkeypatch, princ
     users = workspace_inventory._list_users(Mock(), "synthetic-workspace", False)
     assert users[0]["principalType"] == principal_type
     assert users[0]["graphId"] == "synthetic-principal"
-    assert security_review._principal_type(users[0]) != "user"
-    assert not security_review._is_external(users[0])
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -204,49 +174,7 @@ def test_failed_membership_collection_replaces_stale_evidence(monkeypatch, tmp_p
     )
     path = workspace_inventory.collect(tmp_path)
     assert json.loads(path.read_text(encoding="utf-8"))["collectionComplete"] is False
-    results = {f["rule_id"]: f for f in security_review.analyze(tmp_path)}
-    for rule in ("SEC-004", "SEC-005", "SEC-007"):
-        assert results[rule]["status"] == "missing_evidence"
-
-
-def test_security_review_uses_inventory_members_when_scanner_omits_them(tmp_path):
-    (tmp_path / "scanner.json").write_text(
-        json.dumps({"workspaces": [{"id": "synthetic-workspace"}]}), encoding="utf-8",
-    )
-    (tmp_path / "workspace_inventory.json").write_text(json.dumps({
-        "workspaces": [{
-            "id": "synthetic-workspace",
-            "users": [{
-                "principalType": "User", "groupUserAccessRight": "Admin",
-                "identifier": "guest_example.com#EXT#@example.onmicrosoft.com",
-            }],
-        }],
-    }), encoding="utf-8")
-    results = {f["rule_id"]: f["status"] for f in security_review.analyze(tmp_path)}
-    assert results["SEC-004"] == "fail"
-    assert results["SEC-007"] == "fail"
-
-
-def test_successfully_collected_empty_membership_is_not_missing(tmp_path):
-    (tmp_path / "workspace_inventory.json").write_text(
-        json.dumps({"workspaces": [{"id": "synthetic-workspace", "users": []}]}),
-        encoding="utf-8",
-    )
-    results = {f["rule_id"]: f["status"] for f in security_review.analyze(tmp_path)}
-    for rule in ("SEC-004", "SEC-005", "SEC-007"):
-        assert results[rule] == "pass"
-
-
-def test_guest_check_requires_user_identity_evidence(tmp_path):
-    (tmp_path / "workspace_inventory.json").write_text(json.dumps({
-        "workspaces": [{
-            "id": "synthetic-workspace",
-            "users": [{"principalType": "User", "graphId": "synthetic-user", "groupUserAccessRight": "Viewer"}],
-        }],
-    }), encoding="utf-8")
-    results = {f["rule_id"]: f for f in security_review.analyze(tmp_path)}
-    assert results["SEC-007"]["status"] == "missing_evidence"
-    assert results["SEC-007"]["evidence"]["workspacesMissingMembershipEvidence"] == 1
+    assert load_raw(path) is None
 
 
 @pytest.mark.parametrize("empty_scope", ["", None])

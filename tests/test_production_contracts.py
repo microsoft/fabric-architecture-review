@@ -15,17 +15,31 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_merge_writes_traceable_run_manifest(tmp_path: Path) -> None:
+def test_merge_writes_traceable_run_manifest(tmp_path: Path, monkeypatch) -> None:
     from analyzers.merge_findings import merge
+    from analyzers.far_profile import ACTIVE_RULE_IDS, PROFILE_ID, PROFILE_SHA256
+    from orchestration.review_config import activate, capture, local_configuration, read_snapshot
+
+    for name in ("FAR_CONFIG_SNAPSHOT", "THRESHOLDS_CONFIG", "WORKSPACES_CONFIG"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+    capture(tmp_path, local_configuration())
+    activate(tmp_path / "review_config.json")
+    snapshot = read_snapshot(tmp_path / "review_config.json")
 
     artifact = tmp_path / "findings_architecture.json"
     artifact.write_text(json.dumps([{
-        "rule_id": "ARCH-001",
+        "rule_id": rule_id,
         "dimension": "architecture",
         "severity": "medium",
         "status": "pass",
         "title": "Synthetic finding",
-    }]), encoding="utf-8")
+        "evidence": {},
+        "profile_id": PROFILE_ID,
+        "profile_sha256": PROFILE_SHA256,
+        "configuration_sha256": snapshot["sha256"],
+        "configuration_captured_at_utc": snapshot["captured_at_utc"],
+    } for rule_id in sorted(ACTIVE_RULE_IDS)]), encoding="utf-8")
 
     findings_path = merge(tmp_path, run_id="test-run")
     manifest = json.loads((tmp_path / "run_manifest.json").read_text(encoding="utf-8"))
@@ -33,8 +47,12 @@ def test_merge_writes_traceable_run_manifest(tmp_path: Path) -> None:
     assert findings_path.is_file()
     assert manifest["run_id"] == "test-run"
     assert manifest["status"] == "completed"
-    assert manifest["finding_count"] == 1
-    assert manifest["status_counts"]["pass"] == 1
+    assert manifest["finding_count"] == len(ACTIVE_RULE_IDS)
+    assert manifest["profile_id"] == PROFILE_ID
+    assert manifest["profile_sha256"] == PROFILE_SHA256
+    assert manifest["configuration_sha256"] == snapshot["sha256"]
+    from analyzers.far_profile import RULE_KINDS
+    assert manifest["status_counts"]["pass"] == sum(kind == "control" for kind in RULE_KINDS.values())
     assert len(manifest["rule_catalog_sha256"]) == 64
     assert len(manifest["analyzer_registry_sha256"]) == 64
     assert len(manifest["thresholds_sha256"]) == 64
@@ -70,29 +88,33 @@ def test_release_version_is_consistent_across_tracked_surfaces() -> None:
 
 def test_report_describes_evidence_gaps_and_source_collection(tmp_path: Path) -> None:
     from reports.render_report import render
+    from analyzers.far_profile import PROFILE_ID, PROFILE_SHA256
 
+    (tmp_path / "run_manifest.json").write_text(json.dumps({
+        "profile_id": PROFILE_ID, "profile_sha256": PROFILE_SHA256,
+        "configuration_sha256": "synthetic-policy",
+    }), encoding="utf-8")
     findings = tmp_path / "findings.json"
     findings.write_text(json.dumps([{
-        "rule_id": "PERF-003",
-        "dimension": "performance",
+        "rule_id": "ARCH-001", "profile_id": PROFILE_ID, "profile_sha256": PROFILE_SHA256,
+        "dimension": "architecture",
         "severity": "info",
         "status": "missing_evidence",
-        "title": "Model size evidence unavailable",
+        "title": "Workspace layering design evidence unavailable",
         "evidence": {"reason": "Collection unavailable."},
         "recommendation": "Restore collection and rerun the review.",
     }]), encoding="utf-8")
     report = tmp_path / "report.md"
 
-    render(findings, report, ROOT / "reports" / "templates", raw_dir=tmp_path / "raw")
+    render(findings, report, raw_dir=tmp_path / "raw")
     text = report.read_text(encoding="utf-8")
 
-    assert "| Missing evidence | 1 |" in text
-    assert "Review assessment coverage and unresolved outcomes" in text
+    assert "| ARCH-001 | control | missing_evidence |" in text
+    assert "No assessable controls" in text
     assert "the tenant is aligned" not in text
-    assert "not measured runtime cost" in text
-    assert "notebook source and pipeline definitions" in text
-    assert "notebook outputs are not retained" in text
-    assert "configured local directory or FAR Lakehouse" in text
+    assert "Unknown evidence is not pass" in text
+    assert "independent verification" in text
+    assert "synthetic-policy" in text
 
 
 def test_fabric_setup_deploys_complete_ordered_pipeline() -> None:
@@ -115,10 +137,11 @@ def test_fabric_setup_deploys_complete_ordered_pipeline() -> None:
 def test_fabric_setup_resolves_immutable_release_ref() -> None:
     code = _notebook_code("fabric/setup.ipynb")
 
-    assert 'with open(os.path.join(REPO_DIR, "VERSION")' in code
-    assert 'GITHUB_REF = RELEASE_TAG or (("v" + _branch_version)' in code
+    assert "GITHUB_REF = RELEASE_TAG or GITHUB_BRANCH" in code
+    assert "_branch_version" not in code
     assert 'checkout", "--force", "FETCH_HEAD"' in code
-    assert 'GITHUB_REF = GITHUB_BRANCH' in code
+    assert 'origin", RELEASE_TAG], check=True)' in code
+    assert "validate_checkout(Path(REPO_DIR))" in code
     assert 'def load_agent_nb():' in code
     assert '"GITHUB_REPO_URL": GITHUB_REPO_URL' in code
     assert '"GITHUB_BRANCH": GITHUB_BRANCH' in code
@@ -130,6 +153,8 @@ def test_data_agent_notebook_pins_tested_preview_sdk() -> None:
     code = _notebook_code("fabric/notebooks/05_agent.ipynb")
 
     assert "%pip install -q fabric-data-agent-sdk==0.1.30a0" in code
+    assert 'DATA_AGENT_RUNTIME = "standard"' in " ".join(code.split())
+    assert "runtime=DATA_AGENT_RUNTIME" in code
 
 
 def test_data_agent_notebook_stops_when_dependency_install_fails() -> None:
@@ -198,12 +223,15 @@ def test_setup_stamps_compilable_data_agent_source() -> None:
         assert json.dumps(namespace[parameter]) in stamped_line
 
 
-def test_fabric_stage_notebooks_invoke_dax_pipeline() -> None:
+def test_fabric_stage_notebooks_use_architectural_runtime_not_optimizers() -> None:
     collect_code = _notebook_code("fabric/notebooks/01_collect.ipynb")
     analyze_code = _notebook_code("fabric/notebooks/02_analyze.ipynb")
 
-    assert '"collectors.dax_analysis"' in collect_code
-    assert '("analyzers.dax_review", "findings_dax.json")' in analyze_code
+    assert "collectors.far" in collect_code
+    assert "analyzers.far_review" in analyze_code
+    for module in ("dax_analysis", "vertipaq", "best_practices", "capacity_metrics", "activity_logs"):
+        assert f"collectors.{module}" not in collect_code
+    assert "analyzers.dax_review" not in analyze_code
 
 
 @pytest.mark.parametrize("stage", [
@@ -214,6 +242,7 @@ def test_stage_checkout_reloads_framework_modules_in_a_warm_session(
     tmp_path: Path, stage: str, source_kind: str,
 ) -> None:
     import os
+    import shutil
     import subprocess
     import sys
 
@@ -250,6 +279,9 @@ def test_stage_checkout_reloads_framework_modules_in_a_warm_session(
         directory.mkdir()
         (directory / "__init__.py").write_text('VERSION = "current"\n', encoding="utf-8")
         (directory / "probe.py").write_text('VERSION = "current"\n', encoding="utf-8")
+    shutil.copyfile(ROOT / "orchestration" / "project.py", tmp_path / "orchestration" / "project.py")
+    (tmp_path / "config").mkdir()
+    shutil.copyfile(ROOT / "config" / "project.yaml", tmp_path / "config" / "project.yaml")
     script = f"""
 import importlib, os, subprocess, sys
 from types import ModuleType
@@ -261,6 +293,8 @@ for name in {packages!r}:
     importlib.import_module(name + ".probe").VERSION = "stale"
 external = ModuleType("sempy_labs")
 sys.modules["sempy_labs"] = external
+# Fabric validates the checkout before installing local environment dependencies.
+sys.modules["dotenv"] = None
 exec({bootstrap!r})
 for name in {packages!r}:
     assert importlib.import_module(name).VERSION == "current", name

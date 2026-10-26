@@ -10,6 +10,7 @@ import pytest
 
 from reports.owner import fabric_runtime as runtime
 from reports.owner.schema import OWNER_TABLES_BY_NAME
+from analyzers.far_profile import PROFILE_ID, PROFILE_SHA256
 
 
 class ConcurrentAppendException(Exception):
@@ -128,6 +129,7 @@ def review(run, workspace, stamp, name=None):
         "review_key": f"{run}:{workspace}",
         "run_id": run, "workspace_id": workspace, "run_timestamp": stamp,
         "workspace_name": name or workspace, "is_latest": True,
+        "profile_id": PROFILE_ID, "profile_sha256": PROFILE_SHA256,
     }
 
 

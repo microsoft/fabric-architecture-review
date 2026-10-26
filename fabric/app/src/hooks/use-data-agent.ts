@@ -6,7 +6,7 @@
 //-----------------------------------------------------------------------
 
 import { useRef, useState } from "react";
-import { getDataAgentConnection } from "@/lib/data-agent-factory";
+import { describeDataAgentError, getDataAgentConnection, type DataAgentPhase } from "@/lib/data-agent-factory";
 
 export type DataAgentStatus = "unconfigured" | "ready" | "querying" | "answered" | "error";
 
@@ -16,6 +16,7 @@ export function useDataAgent() {
     const [status, setStatus] = useState<DataAgentStatus>(connection.client ? "ready" : "unconfigured");
     const [answer, setAnswer] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [phase, setPhase] = useState<DataAgentPhase>("authenticating");
 
     const ask = async (question: string) => {
         if (!connection.client || requestInFlight.current) return;
@@ -23,12 +24,13 @@ export function useDataAgent() {
         setStatus("querying");
         setAnswer(null);
         setError(null);
+        setPhase("authenticating");
 
         try {
-            setAnswer(await connection.client.ask(question));
+            setAnswer(await connection.client.ask(question, setPhase));
             setStatus("answered");
         } catch (caught) {
-            setError(caught instanceof Error ? caught.message : String(caught));
+            setError(describeDataAgentError(caught));
             setStatus("error");
         } finally {
             requestInFlight.current = false;
@@ -41,5 +43,6 @@ export function useDataAgent() {
         error,
         missingConfiguration: connection.missingConfiguration,
         status,
+        phase,
     };
 }

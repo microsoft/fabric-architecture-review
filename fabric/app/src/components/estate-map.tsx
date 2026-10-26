@@ -603,7 +603,7 @@ interface CampusSelection {
     itemId?: string;
 }
 
-export type EstateReviewArea = "governance" | "models" | "efficiency" | "architecture" | "notebooks";
+export type EstateReviewArea = "findings";
 
 export interface EstateReviewContext {
     workspaceId: string;
@@ -1067,19 +1067,13 @@ function CampusCanvas({ compact, estate, selectedRoomId, selectedItemId, onSelec
 function ArtifactProfile({ item }: { item: EstateItem }) {
     return (
         <div className="mt-400 border-t border-border pt-400">
-            <div className="mb-300 flex items-center gap-200"><BadgeCheck className="icon-size-200 text-primary-strong" /><p className="text-100 font-bold uppercase text-muted-foreground">Artifact governance</p></div>
+            <div className="mb-300 flex items-center gap-200"><BadgeCheck className="icon-size-200 text-primary-strong" /><p className="text-100 font-bold uppercase text-muted-foreground">Item details</p></div>
             <dl className="grid grid-cols-2 gap-200 text-200">
-                <div><dt className="text-muted-foreground">Endorsement</dt><dd className="font-semibold capitalize">{item.governance?.endorsement ?? "Not assessed"}</dd></div>
-                <div><dt className="text-muted-foreground">Sensitivity</dt><dd className="font-semibold">{item.governance?.sensitivityLabel ?? "Not assessed"}</dd></div>
-                <div className="col-span-2"><dt className="text-muted-foreground">Owner</dt><dd className="font-semibold">{item.governance?.owner ?? "Not recorded"}</dd></div>
+                <div><dt className="text-muted-foreground">Type</dt><dd className="font-semibold">{item.fabricType}</dd></div>
+                <div><dt className="text-muted-foreground">Storage</dt><dd className="font-semibold">{item.storageMode ?? "Not applicable"}</dd></div>
+                {item.security && <div className="col-span-2"><dt className="text-muted-foreground">Model security</dt><dd className="font-semibold">Row-level: {item.security.rls} · Object-level: {item.security.ols}</dd></div>}
+                <div className="col-span-2"><dt className="text-muted-foreground">Item ID</dt><dd className="break-all font-monospace text-100">{item.id}</dd></div>
             </dl>
-            {item.modelProfile && <dl className="mt-300 grid grid-cols-3 gap-200 border-t border-border pt-300 text-200">
-                <div className="col-span-2"><dt className="text-muted-foreground">Storage</dt><dd className="font-semibold">{item.modelProfile.storageMode}</dd></div>
-                <div><dt className="text-muted-foreground">Size</dt><dd className="font-semibold">{item.modelProfile.totalSize}</dd></div>
-                <div><dt className="text-muted-foreground">Tables</dt><dd className="font-numeric font-semibold">{item.modelProfile.tables}</dd></div>
-                <div><dt className="text-muted-foreground">Columns</dt><dd className="font-numeric font-semibold">{item.modelProfile.columns}</dd></div>
-                <div><dt className="text-muted-foreground">Calculated</dt><dd className="font-numeric font-semibold">{item.modelProfile.calculatedColumns}</dd></div>
-            </dl>}
         </div>
     );
 }
@@ -1094,7 +1088,7 @@ function WorkspaceInspector({ findings: allFindings, room, selectedItemId, onSel
                 <div>
                     <p className="section-kicker">{room.domain}</p>
                     <h3 className="font-heading text-500 font-bold">{room.name}</h3>
-                    <p className="mt-100 text-200 text-muted-foreground">{room.items.length} Fabric items · Risk {room.riskScore}/100</p>
+                    <p className="mt-100 text-200 text-muted-foreground">{room.items.length} Fabric items · {room.capacityName ?? "No capacity"} · Risk {room.riskScore}/100</p>
                 </div>
                 <button className="icon-button" aria-label="Close workspace inspector" onClick={onClose} type="button"><X className="icon-size-200" /></button>
             </div>
@@ -1111,18 +1105,11 @@ function WorkspaceInspector({ findings: allFindings, room, selectedItemId, onSel
                 </div>
                 {selectedItem && <ArtifactProfile item={selectedItem} />}
                 {onOpenArea && <div className="mt-400 border-t border-border pt-400">
-                    <p className="mb-200 text-100 font-bold uppercase text-muted-foreground">Open specialist analysis</p>
-                    <div className="grid gap-100">
-                        {selectedItem?.type === "model" && <button className="flex items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("models", { workspaceId: room.id, itemId: selectedItem.id })} type="button"><Layers3 className="icon-size-200" />Open semantic model optimization<ChevronRight className="ml-auto icon-size-200" /></button>}
-                        {selectedItem?.type === "notebook" && <button className="flex items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("notebooks", { workspaceId: room.id, itemId: selectedItem.id })} type="button"><NotebookTabs className="icon-size-200" />Open notebook engineering<ChevronRight className="ml-auto icon-size-200" /></button>}
-                        <button className="flex items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("governance", { workspaceId: room.id, itemId: selectedItem?.id })} type="button"><BadgeCheck className="icon-size-200" />Open governance<ChevronRight className="ml-auto icon-size-200" /></button>
-                        <button className="flex items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("architecture", { workspaceId: room.id, itemId: selectedItem?.id })} type="button"><GitBranch className="icon-size-200" />Open architecture<ChevronRight className="ml-auto icon-size-200" /></button>
-                        <button className="flex items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("efficiency", { workspaceId: room.id, itemId: selectedItem?.id })} type="button"><Database className="icon-size-200" />Open performance + cost<ChevronRight className="ml-auto icon-size-200" /></button>
-                    </div>
+                    <button className="flex w-full items-center gap-200 px-200 py-200 text-left text-200 font-semibold text-primary-strong hover:bg-primary-soft" onClick={() => onOpenArea("findings", { workspaceId: room.id, itemId: selectedItem?.id })} type="button"><ShieldAlert className="icon-size-200" />Open findings for this workspace<ChevronRight className="ml-auto icon-size-200" /></button>
                 </div>}
                 <div className="mt-400 border-t border-border pt-400">
                     <div className="mb-300 flex items-center gap-200"><ShieldAlert className="icon-size-200 text-destructive" /><p className="text-100 font-bold uppercase text-muted-foreground">{selectedItem ? "Artifact flags" : "Workspace flags"}</p></div>
-                    {findings.length ? findings.map((finding) => <article className="border-l-2 border-destructive pl-300" key={finding.id}><p className="font-monospace text-100 font-bold text-destructive">{finding.id} · {finding.severity}</p><h4 className="mt-100 text-200 font-bold">{finding.title}</h4><p className="mt-100 text-200 text-muted-foreground">{finding.recommendation}</p></article>) : <p className="text-200 text-muted-foreground">No high-impact finding is linked to this sample workspace.</p>}
+                    {findings.length ? findings.map((finding) => <article className="border-l-2 border-destructive pl-300" key={finding.id}><p className="font-monospace text-100 font-bold text-destructive">{finding.id} · {finding.severity}</p><h4 className="mt-100 text-200 font-bold">{finding.title}</h4><p className="mt-100 text-200 text-muted-foreground">{finding.recommendation}</p></article>) : <p className="text-200 text-muted-foreground">No finding is linked to this workspace.</p>}
                 </div>
             </div>
         </aside>

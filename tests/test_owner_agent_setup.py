@@ -120,5 +120,6 @@ def test_owner_agent_notebook_stamps_exact_owner_model_and_release(capsys):
     assert values["OWNER_SEMANTIC_MODEL_ID"] == MODEL_ID
     assert values["WORKSPACE_ID"] == WORKSPACE_ID
     assert values["OWNER_AGENT_NAME"] == "Owner Agent"
+    assert values["OWNER_AGENT_RUNTIME"] == "standard"
     assert values["GITHUB_REF"] == "v2026.09.2"
     assert "has not published or shared" in capsys.readouterr().out

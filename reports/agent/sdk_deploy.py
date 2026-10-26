@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Literal, Optional, Set, Tuple
 
 from reports.agent.data_agent import (
     DEFAULT_LAKEHOUSE_FEWSHOTS,
@@ -38,32 +38,24 @@ from reports.agent.data_agent import (
 # before becoming agent grounding. This is not an artifact authorization policy.
 APPROVED_GOLD_TABLES: FrozenSet[str] = frozenset({
     "gold_findings", "gold_run_summary", "gold_dimension_summary",
-    "gold_workspaces", "gold_workspace_risk", "gold_semantic_models",
-    "gold_capacities", "gold_capacity_items", "gold_cost_finding_impacts",
-    "gold_cost_impact_items", "gold_tenant_setting_changes",
-    "gold_dax_models", "gold_dax_measures", "gold_notebook_smells",
-    "gold_bpa_violations", "gold_graph_nodes", "gold_graph_edges",
+    "gold_workspaces", "gold_workspace_risk", "gold_semantic_models", "gold_model_security",
+    "gold_model_security_roles", "gold_capacities", "gold_capacity_items", "gold_tenant_settings",
+    "gold_graph_nodes", "gold_graph_edges",
     "gold_reports", "gold_notebooks", "gold_pipelines", "gold_lakehouses",
-    "gold_lineage_edges", "gold_finding_targets", "gold_severity_matrix",
-    "gold_release", "gold_agent_eval", "gold_model_tables", "gold_model_columns",
-    "gold_model_partitions", "gold_model_relationships", "gold_model_hierarchies",
-    "gold_item_executions", "gold_execution_coverage", "gold_dataflows",
-    "gold_dataflow_queries", "gold_dax_objects", "gold_dax_object_coverage",
+    "gold_lineage_edges", "gold_finding_targets", "gold_finding_items", "gold_severity_matrix",
+    "gold_release", "gold_source_coverage", "gold_rules",
 })
 
-# Tables to leave unselected: they are empty on most runs, so selecting them adds
-# no Q&A value and only invites the empty-table warning. gold_agent_eval is
-# populated by the self-eval (which needs the SDK) and the report reads it
-# directly regardless; the VertiPaq gold_model_* tables are empty unless the
-# Fabric-only VertiPaq collector produced rows.
-DEFAULT_SKIP_TABLES: Set[str] = {
-    "gold_agent_eval",
-    "gold_model_tables",
-    "gold_model_columns",
-    "gold_model_partitions",
-    "gold_model_relationships",
-    "gold_model_hierarchies",
-}
+# The only approved tables the Lakehouse source may expose: static estate and the rule catalogue. Decisions, such as
+# gold_findings and gold_finding_items, stay in the secured model: the Lakehouse has no profile gate or row-level security.
+_LAKEHOUSE_TABLES: FrozenSet[str] = frozenset({
+    "gold_workspaces", "gold_capacities", "gold_capacity_items", "gold_semantic_models", "gold_reports",
+    "gold_notebooks", "gold_pipelines", "gold_lakehouses", "gold_source_coverage", "gold_rules",
+})
+
+# Tables to leave unselected by default. Empty today: every approved table is
+# populated by a normal run.
+DEFAULT_SKIP_TABLES: Set[str] = set()
 
 # Fabric artifact-type token per source kind (see the SDK's ``schema_types``).
 _SEMANTIC_MODEL = "semanticmodel"
@@ -88,6 +80,7 @@ def deploy_agent(
     skip_tables: Optional[Iterable[str]] = None,
     publish: bool = True,
     to_m365: bool = False,
+    runtime: Literal["standard", "preview"] = "standard",
 ) -> Any:
     """Create / configure / publish the Data Agent via the SDK.
 
@@ -101,7 +94,12 @@ def deploy_agent(
     Required instruction/configuration and requested publication failures
     propagate to the caller. Returns the ``FabricDataAgentManagement`` handle
     only after those operations succeed; ``publish=False`` leaves a draft.
+    Runtime defaults to standard and is verified before publication. Use a
+    separately named agent to compare preview without changing production.
     """
+    if runtime not in {"standard", "preview"}:
+        raise ValueError("Data Agent runtime must be 'standard' or 'preview'.")
+
     from fabric.dataagent.client import create_data_agent  # lazy: Fabric-only
 
     skip = set(DEFAULT_SKIP_TABLES if skip_tables is None else skip_tables)
@@ -109,8 +107,13 @@ def deploy_agent(
     print("Deploying data agent via SDK:", agent_name)
     agent = create_data_agent(agent_name)
 
-    agent.update_configuration(instructions=compose_instructions(version))
-    print("  instructions set.")
+    preview = runtime == "preview"
+    agent.update_configuration(
+        instructions=compose_instructions(version), enable_preview_runtime=preview,
+    )
+    if agent.get_configuration().enable_preview_runtime is not preview:
+        raise ValueError("Data Agent runtime could not be verified; refusing to publish.")
+    print(f"  instructions set; runtime verified: {runtime}.")
 
     # The backend enumerates each source's schema/tables - this is the fix.
     _add_datasource(agent, model_name, _SEMANTIC_MODEL)
@@ -224,6 +227,10 @@ def _select_tables(ds: Any, skip: Set[str]) -> Set[str]:
     kind = _source_kind(cfg)
     tables = _table_elements(cfg.get("elements"), allow_files=kind == _LAKEHOUSE)
     allowed = set(agent_tables(skip))
+    if kind == _LAKEHOUSE:
+        # Historical findings remain physically stored. Only the secured model
+        # may expose decisions; SQL grounding must not bypass its profile gate.
+        allowed &= _LAKEHOUSE_TABLES
     planned = {
         path for path, element in tables.items()
         if str(element.definition["type"]).endswith(".table")
@@ -236,6 +243,27 @@ def _select_tables(ds: Any, skip: Set[str]) -> Set[str]:
     for path in tables:
         ds.unselect(*path)
     for path in sorted(planned):
+        from reports.powerbi.schema import GOLD_TABLES_BY_NAME, KEY_COLUMNS
+        approved_columns = {column.name for column in GOLD_TABLES_BY_NAME[path[-1]].columns}
+        if kind == _SEMANTIC_MODEL:
+            # The model hides the ontology key columns, and an agent cannot see hidden columns.
+            approved_columns -= KEY_COLUMNS
+        approved_measures = set()
+        if kind == _SEMANTIC_MODEL:
+            from reports.powerbi.semantic_model import FACT_TABLE, _measures
+            if path[-1] == FACT_TABLE:
+                approved_measures = {measure["name"] for measure in _measures()}
+        children = tables[path].definition.get("children")
+        if not isinstance(children, list) or any(
+            not isinstance(column, dict)
+            or (column.get("name") or column.get("display_name")) not in (
+                approved_measures if str(column.get("type") or "").rsplit(".", 1)[-1].lower() == "measure"
+                else approved_columns
+            )
+            for column in children
+        ) or {column.get("name") or column.get("display_name") for column in children
+              if str(column.get("type") or "").rsplit(".", 1)[-1].lower() != "measure"} != approved_columns:
+            raise ValueError("Stale or unverifiable columns in approved table; migrate the curated source before publication.")
         ds.select(*path)
     verified = _table_elements(ds.get_configuration().get("elements"), allow_files=kind == _LAKEHOUSE)
     if {path for path, element in verified.items() if element.definition["is_selected"]} != planned:

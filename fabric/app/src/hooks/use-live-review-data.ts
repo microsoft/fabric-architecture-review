@@ -1,63 +1,37 @@
-//-----------------------------------------------------------------------
-// <copyright company="Microsoft Corporation">
-//        Copyright (c) Microsoft Corporation.  All rights reserved.
-//        Licensed under the MIT license. See LICENSE file in the project root for full license information.
-// </copyright>
-//-----------------------------------------------------------------------
-
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 import { useMemo } from "react";
 import { useSemanticModelQuery } from "@/hooks/use-semantic-model-query";
 import { buildLiveReviewData, type LiveReviewTables } from "@/lib/live-review-adapter";
 import { liveReviewQueries } from "@/queries/live";
-
 export function useLiveReviewData() {
-    const capacities = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacities });
-    const capacityItems = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacityItems });
-    const daxModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxModels });
-    const daxMeasures = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.daxMeasures });
-    const dimensionSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.dimensionSummary });
-    const estateNodes = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.estateNodes });
-    const findingTargets = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.findingTargets });
     const findings = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.findings });
-    const modelColumns = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.modelColumns });
-    const modelTables = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.modelTables });
-    const notebookSmells = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.notebookSmells });
     const runSummary = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.runSummary });
     const semanticModels = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.semanticModels });
-    const tenantSettingChanges = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.tenantSettingChanges });
     const workspaceRisk = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.workspaceRisk });
-    const results = useMemo(() => ({ capacities, capacityItems, daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, tenantSettingChanges, workspaceRisk }), [capacities, capacityItems, daxModels, daxMeasures, dimensionSummary, estateNodes, findingTargets, findings, modelColumns, modelTables, notebookSmells, runSummary, semanticModels, tenantSettingChanges, workspaceRisk]);
-    const failed = Object.entries(results).find(([, result]) => result.error || result.data?.status === "error");
-    const loading = Object.values(results).some((result) => result.isLoading || !result.data);
+    const coverage = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.coverage });
+    const capacities = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacities });
+    const findingItems = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.findingItems });
+    const dimensions = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.dimensions });
+    const workspaces = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.workspaces });
+    const capacityItems = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.capacityItems });
+    const tenantSettings = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.tenantSettings });
+    // Optional: an older deployed model has no gold_model_security table, and that must not stop the app.
+    const modelSecurity = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.modelSecurity });
+    const modelRoles = useSemanticModelQuery({ connection: liveReviewQueries.connection, query: liveReviewQueries.modelRoles });
+    const results = useMemo(() => ({findings, runSummary, semanticModels, workspaceRisk, coverage, capacities, findingItems, dimensions, workspaces, capacityItems, tenantSettings}),
+        [findings, runSummary, semanticModels, workspaceRisk, coverage, capacities, findingItems, dimensions, workspaces, capacityItems, tenantSettings]);
+    const failed = Object.entries(results).find(([, r]) => r.error || r.data?.status === "error");
+    const loading = Object.values(results).some(r => r.isLoading || !r.data) || modelSecurity.isLoading || modelRoles.isLoading;
     const data = useMemo(() => {
-        if (loading || failed) return null;
-        const table = (name: keyof LiveReviewTables) => {
-            const result = results[name];
-            if (result.data?.status !== "success") throw new Error(`${name}: query returned no table`);
-            return result.data.table;
-        };
-        const tables: LiveReviewTables = {
-            capacities: table("capacities"),
-            capacityItems: table("capacityItems"),
-            daxModels: table("daxModels"),
-            daxMeasures: table("daxMeasures"),
-            dimensionSummary: table("dimensionSummary"),
-            estateNodes: table("estateNodes"),
-            findingTargets: table("findingTargets"),
-            findings: table("findings"),
-            modelColumns: table("modelColumns"),
-            modelTables: table("modelTables"),
-            notebookSmells: table("notebookSmells"),
-            runSummary: table("runSummary"),
-            semanticModels: table("semanticModels"),
-            tenantSettingChanges: table("tenantSettingChanges"),
-            workspaceRisk: table("workspaceRisk"),
-        };
+        if (failed || loading) return null;
+        const tables = Object.fromEntries(Object.entries(results).map(([name, r]) => {
+            if (r.data?.status !== "success") throw new Error(`${name}: no architectural table`);
+            return [name, r.data.table];
+        })) as unknown as LiveReviewTables;
+        tables.modelSecurity = !modelSecurity.error && modelSecurity.data?.status === "success" ? modelSecurity.data.table : null;
+        tables.modelRoles = !modelRoles.error && modelRoles.data?.status === "success" ? modelRoles.data.table : null;
         return buildLiveReviewData(tables);
-    }, [failed, loading, results]);
-    return {
-        data,
-        error: failed ? new Error(`${failed[0]}: ${failed[1].error?.message ?? "Semantic model query failed"}`) : null,
-        loading,
-    };
+    }, [results, failed, loading, modelSecurity, modelRoles]);
+    return {data, loading, error: failed ? new Error(`${failed[0]}: ${failed[1].error?.message ?? "Architectural query failed"}`) : null};
 }

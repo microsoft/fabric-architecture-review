@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
+import re
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
@@ -13,50 +14,35 @@ from orchestration.fabric_api import FabricClient, guid
 from reports.owner.deployment import _contract_difference, _security_shape
 from reports.owner.schema import OWNER_CONTRACT_VERSION
 
-_NEW_TABLES = {"owner_executions", "owner_coverage"}
-_NEW_MEASURES = {
-    "Scoped DAX object rows", "Scoped Dataflow rows", "Scoped executions",
-    "Scoped failed executions", "Scoped timed executions", "Scoped maximum duration ms",
-    "Scoped coverage rows", "Scoped incomplete coverage", "Scoped static objects",
-}
-_OLD_MEASURES = {
-    "Scoped DAX findings": 'COALESCE(CALCULATE(COUNTROWS(owner_findings), '
-    'KEEPFILTERS(owner_reviews[is_latest] = TRUE()), '
-    'KEEPFILTERS(owner_findings[item_type] = "SemanticModel")), 0)',
-    "Scoped notebook findings": 'COALESCE(CALCULATE(COUNTROWS(owner_findings), '
-    'KEEPFILTERS(owner_reviews[is_latest] = TRUE()), '
-    'KEEPFILTERS(owner_findings[item_type] = "Notebook")), 0)',
-}
-
-
 class ModelEditor(Protocol):
     def read(self) -> dict[str, Any]: ...
     def apply(self, target: dict[str, Any], migration: str) -> None: ...
     def close(self) -> None: ...
 
 
-def _legacy_contract(target: dict[str, Any]) -> dict[str, Any]:
-    """The unversioned five-table contract shipped at 99a4e15, not arbitrary drift."""
-    if OWNER_CONTRACT_VERSION != 2:
-        raise ValueError("This migration only supports owner contract 2.")
-    legacy = deepcopy(target)
-    model = legacy["model"]
-    model["annotations"] = [a for a in model["annotations"] if a["name"] != "OwnerContractVersion"]
-    model["tables"] = [t for t in model["tables"] if t["name"] not in _NEW_TABLES]
-    for table in model["tables"]:
-        if "measures" in table:
-            table["measures"] = [m for m in table["measures"] if m["name"] not in _NEW_MEASURES]
-            for measure in table["measures"]:
-                if measure["name"] in _OLD_MEASURES:
-                    measure["expression"] = _OLD_MEASURES[measure["name"]]
-    model["relationships"] = [
-        r for r in model["relationships"] if r["fromTable"] not in _NEW_TABLES
-    ]
-    for role in model["roles"]:
-        role["tablePermissions"] = [
-            p for p in role["tablePermissions"] if p["name"] not in _NEW_TABLES
-        ]
-    return legacy
+REFRESH_BINDING = "refresh-profile-binding"
+_PINNED_HASH = re.compile(r'(profile_sha256\]\s*==?\s*)"[0-9a-fA-F]{64}"')
+_PINNED_RULES = re.compile(r'(rule_id\]\s+IN\s+)\{[^{}]*\}')
+
+
+def _unpinned(shape: dict[str, Any]) -> dict[str, Any]:
+    """The contract with the pinned rule-logic hash and rule list blanked out.
+
+    Security filters and measures pin the rule logic a release was built for, so every release that changes the
+    rules changes them. Comparing without those two values tells a routine rebinding from real drift: a filter
+    that lost its profile condition, or any other change, still differs.
+    """
+    def blank(text: str) -> str:
+        return _PINNED_RULES.sub(r"\1{...}", _PINNED_HASH.sub(r'\1"..."', text))
+
+    shape = deepcopy(shape)
+    for role in shape["roles"]:
+        for permission in role["tablePermissions"]:
+            permission["filterExpression"] = blank(permission["filterExpression"])
+    for table in shape["tables"]:
+        for measure in table["measures"]:
+            measure["expression"] = blank(measure["expression"])
+    return shape
 
 
 def migration_for(existing: dict[str, Any], target: dict[str, Any]) -> str:
@@ -66,17 +52,19 @@ def migration_for(existing: dict[str, Any], target: dict[str, Any]) -> str:
         return "none"
     version = actual["ownerContractVersion"]
     if version is None:
-        if _contract_difference(_security_shape(_legacy_contract(target)), actual) is None:
-            return "legacy-five-table-to-2"
         unmarked = deepcopy(expected)
         unmarked["ownerContractVersion"] = None
         if _contract_difference(unmarked, actual) is None:
-            return "restore-contract-2-marker"
+            return f"restore-contract-{OWNER_CONTRACT_VERSION}-marker"
+    if _contract_difference(_unpinned(expected), _unpinned(actual)) is None:
+        return REFRESH_BINDING
     raise ValueError(
         "Existing owner model security/schema/calculation contract differs. "
-        "No approved owner migration matches the deployed contract. "
+        "No approved owner migration matches the deployed contract: a release that only changes the pinned "
+        "rule-logic version is upgraded automatically, anything more is not. "
         f"First mismatch: {_contract_difference(expected, actual)}. "
-        "No model update performed; inspect the deployed schema/security/source locally."
+        "No model update performed. Legacy optimizer contracts require a separately "
+        "provisioned architecture model/Lakehouse; preserve their data and ACLs."
     )
 
 

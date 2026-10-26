@@ -16,9 +16,10 @@ SOURCE_SUFFIXES = {
 }
 
 
-def tracked_sources() -> list[Path]:
+def publishable_sources() -> list[Path]:
     result = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True,
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT, check=True, capture_output=True,
     )
     return [
         Path(name) for name in result.stdout.decode("utf-8").split("\0")
@@ -26,7 +27,7 @@ def tracked_sources() -> list[Path]:
     ]
 
 
-@pytest.mark.parametrize("relative", tracked_sources(), ids=str)
+@pytest.mark.parametrize("relative", publishable_sources(), ids=str)
 def test_authored_source_has_copyright_and_mit_notice(relative: Path):
     text = (ROOT / relative).read_text(encoding="utf-8")
     if relative.suffix == ".ipynb":
@@ -38,7 +39,7 @@ def test_authored_source_has_copyright_and_mit_notice(relative: Path):
 
 
 @pytest.mark.parametrize(
-    "relative", [path for path in tracked_sources() if path.suffix == ".ipynb"],
+    "relative", [path for path in publishable_sources() if path.suffix == ".ipynb"],
     ids=str,
 )
 def test_public_notebooks_have_clean_outputs_and_valid_python(relative: Path):

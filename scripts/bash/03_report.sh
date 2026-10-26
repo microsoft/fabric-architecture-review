@@ -8,21 +8,27 @@ set -euo pipefail
 # cd to repo root (two levels up: scripts/bash -> scripts -> repo root)
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-# Load .env (KEY=VALUE lines, skipping comments/blank lines) into the environment.
-if [[ -f .env ]]; then
+# Load .env.far (KEY=VALUE lines, skipping comments/blank lines) into the environment.
+if [[ -f .env.far ]]; then
     set -a
     while IFS='=' read -r key value; do
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
         export "${key// /}=${value}"
-    done < <(grep -E '^[[:space:]]*[^#].*=' .env)
+    done < <(grep -E '^[[:space:]]*[^#].*=' .env.far)
     set +a
 fi
 
-OUT_DIR="${OUTPUT_DIR:-output}"
+OUT_DIR="${OUTPUT_DIR:-output/far}"
+if [[ ! -f "$OUT_DIR/review_config.json" ]]; then
+    echo "Review configuration not found. Run FAR collection first." >&2
+    exit 1
+fi
+export FAR_CONFIG_SNAPSHOT="$PWD/$OUT_DIR/review_config.json"
+if [[ "$OUT_DIR" = /* ]]; then export FAR_CONFIG_SNAPSHOT="$OUT_DIR/review_config.json"; fi
 RAW_DIR="$OUT_DIR/raw"
 FINDINGS_PATH="$OUT_DIR/findings.json"
 REPORT_MD="$OUT_DIR/report.md"
-REPORT_PDF="$OUT_DIR/fabric-arch-review.pdf"
+REPORT_PDF="$OUT_DIR/far-review.pdf"
 
 if [[ ! -f "$FINDINGS_PATH" ]]; then
     echo "$FINDINGS_PATH not found. Run scripts/bash/02_analyze.sh first." >&2
@@ -38,7 +44,7 @@ python -m reports.render_report \
 [[ -s "$REPORT_MD" ]] || { echo "Markdown report generation did not produce a nonempty report." >&2; exit 1; }
 
 echo "==> Generating PDF..."
-# Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.
+# Title and footer default to $ENGAGEMENT_NAME and "$CLIENT_NAME — $ENGAGEMENT_NAME" from .env.far.
 # Override per-run with --title and --footer-label if needed.
 python reports/_generate_pdf.py \
     --input "$REPORT_MD" \

@@ -54,7 +54,7 @@ def test_collect_refreshes_headers_for_each_model(tmp_path, monkeypatch):
     assert len(payload["models"]) == 2
 
 
-def test_collect_resumes_successful_models_from_matching_checkpoint(tmp_path, monkeypatch):
+def test_candidate_fingerprint_without_capture_proof_does_not_suppress_requests(tmp_path, monkeypatch):
     raw_dir = tmp_path / "raw"
     raw_dir.mkdir()
     datasets = _catalog(raw_dir)
@@ -86,7 +86,7 @@ def test_collect_resumes_successful_models_from_matching_checkpoint(tmp_path, mo
     target = definitions.collect(raw_dir)
     payload = json.loads(target.read_text(encoding="utf-8"))
 
-    assert requested == ["model-2"]
-    assert provider.calls == 1
+    assert requested == ["model-1", "model-2"]
+    assert provider.calls == 2
     assert payload["status"] == "completed"
     assert [model["id"] for model in payload["models"]] == ["model-1", "model-2"]

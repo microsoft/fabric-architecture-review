@@ -340,20 +340,19 @@ assert "collectors.capacity_metrics" not in sys.modules
                     *("collectors/" + name for name in RUNTIME_COLLECTOR_MODULES),
                 })
 
-    def test_all_actual_far_parameters_are_preserved_except_parent_scope_default(self):
+    def test_pipeline_parameters_are_only_the_values_that_vary_between_runs(self):
         notebook = json.loads((ROOT / "fabric/setup.ipynb").read_text())
         code = "\n".join("".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code")
         tree = ast.parse(code)
-        names = {"common_keys", "collect_keys", "threshold_keys"}
+        names = {"label_keys", "scope_keys"}
         nodes = [
             node for node in tree.body if isinstance(node, ast.Assign)
             and any(isinstance(target, ast.Name) and target.id in names for target in node.targets)
         ]
-        namespace = {"GITHUB_REPO_URL": "https://github.com/microsoft/fabric-architecture-review.git",
-                     "GITHUB_BRANCH": "test", "GITHUB_REF": "test",
-                     "SP_CLIENT_ID": "", "SP_CONNECTION_NAME": "test-connection"}
+        namespace = {}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "<pipeline-defaults>", "exec"), namespace)
-        values = {**namespace["common_keys"], **namespace["collect_keys"], **namespace["threshold_keys"]}
+        values = {**namespace["label_keys"], **namespace["scope_keys"]}
+        self.assertEqual(set(values), {"CLIENT_NAME", "ENGAGEMENT_NAME", "REVIEWER_NAME", "WORKSPACE_IDS"})
         child = {"properties": {"parameters": {
             name: {"type": "string", "defaultValue": value} for name, value in values.items()
         }}}
@@ -391,36 +390,29 @@ assert "collectors.capacity_metrics" not in sys.modules
         self.assertEqual([row.metric_value for row in selected], [6, 5, 4, 3, 2])
         self.assertEqual(rank_workspaces(rows, allowlist=WS), [])
 
-    @unittest.skipUnless(
-        (ROOT / "fabric/setup_private_test_DISPOSABLE.ipynb").exists(),
-        "Optional local deployment harness is not part of public distributions.",
-    )
-    def test_private_setup_patches_indented_optional_notebook(self):
-        notebook = json.loads((ROOT / "fabric/setup_private_test_DISPOSABLE.ipynb").read_text())
-        code = "\n".join("".join(c["source"]) for c in notebook["cells"] if c["cell_type"] == "code")
+    def test_far_setup_stamps_optional_notebook_without_legacy_private_harness(self):
+        notebook = json.loads((ROOT / "fabric/setup.ipynb").read_text())
+        code = "".join(notebook["cells"][8]["source"])
         tree = ast.parse(code)
         nodes = [
             node for node in tree.body
-            if isinstance(node, ast.FunctionDef) and node.name == "_patch_stage_notebook"
-            or isinstance(node, ast.Assign) and any(
-                isinstance(target, ast.Name) and target.id == "_PRIVATE_SNAPSHOT_LINES"
-                for target in node.targets
-            )
+            if isinstance(node, ast.FunctionDef) and node.name == "load_nb"
         ]
-        with tempfile.TemporaryDirectory() as folder:
-            relative = "fabric/notebooks/06_targeted_review_setup.ipynb"
-            target = Path(folder) / relative
-            target.parent.mkdir(parents=True)
-            shutil.copyfile(ROOT / relative, target)
-            namespace = {"os": os, "json": json, "REPO_DIR": folder, "_embedded_token": "synthetic-test-value"}
-            exec(compile(ast.Module(body=nodes, type_ignores=[]), "<private-patcher>", "exec"), namespace)
-            namespace["_patch_stage_notebook"](relative)
-            patched = json.loads(target.read_text())
-            combined = "\n".join("".join(c["source"]) for c in patched["cells"] if c["cell_type"] == "code")
-            ast.parse(combined)
-            self.assertNotIn('["git", "clone"', combined)
-            self.assertIn("_download_private_snapshot()", combined)
-            self.assertIn("synthetic-test-value", combined)
+        namespace = {
+            "os": os, "json": json, "REPO_DIR": str(ROOT), "wid": WS,
+            "lhid": ITEM, "LAKEHOUSE_NAME": "fabric_arch_review_lh",
+            "_deployment_values": {
+                "FAR_CONFIG_WORKSPACE_ID": WS, "FAR_CONNECTIONS_LIBRARY": "FAR_Connections",
+                "GITHUB_REPO_URL": "https://github.com/example/far.git", "GITHUB_BRANCH": "main", "GITHUB_REF": "",
+            },
+        }
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), "<far-setup>", "exec"), namespace)
+        deployed = namespace["load_nb"]("fabric/notebooks/06_targeted_review_setup.ipynb")
+        parameters = "".join(deployed["cells"][1]["source"])
+        self.assertNotIn("FAR_CONFIG_WORKSPACE_ID", parameters)
+        self.assertIn('FAR_CONNECTIONS_LIBRARY = "FAR_Connections"', parameters)
+        self.assertIn('GITHUB_REPO_URL = "https://github.com/example/far.git"', parameters)
+        self.assertEqual(deployed["metadata"]["dependencies"]["lakehouse"]["default_lakehouse"], ITEM)
 
     def test_pipeline_preserves_defaults_and_disables_automatic_retry(self):
         child = {"properties": {"parameters": {

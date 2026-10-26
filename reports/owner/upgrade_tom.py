@@ -81,55 +81,51 @@ class TomEditor:
     def apply(self, target: dict[str, Any], migration: str) -> None:
         if self._readonly:
             raise ValueError("Read-only owner migration cannot apply changes.")
-        if migration not in {"legacy-five-table-to-2", "restore-contract-2-marker"}:
+        from reports.owner.schema import OWNER_CONTRACT_VERSION
+        from reports.owner.upgrade import REFRESH_BINDING
+        marker = f"restore-contract-{OWNER_CONTRACT_VERSION}-marker"
+        if migration not in {marker, REFRESH_BINDING}:
             raise ValueError("Unsupported owner migration.")
         from reports.owner.deployment import _contract_difference, _security_shape
-        from reports.owner.upgrade import _NEW_MEASURES, _NEW_TABLES, _OLD_MEASURES, _members, migration_for
+        from reports.owner.upgrade import _members, migration_for
 
         before = self.read()
         if migration_for(before, target) != migration:
             raise ValueError("Owner contract changed before the TOM update.")
-        desired = self._tom.JsonSerializer.DeserializeDatabase(json.dumps(target)).Model
         model = self._database.Model
-        if migration == "legacy-five-table-to-2":
-            for table in desired.Tables:
-                if str(table.Name) in _NEW_TABLES:
-                    added = table.Clone()
-                    for partition in added.Partitions:
-                        source = table.Partitions[partition.Name].Source.ExpressionSource
-                        partition.Source.ExpressionSource = model.Expressions[source.Name]
-                    model.Tables.Add(added)
-            for table in desired.Tables:
-                for measure in table.Measures:
-                    name = str(measure.Name)
-                    if name in _NEW_MEASURES:
-                        model.Tables[table.Name].Measures.Add(measure.Clone())
-                    elif name in _OLD_MEASURES:
-                        model.Tables[table.Name].Measures[name].Expression = measure.Expression
-            for relationship in desired.Relationships:
-                if str(relationship.FromTable.Name) in _NEW_TABLES:
-                    added = relationship.Clone()
-                    added.FromColumn = model.Tables[relationship.FromTable.Name].Columns[relationship.FromColumn.Name]
-                    added.ToColumn = model.Tables[relationship.ToTable.Name].Columns[relationship.ToColumn.Name]
-                    model.Relationships.Add(added)
-            role = model.Roles["WorkspaceOwner"]
-            for permission in desired.Roles["WorkspaceOwner"].TablePermissions:
-                if str(permission.Table.Name) in _NEW_TABLES:
-                    added = self._tom.TablePermission()
-                    added.Table = model.Tables[permission.Table.Name]
-                    added.FilterExpression = permission.FilterExpression
-                    role.TablePermissions.Add(added)
-        annotation = self._tom.Annotation()
-        annotation.Name = "OwnerContractVersion"
-        annotation.Value = "2"
-        model.Annotations.Add(annotation)
+        if migration == marker:
+            annotation = self._tom.Annotation()
+            annotation.Name = "OwnerContractVersion"
+            annotation.Value = str(OWNER_CONTRACT_VERSION)
+            model.Annotations.Add(annotation)
+        else:
+            self._rebind(model, target)
         candidate = self._serialize()
         if (_contract_difference(_security_shape(target), _security_shape(candidate))
                 or _members(before) != _members(candidate)):
             raise ValueError("Owner migration failed pre-save security validation; no model update performed.")
-        # One metadata save includes new tables and their RLS. Existing roles,
-        # members, source expressions, partitions and item IDs are never replaced.
+        # Neither migration replaces roles, members, sources, or item IDs; nothing is saved unless the
+        # result already equals the target.
         model.SaveChanges()
+
+    @staticmethod
+    def _rebind(model: Any, target: dict[str, Any]) -> None:
+        """Point the security filters and measures at this release's rule logic; nothing else is touched."""
+        from reports.owner.deployment import _expression
+
+        filters = {permission["name"]: permission["filterExpression"]
+                   for role in target["model"]["roles"] for permission in role.get("tablePermissions", [])}
+        measures = {(table["name"], measure["name"]): measure["expression"]
+                    for table in target["model"]["tables"] for measure in table.get("measures", [])}
+        for role in model.Roles:
+            for permission in role.TablePermissions:
+                wanted = filters.get(str(permission.Name))
+                if wanted is not None and _expression(str(permission.FilterExpression)) != _expression(wanted):
+                    permission.FilterExpression = wanted if isinstance(wanted, str) else "\n".join(wanted)
+        for (table_name, measure_name), wanted in measures.items():
+            measure = model.Tables[table_name].Measures[measure_name]
+            if _expression(str(measure.Expression)) != _expression(wanted):
+                measure.Expression = wanted if isinstance(wanted, str) else "\n".join(wanted)
 
     def close(self) -> None:
         self._server.Disconnect()

@@ -23,19 +23,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from collectors._http import request
-from collectors._common import load_workspace_inventory, record_collection_failure
+from collectors._common import filter_workspaces_by_scope, load_workspace_inventory, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
 
 
 def _load_workspaces(raw_dir: Path) -> List[Tuple[str, str]]:
-    """Return list of (workspace_id, workspace_name) from whatever inventory exists."""
-    return [(w["id"], w.get("name") or "") for w in load_workspace_inventory(raw_dir) if w.get("id")]
+    """Return (workspace_id, workspace_name) for in-scope workspaces only."""
+    return [(w["id"], w.get("name") or "")
+            for w in filter_workspaces_by_scope(load_workspace_inventory(raw_dir)) if w.get("id")]
 
 
 @record_collection_failure("git_integration.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     workspaces = _load_workspaces(raw_dir)
@@ -81,13 +82,22 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
                     "error": f"insufficient_permissions ({r.status_code})",
                 }
             )
-        else:
+        elif r.status_code == 404:
             results.append(
                 {
                     "workspaceId": wsid,
                     "workspaceName": wsname,
                     "connected": False,
                     "gitConnectionState": "NotConnected",
+                }
+            )
+        else:
+            results.append(
+                {
+                    "workspaceId": wsid,
+                    "workspaceName": wsname,
+                    "connected": False,
+                    "error": f"unexpected_status ({r.status_code})",
                 }
             )
         if i % 25 == 0:
@@ -105,7 +115,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

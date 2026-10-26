@@ -19,70 +19,37 @@ Why this exists:
   TridentNotebook activities and the parameters they pass) AND the notebook
   source (so we can read its ``parameters``-tagged cell).
 
-  This collector reads ``pipelines_notebooks.json`` produced by the
-  ``pipelines_notebooks`` collector, then for every pipeline + notebook calls
-  ``getDefinition`` and stores both the raw base64 parts and, where the
-  payload is JSON or .ipynb, a decoded view so the analyzers don't have to
-  re-decode.
+  Definitions are inspected in memory. Persistence contains only the pipeline
+  dependency skeleton, parameter names and notebook sanitized summaries.
 
 DATA SAFETY:
-  - Pipeline definitions are *configuration* (activity JSON) - no row data.
-  - Notebook definitions contain source code (.ipynb). The collector stores
-    cell source but strips all ``outputs`` and ``execution_count`` so no
-    materialised results / customer data leak into the raw dump.
+  - Never persist raw/base64 code, parameter values, secrets or cell outputs.
+  - Notebook evidence is parameterNames, parameterCoverage and rule hit counts.
 """
 from __future__ import annotations
 
 from collectors.workspace_scope import filter_review_payload
 
 import argparse
-import base64
-import binascii
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from collectors._http import Headers, HttpError, request
-from collectors._common import collection_incomplete, record_collection_failure
+from collectors._common import collection_incomplete, get_scope_workspace_ids, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
+from collectors.definition_safety import notebook_summary, pipeline_summary
 
 FAB = "https://api.fabric.microsoft.com/v1"
 
 # Cap on poll attempts per item to avoid runaway loops.
 LRO_MAX_POLLS = int(os.environ.get("PIPELINE_DEF_LRO_MAX_POLLS", "20"))
 LRO_DEFAULT_RETRY_AFTER = int(os.environ.get("PIPELINE_DEF_LRO_RETRY_AFTER", "3"))
-
-
-def _decode_payload(payload: str, payload_type: str, path: str) -> Optional[Any]:
-    """Decode a definition part if it's base64-encoded JSON or .ipynb.
-
-    Returns the parsed object or ``None`` if the payload isn't JSON-shaped.
-    Notebook outputs are stripped to avoid leaking materialised data.
-    """
-    if not payload or (payload_type or "").lower() != "inlinebase64":
-        return None
-    try:
-        raw = base64.b64decode(payload, validate=False)
-    except (binascii.Error, ValueError):
-        return None
-    # Only attempt JSON decode for .json / .ipynb / pipeline-content parts.
-    lower = (path or "").lower()
-    is_json_like = lower.endswith(".json") or lower.endswith(".ipynb")
-    if not is_json_like:
-        return None
-    try:
-        obj = json.loads(raw.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    # Strip notebook outputs / execution counts.
-    if lower.endswith(".ipynb") and isinstance(obj, dict):
-        for cell in obj.get("cells") or []:
-            if isinstance(cell, dict):
-                cell.pop("outputs", None)
-                cell.pop("execution_count", None)
-    return obj
+LRO_FIRST_POLL_DELAY = 2
+LRO_WORKERS = 4
 
 
 def _get_definition(
@@ -99,7 +66,7 @@ def _get_definition(
     try:
         return _get_definition_impl(headers, workspace_id, item_id)
     except HttpError as exc:
-        return None, f"http_error:{exc}"
+        return None, f"http_{exc.status_code or 'error'}"
 
 
 def _get_definition_impl(
@@ -129,10 +96,13 @@ def _get_definition_impl(
     op_url = r.headers.get("Location")
     if not op_url:
         return None, "lro_missing_location"
+    # The service advertises a long Retry-After even when the operation finishes within a
+    # second, so the first poll is quick and later polls honor the advertised delay.
     retry_after = int(r.headers.get("Retry-After") or LRO_DEFAULT_RETRY_AFTER)
+    delay = min(retry_after, LRO_FIRST_POLL_DELAY)
 
     for _ in range(LRO_MAX_POLLS):
-        time.sleep(max(1, retry_after))
+        time.sleep(max(1, delay))
         pr = request("GET", op_url, headers)
         if pr.status_code in (401, 403):
             return None, f"http_{pr.status_code}"
@@ -151,9 +121,8 @@ def _get_definition_impl(
                 return body, None
             return None, "lro_result_unavailable"
         if status in ("failed", "canceled"):
-            err = body.get("error") or {}
-            return None, f"lro_{status}:{err.get('errorCode') or err.get('code') or ''}"
-        retry_after = int(pr.headers.get("Retry-After") or retry_after)
+            return None, f"lro_{status}"
+        delay = int(pr.headers.get("Retry-After") or retry_after)
 
     return None, "lro_timeout"
 
@@ -162,6 +131,8 @@ def _normalise(
     item: Dict[str, Any],
     definition: Optional[Dict[str, Any]],
     error: Optional[str],
+    *,
+    notebook: bool = False,
 ) -> Dict[str, Any]:
     rec: Dict[str, Any] = {
         "id": item.get("id"),
@@ -171,27 +142,14 @@ def _normalise(
     }
     if error:
         rec["error"] = error
+        rec.update(notebook_summary(None) if notebook else pipeline_summary(None))
         return rec
-    parts_in = ((definition or {}).get("definition") or {}).get("parts") or []
-    parts_out: List[Dict[str, Any]] = []
-    for p in parts_in:
-        path = p.get("path")
-        payload_type = p.get("payloadType")
-        decoded = _decode_payload(p.get("payload") or "", payload_type or "", path or "")
-        out_part: Dict[str, Any] = {"path": path, "payloadType": payload_type}
-        # Keep raw payload only when we couldn't decode it (so analyzers can
-        # still inspect e.g. .py files). Decoded payloads supersede raw.
-        if decoded is not None:
-            out_part["decoded"] = decoded
-        else:
-            out_part["payload"] = p.get("payload")
-        parts_out.append(out_part)
-    rec["parts"] = parts_out
+    rec.update(notebook_summary(definition) if notebook else pipeline_summary(definition))
     return rec
 
 
 @record_collection_failure("pipeline_definitions.json")
-def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
+def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     target = raw_dir / "pipeline_definitions.json"
@@ -208,11 +166,15 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         raise HttpError(f"Required inventory {src.name} has no usable pipeline/notebook catalog")
     pipelines_in = catalog["pipelines"]
     notebooks_in = catalog["notebooks"]
+    scope = get_scope_workspace_ids()
+    if scope:
+        pipelines_in = [row for row in pipelines_in if str(row.get("workspaceId") or "").lower() in scope]
+        notebooks_in = [row for row in notebooks_in if str(row.get("workspaceId") or "").lower() in scope]
     source_complete = not (
         collection_incomplete(catalog) or catalog.get("inventoryErrors") or catalog.get("collectionErrors")
     )
     if not source_complete:
-        print("Pipeline definitions: upstream coverage is incomplete; fetching all known artifact IDs.")
+        print("Pipeline definitions: inventory coverage is incomplete; fetching all known artifact IDs.")
 
     print(
         f"Pipeline definitions: fetching getDefinition for "
@@ -222,35 +184,27 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
         provider = get_default_provider()
         headers = lambda: provider.headers(scope=FABRIC_SCOPE)
 
+    def fetch(item: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        wsid, item_id = item.get("workspaceId"), item.get("id")
+        if not (wsid and item_id):
+            return None, "missing_item_identity"
+        return _get_definition(headers, wsid, item_id)
+
+    # Each definition is a long-running operation of a few seconds; a small pool keeps a large
+    # estate practical while staying well inside the service's request limits.
+    with ThreadPoolExecutor(max_workers=LRO_WORKERS) as pool:
+        pipeline_results = list(pool.map(fetch, pipelines_in))
+        notebook_results = list(pool.map(fetch, notebooks_in))
+
     pipelines_out: List[Dict[str, Any]] = []
     notebooks_out: List[Dict[str, Any]] = []
     errors = 0
-
-    for i, p in enumerate(pipelines_in, 1):
-        wsid, pid = p.get("workspaceId"), p.get("id")
-        if not (wsid and pid):
-            defn, err = None, "missing_item_identity"
-        else:
-            defn, err = _get_definition(headers, wsid, pid)
-        rec = _normalise(p, defn, err)
-        pipelines_out.append(rec)
-        if err:
-            errors += 1
-        if i % 10 == 0:
-            print(f"  ... pipelines {i}/{len(pipelines_in)}")
-
-    for i, n in enumerate(notebooks_in, 1):
-        wsid, nid = n.get("workspaceId"), n.get("id")
-        if not (wsid and nid):
-            defn, err = None, "missing_item_identity"
-        else:
-            defn, err = _get_definition(headers, wsid, nid)
-        rec = _normalise(n, defn, err)
-        notebooks_out.append(rec)
-        if err:
-            errors += 1
-        if i % 25 == 0:
-            print(f"  ... notebooks {i}/{len(notebooks_in)}")
+    for item, (defn, err) in zip(pipelines_in, pipeline_results):
+        pipelines_out.append(_normalise(item, defn, err))
+        errors += bool(err)
+    for item, (defn, err) in zip(notebooks_in, notebook_results):
+        notebooks_out.append(_normalise(item, defn, err, notebook=True))
+        errors += bool(err)
 
     target.write_text(
         json.dumps(
@@ -278,7 +232,7 @@ def collect(output_dir: str | os.PathLike = "output/raw") -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", default="output/raw")
+    parser.add_argument("--output-dir", default="output/far/raw")
     args = parser.parse_args()
     collect(args.output_dir)
 

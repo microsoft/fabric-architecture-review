@@ -1,195 +1,27 @@
-//-----------------------------------------------------------------------
-// <copyright company="Microsoft Corporation">
-//        Copyright (c) Microsoft Corporation.  All rights reserved.
-//        Licensed under the MIT license. See LICENSE file in the project root for full license information.
-// </copyright>
-//-----------------------------------------------------------------------
-
-import { describe, it, expect } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
-import App from "@/App";
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import App from "./App";
 import { ReviewWorkbench } from "@/components/review-workbench";
 import { previewReviewData } from "@/lib/review-data";
-import { readPipelineEvidence } from "@/lib/pipeline-evidence";
-
-describe("App", () => {
-    it("renders without throwing", () => {
-        expect(() => render(<App />)).not.toThrow();
-    });
-
-    it("renders the architecture review workbench", () => {
+vi.mock("@/components/agent-panel", () => ({AgentPanel: () => <aside>Architectural Agent</aside>}));
+describe("App architecture profile", () => {
+    it("renders an accessible workbench with honest no-score preview", () => {
         render(<App />);
-        expect(screen.getAllByText("FAR")).toHaveLength(2);
-        expect(screen.getByRole("heading", { name: "Estate, prioritized" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Findings by severity" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Risk versus item count" })).toBeInTheDocument();
-        expect(screen.getByText("DAX static analysis")).toBeInTheDocument();
-        expect(screen.getByText("3 measures · 2 flagged")).toBeInTheDocument();
-        expect(screen.getByText("100% definition coverage · 3 of 3 models available")).toBeInTheDocument();
+        expect(screen.getByRole("heading", {name: "Estate, prioritized"})).toBeInTheDocument();
+        expect(screen.getByText("No assessable controls")).toBeInTheDocument();
     });
-
-    it("opens the DAX Analyzer from its non-scored overview summary", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Open DAX Analyzer" }));
-
-        expect(screen.getByRole("heading", { name: "Review DAX risk patterns" })).toBeInTheDocument();
+    it("does not render excluded rules even when supplied directly", () => {
+        render(<ReviewWorkbench data={{...previewReviewData, findings: [{id: "DAX-001", dimension: "Architecture",
+            severity: "high", title: "Forbidden expression", affected: "", recommendation: "", workspaceIds: []}]}} />);
+        fireEvent.click(screen.getByRole("button", {name: "Findings"}));
+        expect(screen.queryByText("Forbidden expression")).not.toBeInTheDocument();
     });
-
-    it("opens the native evidence lenses from primary navigation", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Native evidence" }));
-        expect(screen.getByRole("heading", { name: "Inspect observations, signals and gaps" })).toBeInTheDocument();
-        expect(screen.getByText("Synthetic sample evidence")).toBeInTheDocument();
-    });
-
-    it("shows structural findings with concrete IDs and keeps pipeline details in their workspace", () => {
-        const data = { ...previewReviewData, findings: [{
-            id: "ARCH-016", dimension: "Architecture" as const, severity: "medium" as const,
-            title: "Pipeline dependency integrity", affected: "Two pipelines", recommendation: "Repair static dependencies.",
-            workspaceIds: ["finance", "customer"],
-            pipelineEvidence: readPipelineEvidence(JSON.stringify({ items: [
-                { workspace_id: "finance", item_id: "pipeline-finance", item_name: "Finance pipeline", signal_codes: ["dependency_cycle"], coverage_status: "complete" },
-                { workspace_id: "customer", item_id: "pipeline-customer", item_name: "Customer pipeline", signal_codes: ["missing_dependency"], coverage_status: "partial" },
-            ] })),
-        }] };
-        render(<ReviewWorkbench data={data} />);
-        fireEvent.click(screen.getByRole("button", { name: "Findings" }));
-        fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "finance" } });
-        expect(screen.getByText("Workspace: finance · Item: pipeline-finance")).toBeInTheDocument();
-        expect(screen.getByText("Static pipeline structure, not observed execution reliability")).toBeInTheDocument();
-        expect(screen.queryByText("Customer pipeline")).not.toBeInTheDocument();
-    });
-
-    it("provides keyboard-accessible definitions for overview evidence", () => {
-        render(<App />);
-        const scoreHelp = screen.getByRole("button", { name: "About Best-practice score" });
-        const governanceHelp = screen.getByRole("button", { name: "About Governance" });
-        const daxHelp = screen.getByRole("button", { name: "About DAX static analysis" });
-
-        expect(scoreHelp).toHaveAttribute("aria-describedby");
-        expect(governanceHelp).toHaveAttribute("aria-describedby");
-        expect(daxHelp).toHaveAttribute("aria-describedby");
-        expect(document.getElementById(scoreHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Unknown and missing-evidence checks are not treated as passes");
-        expect(document.getElementById(governanceHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("pass percentage among scored checks");
-        expect(document.getElementById(daxHelp.getAttribute("aria-describedby") ?? "")).toHaveTextContent("does not measure duration");
-    });
-
-    it("opens a plotted workspace in its findings queue", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: /Open findings for Sample Workspace 01/ }));
-
-        expect(screen.getByRole("heading", { name: "Risk decision queue" })).toBeInTheDocument();
-        expect(screen.getByLabelText("Workspace")).toHaveValue("finance");
-    });
-
-    it("keeps governance and semantic model optimization in separate report-aligned views", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Governance" }));
-
-        expect(screen.getByRole("heading", { name: "Govern ownership and trust" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Ownership and governance signals" })).toBeInTheDocument();
-        expect(screen.queryByText("Calculated columns")).not.toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole("button", { name: "Semantic model optimization" }));
-
-        expect(screen.getByRole("heading", { name: "Optimize semantic models" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Semantic models by storage mode" })).toBeInTheDocument();
-        expect(screen.getAllByText("Sample Model 01")).toHaveLength(2);
-        expect(screen.getByText("Calculated columns")).toBeInTheDocument();
-    });
-
-    it("groups findings by workspace and filters the decision queue", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Findings" }));
-
-        expect(screen.getByRole("heading", { name: "Sample Workspace 01" })).toBeInTheDocument();
-        fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "customer" } });
-
-        expect(screen.getByRole("heading", { name: "Sample Workspace 02" })).toBeInTheDocument();
-        expect(screen.queryByRole("heading", { name: "Sample Workspace 01" })).not.toBeInTheDocument();
-        expect(screen.getByText("GOV-001")).toBeInTheDocument();
-    });
-
-    it("drills into selectable VertiPaq details for one semantic model", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Semantic model optimization" }));
-        fireEvent.click(screen.getByRole("button", { name: /Sample Model 01.*Direct Lake/ }));
-
-        expect(screen.getByRole("heading", { name: "Largest tables" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Largest columns" })).toBeInTheDocument();
-        expect(screen.getByText("FactTransactions")).toBeInTheDocument();
-        expect(screen.getByText(/TransactionId/)).toBeInTheDocument();
-        expect(screen.getAllByRole("columnheader")).toHaveLength(10);
-    });
-
-    it("filters DAX metadata by capacity before semantic model", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "DAX Analyzer" }));
-
-        expect(screen.getByRole("heading", { name: "Review DAX risk patterns" })).toBeInTheDocument();
-        expect(screen.getByRole("figure", { name: "DAX measures by risk pattern" })).toBeInTheDocument();
-        expect(screen.getByRole("figure", { name: "Most common static signals" })).toBeInTheDocument();
-        expect(screen.getByText("Nested iterators")).toBeInTheDocument();
-        expect(screen.getByText("Cardinality expansion")).toBeInTheDocument();
-        expect(screen.getByText("Potentially Expensive Sales")).toBeInTheDocument();
-        expect(screen.getByText("Customer Revenue")).toBeInTheDocument();
-
-        fireEvent.change(screen.getByLabelText("Capacity"), { target: { value: "cap-shared" } });
-        expect(screen.getByLabelText("Semantic model")).toHaveTextContent("Sample Model 03");
-        expect(screen.queryByText("Potentially Expensive Sales")).not.toBeInTheDocument();
-        expect(screen.getByText("Total Revenue")).toBeInTheDocument();
-        expect(screen.getByText("No risk pattern detected")).toBeInTheDocument();
-    });
-
-    it("opens the selected overview finding in its workspace queue", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: /OPS-001.*Production workspace/ }));
-
-        expect(screen.getByRole("heading", { name: "Risk decision queue" })).toBeInTheDocument();
-        expect(screen.getByLabelText("Workspace")).toHaveValue("finance");
-        expect(screen.getByText("OPS-001")).toBeInTheDocument();
-        expect(screen.queryByText("GOV-001")).not.toBeInTheDocument();
-    });
-
-    it("combines performance and cost while preserving architecture and notebooks", () => {
-        render(<App />);
-
-        fireEvent.click(screen.getByRole("button", { name: "Performance + cost" }));
-        expect(screen.getByRole("heading", { name: "Balance speed and capacity efficiency" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Performance and cost posture" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Workspaces and items behind the cost evidence" })).toBeInTheDocument();
-        expect(screen.getByText("Tenant scope")).toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole("button", { name: "Architecture" }));
-        expect(screen.getByRole("heading", { name: "Understand design and lineage" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Estate composition" })).toBeInTheDocument();
-
-        fireEvent.click(screen.getByRole("button", { name: "Notebooks" }));
-        expect(screen.getByRole("heading", { name: "Improve notebook engineering" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Notebook smells by severity" })).toBeInTheDocument();
-        expect(screen.getByText("Unbounded Spark collect or toPandas action can exhaust driver memory.")).toBeInTheDocument();
-        expect(screen.getByText("Affected cells")).toBeInTheDocument();
-        expect(screen.getByText("4, 7")).toBeInTheDocument();
-    });
-
-    it("shows current tenant-setting posture separately from observed audit history", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Tenant settings" }));
-
-        expect(screen.getByRole("heading", { name: "Review posture and observed changes" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Settings requiring action" })).toBeInTheDocument();
-        expect(screen.getByRole("heading", { name: "Tenant-setting audit history" })).toBeInTheDocument();
-        expect(screen.getByText("sample.admin@example.com")).toBeInTheDocument();
-        expect(screen.getByText(/does not prove that no changes occurred outside the window/)).toBeInTheDocument();
-    });
-
-    it("reports supported ownership separately from uncollected classification", () => {
-        render(<App />);
-        fireEvent.click(screen.getByRole("button", { name: "Governance" }));
-        fireEvent.change(screen.getByLabelText("Workspace"), { target: { value: "supply" } });
-
-        expect(screen.getByRole("heading", { name: "Workspace ownership" })).toBeInTheDocument();
-        expect(screen.getByText("Classification is not collected")).toBeInTheDocument();
-        expect(screen.getByText(/No classification percentage is inferred/)).toBeInTheDocument();
+    it("rejects incompatible direct payloads", () => {
+        render(<ReviewWorkbench data={{...previewReviewData, profileHash: "old", score: 100}} />);
+        expect(screen.getByRole("alert")).toHaveTextContent("Incompatible profile");
+        expect(screen.getByRole("alert")).toHaveTextContent("Run the pipeline again");
+        expect(screen.getByText("No assessable controls")).toBeInTheDocument();
     });
 });

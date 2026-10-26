@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
-# Collect metadata, configuration, and (REST-accessible) metrics from the Fabric tenant.
+# Collect demand-driven architectural metadata and configuration from the Fabric tenant.
 # DATA SAFETY: Every collector below reads metadata only. Customer data is never queried.
 # bash equivalent of scripts/01_collect.ps1
 set -uo pipefail
@@ -9,22 +9,21 @@ set -uo pipefail
 # cd to repo root (two levels up: scripts/bash -> scripts -> repo root)
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 
-# Load .env (KEY=VALUE lines, skipping comments/blank lines) into the environment.
-if [[ -f .env ]]; then
+# Load .env.far (KEY=VALUE lines, skipping comments/blank lines) into the environment.
+if [[ -f .env.far ]]; then
     set -a
     # shellcheck disable=SC1091
     while IFS='=' read -r key value; do
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
         export "${key// /}=${value}"
-    done < <(grep -E '^[[:space:]]*[^#].*=' .env)
+    done < <(grep -E '^[[:space:]]*[^#].*=' .env.far)
     set +a
 fi
 
-# Keep skipped snapshots fresh without installing Fabric-only dependencies.
-export VERTIPAQ_STATS_SKIP=true
-export BEST_PRACTICES_SKIP=true
-
-OUT_DIR="${OUTPUT_DIR:-output}"
+OUT_DIR="${OUTPUT_DIR:-output/far}"
+python -m orchestration.review_config --out-dir "$OUT_DIR" --replace || exit 1
+export FAR_CONFIG_SNAPSHOT="$PWD/$OUT_DIR/review_config.json"
+if [[ "$OUT_DIR" = /* ]]; then export FAR_CONFIG_SNAPSHOT="$OUT_DIR/review_config.json"; fi
 RAW_DIR="$OUT_DIR/raw"
 mkdir -p "$RAW_DIR"
 echo "Raw output directory: $RAW_DIR"
@@ -43,26 +42,7 @@ invoke_collector() {
     fi
 }
 
-invoke_collector "collectors.tenant_settings"           "Tenant settings (Fabric Admin)"
-invoke_collector "collectors.scanner_api"               "Workspace + item metadata (Scanner API)"
-invoke_collector "collectors.workspace_inventory"       "Workspace inventory (REST fallback / complement)"
-invoke_collector "collectors.git_integration"           "Git integration per workspace"
-invoke_collector "collectors.capacity_metrics"          "Capacity inventory + refreshables + workloads"
-invoke_collector "collectors.capacity_metrics_app"      "Capacity Metrics App semantic model (DAX via executeQueries — opt-in via CAPACITY_METRICS_APP_INSTALLED)"
-invoke_collector "collectors.azure_capacity_automation" "Azure-side Pause/Resume automation (opt-in via CAPACITY_AUTO_PAUSE_CONFIGURED)"
-invoke_collector "collectors.semantic_models"           "Semantic models + refresh history"
-invoke_collector "collectors.semantic_model_definitions" "Semantic model TMDL definitions (all models; metadata-only DAX and DirectLake analysis)"
-invoke_collector "collectors.dax_analysis"               "Static DAX metadata normalization (no query execution)"
-invoke_collector "collectors.dataflows"                  "Dataflow Gen2 inventory and static Power Query evidence"
-invoke_collector "collectors.vertipaq_stats"            "VertiPaq Analyzer (skipped locally; Fabric-only)"
-invoke_collector "collectors.best_practices"            "Semantic Link BPA and health analysis (skipped locally; Fabric-only)"
-invoke_collector "collectors.lakehouse_warehouse"       "Lakehouses + Warehouses + table metadata"
-invoke_collector "collectors.pipelines_notebooks"       "Pipelines + Notebooks + recent job runs"
-invoke_collector "collectors.pipeline_definitions"      "Pipeline + Notebook definitions (getDefinition)"
-invoke_collector "collectors.deployment_pipelines"      "Fabric / Power BI deployment pipelines"
-invoke_collector "collectors.gateways"                  "Data gateways (on-prem / VNet / personal)"
-invoke_collector "collectors.realtime_intelligence"     "Real-Time Intelligence + Mirrored Databases"
-invoke_collector "collectors.activity_logs"             "Admin activity log (last 7 days)"
+invoke_collector "collectors.far_collection" "Demand-driven architectural metadata (shared local/Fabric plan)"
 
 if (( ${#collector_failures[@]} > 0 )); then
     printf 'Collection incomplete. Failed collectors: %s\n' "$(IFS=', '; echo "${collector_failures[*]}")" >&2
