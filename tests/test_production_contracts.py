@@ -82,6 +82,7 @@ def test_release_version_is_consistent_across_tracked_surfaces() -> None:
     assert package_lock["version"] == npm_version
     assert package_lock["packages"][""]["version"] == npm_version
     assert f'version: "{npm_version}"' in _text("fabric/app/src/lib/data-agent-factory.ts")
+    assert yaml.safe_load(_text("fabric/app/rayfin/rayfin.yml"))["version"] == npm_version
     assert _text("CHANGELOG.md").splitlines().count(f"## {version}") == 1
     assert f"<code>{version}</code>" in _text("samples/report.md")
 

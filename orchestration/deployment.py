@@ -15,6 +15,7 @@ from typing import Any
 
 from orchestration.fabric_api import FabricClient, definition_part, guid
 from orchestration.sources import capacity_selector
+from orchestration.review_history import cooldown_days
 
 
 DEFAULTS = {
@@ -24,6 +25,7 @@ DEFAULTS = {
     "RANKING_METRIC": "cu_seconds",
     "LOOKBACK_DAYS": "7",
     "TOP_N": "5",
+    "SKIP_REVIEWED_WITHIN_DAYS": "0",
     "NOTIFICATIONS_ENABLED": "false",
     "FAR_REPORT_URL": "",
 }
@@ -38,6 +40,7 @@ SELECT_ACTIVITY = "Select workspaces"
 REVIEW_ACTIVITY = "Review selected workspaces"
 CHILD_ACTIVITY = "Invoke FAR"
 OWNER_ACCESS_ACTIVITY = "Sync owner access"
+RECORD_REVIEW_ACTIVITY = "Record successful review"
 NOTIFY_ACTIVITY = "Notify owners if enabled"
 PREPARE_ACTIVITY = "Prepare owner emails"
 STORE_EMAILS_ACTIVITY = "Store owner emails"
@@ -49,7 +52,7 @@ SELECTION_OUTPUT = f"json(activity('{SELECT_ACTIVITY}').output.result.exitValue)
 RUNTIME_MODULES = (
     "project.py",
     "__init__.py", "completion.py", "deployment.py", "fabric_api.py",
-    "ranking.py", "runtime.py", "setup.py", "sources.py", "review_config.py",
+    "ranking.py", "runtime.py", "setup.py", "sources.py", "review_config.py", "review_history.py",
 )
 RUNTIME_COLLECTOR_MODULES = ("__init__.py", "_http.py", "workspace_scope.py")
 
@@ -118,7 +121,8 @@ def runtime_notebook(
         names = tuple(name for name in names if name not in {"FUAM_WORKSPACE_ID", "FUAM_LAKEHOUSE_ID"})
     names = (*names, "PARENT_RUN_ID")
     if stage == "notifications":
-        names = (*names, "CHILD_RUN_ID")
+        names = (*names, "CHILD_RUN_ID", "COMPLETION_ACTION")
+    entrypoint = "completion" if stage == "notifications" else stage
     code = [
         "import json, sys\n",
         "import notebookutils\n",
@@ -126,7 +130,7 @@ def runtime_notebook(
         "    del sys.modules[module]\n",
         f"sys.path.insert(0, {json.dumps(bundle_path)})\n",
         "from orchestration.deployment import read_notebook_parameters\n",
-        f"from orchestration.runtime import run_{stage}\n",
+        f"from orchestration.runtime import run_{entrypoint}\n",
         f"config = read_notebook_parameters(globals(), {names!r})\n",
         f"config['CHILD_WORKSPACE_ID'] = {json.dumps(guid(workspace_id))}\n",
     ]
@@ -137,7 +141,7 @@ def runtime_notebook(
             f"config.update(targeting_source(notebookutils.variableLibrary.getLibrary, {json.dumps(connections_library)}))\n",
         ])
     code.extend([
-        f"result = run_{stage}(config)\n",
+        f"result = run_{entrypoint}(config)\n",
         "notebookutils.notebook.exit(json.dumps(result))\n",
     ])
     return {
@@ -201,6 +205,7 @@ def build_parent_pipeline(
         raise ValueError("Child/orchestration parameter collision: " + ", ".join(sorted(collision)))
     if any(not isinstance(value, str) for value in options.values()):
         raise ValueError("Orchestration defaults must be strings.")
+    cooldown_days(options["SKIP_REVIEWED_WITHIN_DAYS"])
     if email_connection_id is not None:
         email_connection_id = guid(email_connection_id)
     if email_state is None:
@@ -258,6 +263,11 @@ def build_parent_pipeline(
     prepare["typeProperties"]["parameters"]["CHILD_RUN_ID"] = notebook_parameter(
         f"@variables('{CHILD_RUN_VARIABLE}')"
     )
+    prepare["typeProperties"]["parameters"]["COMPLETION_ACTION"] = notebook_parameter("@'prepare_notifications'")
+    record_review = copy.deepcopy(prepare)
+    record_review["name"] = RECORD_REVIEW_ACTIVITY
+    record_review["dependsOn"] = succeeded("Record FAR run ID")
+    record_review["typeProperties"]["parameters"]["COMPLETION_ACTION"] = notebook_parameter("@'record_review'")
     store_emails = {
         "name": STORE_EMAILS_ACTIVITY, "type": "SetVariable",
         "dependsOn": succeeded(PREPARE_ACTIVITY),
@@ -317,9 +327,10 @@ def build_parent_pipeline(
                                 "value": expression(f"@activity('{CHILD_ACTIVITY}').output.pipelineRunId"),
                             },
                         },
+                        record_review,
                         *([{
                             "name": OWNER_ACCESS_ACTIVITY, "type": "TridentNotebook",
-                            "dependsOn": succeeded("Record FAR run ID"),
+                            "dependsOn": succeeded(RECORD_REVIEW_ACTIVITY),
                             "policy": copy.deepcopy(policy),
                             "typeProperties": {
                                 "workspaceId": guid(workspace_id),

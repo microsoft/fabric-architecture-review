@@ -22,7 +22,7 @@ from unittest.mock import Mock, patch
 from orchestration.deployment import (
     CHILD_RUN_VARIABLE, DEFAULTS, EMPTY_CAPABLE_PARAMETERS, NOTIFICATION_PARAMETERS,
     RUNTIME_COLLECTOR_MODULES, RUNTIME_MODULES, SELECTION_PARAMETERS, STRING_TRANSPORT_PREFIX,
-    build_parent_pipeline, deploy, expression, notebook_parameter, package_runtime,
+    RECORD_REVIEW_ACTIVITY, build_parent_pipeline, deploy, expression, notebook_parameter, package_runtime,
     read_notebook_parameters, runtime_notebook, stamp_parameters,
 )
 from orchestration.ranking import rank_workspaces
@@ -105,18 +105,22 @@ class DeploymentTests(unittest.TestCase):
         parent = build_parent_pipeline(child, owner_access_notebook_id=ITEM, **kwargs)
         self.assertEqual(len(parent["properties"]["activities"]), 4)
         _, review, notification, send = parent["properties"]["activities"]
-        invoke, record, sync = review["typeProperties"]["ifTrueActivities"]
+        invoke, record, history, sync = review["typeProperties"]["ifTrueActivities"]
         self.assertEqual(sync["type"], "TridentNotebook")
         self.assertEqual(sync["typeProperties"], {
             "workspaceId": WS, "notebookId": ITEM, "parameters": {},
         })
         self.assertEqual(sync["policy"]["retry"], 0)
         self.assertEqual(sync["dependsOn"], [{
-            "activity": record["name"], "dependencyConditions": ["Succeeded"],
+            "activity": history["name"], "dependencyConditions": ["Succeeded"],
         }])
         self.assertTrue(invoke["typeProperties"]["waitOnCompletion"])
         self.assertEqual(record["dependsOn"], [{
             "activity": invoke["name"], "dependencyConditions": ["Succeeded"],
+        }])
+        self.assertEqual(history["name"], RECORD_REVIEW_ACTIVITY)
+        self.assertEqual(history["dependsOn"], [{
+            "activity": record["name"], "dependencyConditions": ["Succeeded"],
         }])
         # Failure of any review branch activity blocks preparation, then the email loop.
         self.assertEqual(notification["dependsOn"], [{
@@ -449,7 +453,7 @@ assert "collectors.capacity_metrics" not in sys.modules
             review["typeProperties"]["expression"],
             expression("@not(empty(json(activity('Select workspaces').output.result.exitValue).workspace_ids))"),
         )
-        invoke, record = review["typeProperties"]["ifTrueActivities"]
+        invoke, record, history = review["typeProperties"]["ifTrueActivities"]
         self.assertEqual(invoke["type"], "ExecutePipeline")
         self.assertTrue(invoke["typeProperties"]["waitOnCompletion"])
         self.assertEqual(invoke["typeProperties"]["pipeline"], {"referenceName": ITEM, "type": "PipelineReference"})
@@ -460,6 +464,8 @@ assert "collectors.capacity_metrics" not in sys.modules
         )
         self.assertEqual(record["typeProperties"]["value"], expression("@activity('Invoke FAR').output.pipelineRunId"))
         self.assertEqual(record["dependsOn"], [{"activity": invoke["name"], "dependencyConditions": ["Succeeded"]}])
+        self.assertEqual(history["name"], RECORD_REVIEW_ACTIVITY)
+        self.assertEqual(history["dependsOn"], [{"activity": record["name"], "dependencyConditions": ["Succeeded"]}])
         self.assertEqual(notification["dependsOn"], [{"activity": review["name"], "dependencyConditions": ["Succeeded"]}])
         self.assertEqual(
             notification["typeProperties"]["expression"],
@@ -598,6 +604,7 @@ assert "collectors.capacity_metrics" not in sys.modules
                 values.update(PARENT_RUN_ID=RUN)
                 if stage == "notifications":
                     values["CHILD_RUN_ID"] = RUN
+                    values["COMPLETION_ACTION"] = "prepare_notifications"
                 namespace.update({
                     name: STRING_TRANSPORT_PREFIX + value if name in EMPTY_CAPABLE_PARAMETERS else value
                     for name, value in values.items()
@@ -609,7 +616,9 @@ assert "collectors.capacity_metrics" not in sys.modules
                     "sys": SimpleNamespace(path=[], modules={}),
                     "notebookutils": SimpleNamespace(notebook=SimpleNamespace(exit=exit_notebook)),
                     "orchestration.deployment": SimpleNamespace(read_notebook_parameters=read_notebook_parameters),
-                    "orchestration.runtime": SimpleNamespace(**{"run_" + stage: runtime}),
+                    "orchestration.runtime": SimpleNamespace(**{
+                        "run_completion" if stage == "notifications" else "run_selection": runtime,
+                    }),
                 }
                 with patch("builtins.__import__", side_effect=lambda name, *args, **kwargs: modules[name]):
                     exec("".join(notebook["cells"][1]["source"]), namespace)

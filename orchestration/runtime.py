@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-"""Selection and email preparation; native pipeline monitoring owns delivery."""
+"""Selection, successful-review recording and email preparation for the parent."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -15,6 +15,7 @@ from typing import Any
 from orchestration.completion import prepare_owner_emails, validate_report_url
 from orchestration.fabric_api import FabricClient, guid
 from orchestration.ranking import METRICS, rank_workspaces, selection_payload
+from orchestration.review_history import cooldown_days, get_recently_reviewed_workspace_ids, record_completed_review
 from orchestration.sources import capacity_selector, validate_capacity_scope
 
 
@@ -32,6 +33,7 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ValueError("LOOKBACK_DAYS must be between 1 and 28.")
     if not 1 <= int(config["TOP_N"]) <= 100:
         raise ValueError("TOP_N must be between 1 and 100.")
+    cooldown_days(config.get("SKIP_REVIEWED_WITHIN_DAYS", "0"))
     if config.get("SOURCE_MODE", "fuam") != "fuam":
         raise ValueError("Only FUAM is supported; no unsupported Capacity Metrics queries.")
     validate_notifications(config)
@@ -68,10 +70,18 @@ def select_workspaces(
     if capacity_scope["requested"] != capacity_selector(config.get("CAPACITY_ID_OR_NAME")):
         raise ValueError("Monitoring source did not confirm the requested capacity scope.")
     allowlist = config.get("WORKSPACE_IDS", "")
+    selected_at = datetime.now(timezone.utc)
+    days = cooldown_days(config.get("SKIP_REVIEWED_WITHIN_DAYS", "0"))
+    recently_reviewed = get_recently_reviewed_workspace_ids(
+        days, state_dir=state_dir, workspace_id=config["CHILD_WORKSPACE_ID"],
+        pipeline_id=config["CHILD_PIPELINE_ID"], now=selected_at,
+    )
     selected = rank_workspaces(
         rows, top_n=int(config["TOP_N"]), allowlist=allowlist,
-        excluded_workspace_ids=(config["CHILD_WORKSPACE_ID"], config["FUAM_WORKSPACE_ID"]),
+        excluded_workspace_ids=(config["CHILD_WORKSPACE_ID"], config["FUAM_WORKSPACE_ID"], *recently_reviewed),
     )
+    if days:
+        print(f"Targeted-review cooldown: days={days}, recently_reviewed_workspaces={len(recently_reviewed)}; excluded before top-N.")
     print("FUAM selection excludes Capacity Metrics app workspaces, the FAR hosting workspace and the configured FUAM workspace before top-N.")
     print(
         f"FUAM selection: source_rows={len(rows)}, "
@@ -80,7 +90,8 @@ def select_workspaces(
     state = {
         **selection_payload(selected, source, config["RANKING_METRIC"]),
         "parent_run_id": parent_run_id,
-        "selected_at": datetime.now(timezone.utc).isoformat(),
+        "selected_at": selected_at.isoformat(),
+        "review_cooldown": {"days": days, "excluded_workspace_ids": sorted(recently_reviewed)},
         "lookback_days": int(config["LOOKBACK_DAYS"]),
         "capacity_scope": capacity_scope,
         "unattributed_workspace_groups": getattr(result, "unattributed_workspace_groups", 0),
@@ -92,7 +103,7 @@ def select_workspaces(
     with path.open("x", encoding="utf-8") as stream:
         json.dump(state, stream, indent=2)
     if not selected:
-        print("No workspaces have positive metrics in scope. FAR and notifications were skipped.")
+        print("No eligible workspaces remain with positive metrics after exclusions. FAR and notifications were skipped.")
     return {
         "parent_run_id": parent_run_id, "status": state["status"],
         "workspace_ids": state["workspace_ids"], "workspace_count": len(selected),
@@ -217,3 +228,15 @@ def run_notifications(config: dict[str, Any]) -> dict[str, Any]:
         prepare=lambda options, state: prepare_owner_emails(options, state, client),
         state_dir=Path("/lakehouse/default/Files/far-orchestration/runs"),
     )
+
+
+def run_completion(config: dict[str, Any]) -> dict[str, Any]:
+    action = config.get("COMPLETION_ACTION")
+    if action == "record_review":
+        return record_completed_review(
+            config, config["PARENT_RUN_ID"], config["CHILD_RUN_ID"],
+            state_dir=Path("/lakehouse/default/Files/far-orchestration/runs"),
+        )
+    if action == "prepare_notifications":
+        return run_notifications(config)
+    raise ValueError("Unknown targeted-review completion action.")

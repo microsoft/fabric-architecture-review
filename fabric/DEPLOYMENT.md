@@ -138,6 +138,7 @@ Use an existing, populated FUAM Lakehouse that the review identity can read.
    RANKING_METRIC = "cu_seconds"
    LOOKBACK_DAYS = "7"
    TOP_N = "5"
+   SKIP_REVIEWED_WITHIN_DAYS = "0"
    ```
 
 3. Leave deployment IDs unchanged and run all cells.
@@ -149,6 +150,10 @@ The capacity filter applies before ranking; `TOP_N` is across the selected capac
 An empty selection skips the review and notifications. Source errors stop the run.
 FAR/FUAM hosting workspaces and Capacity Metrics app workspaces are excluded
 before `TOP_N`; the next eligible workspaces fill the available slots.
+Optionally set `SKIP_REVIEWED_WITHIN_DAYS="7"` to exclude workspaces from
+successful targeted reviews in the past seven days before taking `TOP_N`.
+The default `0` disables this cooldown. History starts after redeploying 06;
+standalone and pre-upgrade reviews do not count.
 
 See [targeted-review guidance](../docs/targeted-review.md) for supported FUAM tables,
 other ranking options and troubleshooting.

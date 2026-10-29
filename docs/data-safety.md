@@ -119,6 +119,10 @@ default and separate from the standard review.
   notifications. Run the Completion notebook only through that parent. Runtime
   packages and run-state files are stored in the Lakehouse; restrict write access
   to trusted deployers.
+- Successful targeted reviews also record workspace IDs, parent/child run IDs and
+  completion time in the FAR Lakehouse, even with email disabled. The optional
+  `SKIP_REVIEWED_WITHIN_DAYS` cooldown reads these records, not customer data or
+  tenant activity logs; standalone and pre-upgrade reviews do not count.
 - When notifications are enabled, owner emails are resolved from workspace role
   assignments through the Power BI admin group-users API. All direct `User`/`Admin`
   recipients are resolved before any record is prepared. A failed or missing lookup

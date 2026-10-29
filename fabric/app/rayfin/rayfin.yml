@@ -3,7 +3,7 @@
 
 id: fabric-architecture-review
 name: FAR
-version: 2026.10.1
+version: 2026.10.2
 services:
   auth:
     enabled: true

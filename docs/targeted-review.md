@@ -65,14 +65,14 @@ change the standard review pipeline. Rerun base setup and then all cells of 06
 to apply this binding to an existing targeted parent.
 
 1. Run the notebook. It creates a selection **Runner**, a **Completion** notebook
-   that prepares email records only, and a native same-workspace targeted-review
+   that records successful reviews and prepares email records, and a native same-workspace targeted-review
    parent. On a new deployment the parent's native email activity is inactive,
    has no connection, and `NOTIFICATIONS_ENABLED="false"`. Setup sends no messages.
    The original four-stage review pipeline is not modified.
 2. **Success:** the output lists the parent pipeline, selection runner and
    completion notebook IDs, plus the bound access-sync notebook ID when enabled.
    In **Review selected workspaces**, confirm **Sync owner access** follows
-   **Record FAR run ID** before enabling notifications.
+   **Record successful review** before enabling notifications.
 3. **Next:** run the parent manually with a test-workspace `WORKSPACE_IDS` allow-list.
    Confirm its selection and successful child run before configuring a weekly
    schedule through Fabric.
@@ -125,6 +125,7 @@ parameter contract.
 | `RANKING_METRIC` | `cu_seconds` | CU-seconds or `recorded_throttling_minutes`; never substitutes operation counts or another metric |
 | `LOOKBACK_DAYS` | `7` | Last 1-28 complete reporting dates ending before today's UTC date; FUAM retention still applies |
 | `TOP_N` | `5` | Maximum workspace count, 1-100 |
+| `SKIP_REVIEWED_WITHIN_DAYS` | `0` | Nonnegative whole days; `0` disables cooldown. Exclude workspaces from recently successful targeted reviews before Top N |
 | `WORKSPACE_IDS` | blank | Optional allow-list applied **before** ranking; blank ranks all FUAM candidates; selected IDs replace this value for the child |
 | `NOTIFICATIONS_ENABLED` | `false` | Boolean string `true`/`false`; enables the success-only owner-email branch after configuring and activating its native email activity |
 | `FAR_REPORT_URL` | blank | Fabric/Power BI report link used in owner messages |
@@ -132,6 +133,39 @@ parameter contract.
 A nonblank `WORKSPACE_IDS` allow-list must contain at least one valid workspace
 GUID. Separator-only values such as `,` are rejected rather than treated as an
 unrestricted selection.
+
+### Recently reviewed workspace cooldown
+
+Set `SKIP_REVIEWED_WITHIN_DAYS="7"`, for example, to skip workspaces selected in a
+successfully completed targeted review within the preceding seven rolling 24-hour
+periods. This is separate from the FUAM usage window (`LOOKBACK_DAYS`). Completion
+exactly N days ago is eligible again. `0` preserves the existing selection behavior
+and does not read completion history.
+Completion recording still runs at `0`, so later enabling the cooldown can use
+that history. This adds one Completion notebook invocation per successful,
+nonempty targeted review, including when email is disabled.
+
+The cooldown applies before `TOP_N`, within the existing capacity and allow-list
+scope, for either ranking metric. It overrides `WORKSPACE_IDS`; the next eligible
+workspaces fill the slots. If all candidates are excluded, FAR and email are
+safely skipped.
+
+Only successful targeted child reviews for the same FAR workspace and child
+pipeline count. The parent records completion even with notifications disabled,
+before owner-access sync and email. A later sync or email failure does not undo
+the completed review; failed, cancelled or in-progress child reviews have no
+completion record and do not start a cooldown. Completion does not imply that
+every evidence inspection succeeded or that the workspaces passed their checks.
+
+History starts after upgrading and rerunning all cells of 06. Standalone reviews
+and older targeted reviews are not backfilled. Records are stored in the attached
+FAR output Lakehouse under `Files/far-orchestration/runs/completed/<parent-run-id>.json`.
+Retain them for the required cooldown period and restrict write access to trusted
+operators. A missing history directory is logged as no history yet; unreadable or
+malformed history stops an enabled selection rather than silently ignoring it.
+The selection audit records `review_cooldown.days` and `excluded_workspace_ids`.
+Avoid overlapping runs: selection does not reserve workspaces while a review is
+still running.
 
 After owner live acceptance, manually set `FAR_REPORT_URL` to the **owner
 report**, rather than granting recipients access to the central report.
@@ -211,7 +245,10 @@ parent run.
 1. **Select workspaces** runs the short selection notebook and persists its scope.
 2. **Review selected workspaces** is a nonempty-scope condition. Open its true
    branch to see **Invoke FAR**, a native same-workspace `ExecutePipeline`
-   activity with `waitOnCompletion=true`, followed by **Record FAR run ID**.
+   activity with `waitOnCompletion=true`, followed by **Record FAR run ID** and
+   **Record successful review** (the Completion notebook). The latter persists
+   cooldown history independently of the notification setting. A history-write
+   failure stops the parent before access sync or email; reconcile it before retrying.
    When 07 is bound, this branch also runs **Sync owner access** after the review
    succeeds and before notifications. The standard review has no such added step.
 3. **Notify owners if enabled** requires a successful child run and
@@ -232,9 +269,10 @@ activity timeout is 12 hours with zero automatic retries.
 Inspect the parent's **Invoke FAR** activity in monitoring after
 timeout or cancellation rather than assuming the child stopped.
 
-The Completion notebook does not send email. Native mail activities use the
-manually authorized Office365 Outlook connection. With notifications off, the
-completion branch is skipped and no recipients are resolved.
+The Completion notebook records successful reviews or prepares email, but does
+not send email. Native mail activities use the manually authorized Office365
+Outlook connection. With notifications off, only email preparation is skipped;
+successful-review history is still recorded and no recipients are resolved.
 
 ## Supported FUAM source contract
 
