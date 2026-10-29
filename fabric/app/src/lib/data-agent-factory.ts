@@ -204,7 +204,7 @@ export class RayfinDataAgentClient implements DataAgentClient {
                 buildDataAgentEndpoint(this.workspaceId, this.dataAgentId),
                 { requestInit: { headers: { Authorization: `Bearer ${token}` } } },
             );
-            const client = new Client({ name: "fabric-architecture-review", version: "2026.10.1" });
+            const client = new Client({ name: "fabric-architecture-review", version: "2026.10.2" });
             try {
                 onProgress?.("connecting");
                 await client.connect(transport);

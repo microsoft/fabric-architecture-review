@@ -1,6 +1,6 @@
 <!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. -->
 
-> **Synthetic sample.** Two invented workspaces and masked identifiers; it shows the report layout, not a real tenant. FAR version: <code>2026.10.1</code>.
+> **Synthetic sample.** Two invented workspaces and masked identifiers; it shows the report layout, not a real tenant. FAR version: <code>2026.10.2</code>.
 
 # FAR Architecture Review
 

@@ -4,6 +4,41 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.10.2
+
+### Targeted-review cooldown
+
+- Add `SKIP_REVIEWED_WITHIN_DAYS` to targeted-review setup and parent run
+  parameters. The default `0` keeps existing selection behavior; a positive
+  value excludes workspaces from successful targeted reviews in the preceding
+  N rolling days, before Top-N selection, for either ranking metric.
+- Refill Top-N from eligible workspaces within the existing capacity and
+  allow-list scope. Cooldown exclusions override the allow-list; an empty
+  selection safely skips FAR and email.
+- Persist successful targeted child completion independently of notifications,
+  before owner-access sync and email. Failed or unfinished child reviews do not
+  start a cooldown, and a later sync or email failure does not erase completion.
+- Record cooldown exclusions in selection audits. Unreadable or malformed
+  completion history stops an enabled selection instead of silently bypassing
+  the cooldown.
+- Standalone reviews are unchanged. History starts after redeploying the
+  targeted parent; standalone and pre-upgrade reviews are not backfilled.
+
+### Upgrade and testing
+
+Pause targeted schedules, finish active runs, and rerun **all cells of 06** from
+the updated deployment ref. This updates the parent and both runtime notebooks
+together. Confirm the new **Record successful review** activity, then test with
+notifications off. Leave the cooldown at `0` to disable exclusions or set it to
+the required number of days. Successful targeted reviews are recorded either way.
+Keep the existing independent daily owner-access sync schedule.
+
+See the [cooldown guide](docs/targeted-review.md#recently-reviewed-workspace-cooldown)
+for history retention, failure handling and the rolling UTC boundary. Sequential
+Fabric runs verified successful completion recording and exclusion of the first
+run's workspaces from the second selection. Validate the upgraded flow in your
+own workspace before resuming schedules.
+
 ## 2026.10.1
 
 ### Architecture reviews
