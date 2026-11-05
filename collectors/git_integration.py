@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from collectors._http import request
+from collectors._http import request, response_error_code
 from collectors._common import filter_workspaces_by_scope, load_workspace_inventory, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
@@ -33,6 +33,26 @@ def _load_workspaces(raw_dir: Path) -> List[Tuple[str, str]]:
     """Return (workspace_id, workspace_name) for in-scope workspaces only."""
     return [(w["id"], w.get("name") or "")
             for w in filter_workspaces_by_scope(load_workspace_inventory(raw_dir)) if w.get("id")]
+
+
+def read_connection(wsid: str, wsname: str, headers: Any) -> Dict[str, Any]:
+    response = request("GET", f"{FAB}/workspaces/{wsid}/git/connection", headers)
+    row: Dict[str, Any] = {"workspaceId": wsid, "workspaceName": wsname, "connected": False}
+    if response.status_code == 200 and response.content:
+        payload = response.json()
+        state = payload.get("gitConnectionState")
+        row.update(connected=state in ("Connected", "ConnectedAndInitialized") or bool(payload.get("gitProviderDetails")),
+                   gitConnectionState=state, gitProviderDetails=payload.get("gitProviderDetails"),
+                   gitSyncDetails=payload.get("gitSyncDetails"))
+    elif response.status_code == 404:
+        row["gitConnectionState"] = "NotConnected"
+    else:
+        category = "insufficient_permissions" if response.status_code in (401, 403) else "unexpected_status"
+        row["error"] = f"{category} ({response.status_code})"
+        code = response_error_code(response)
+        if code:
+            row["errorCode"] = code
+    return row
 
 
 @record_collection_failure("git_integration.json")
@@ -52,54 +72,7 @@ def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
 
     results: List[Dict[str, Any]] = []
     for i, (wsid, wsname) in enumerate(workspaces, 1):
-        url = f"{FAB}/workspaces/{wsid}/git/connection"
-        r = request("GET", url, headers)
-        if r.status_code == 200 and r.content:
-            payload = r.json()
-            state = payload.get("gitConnectionState")
-            # The Fabric API returns "Connected" for a workspace that is wired
-            # to a repo but never synced, and "ConnectedAndInitialized" once
-            # the first sync has happened. Both mean "under source control".
-            is_connected = state in ("Connected", "ConnectedAndInitialized") or bool(
-                payload.get("gitProviderDetails")
-            )
-            results.append(
-                {
-                    "workspaceId": wsid,
-                    "workspaceName": wsname,
-                    "connected": is_connected,
-                    "gitConnectionState": state,
-                    "gitProviderDetails": payload.get("gitProviderDetails"),
-                    "gitSyncDetails": payload.get("gitSyncDetails"),
-                }
-            )
-        elif r.status_code in (401, 403):
-            results.append(
-                {
-                    "workspaceId": wsid,
-                    "workspaceName": wsname,
-                    "connected": False,
-                    "error": f"insufficient_permissions ({r.status_code})",
-                }
-            )
-        elif r.status_code == 404:
-            results.append(
-                {
-                    "workspaceId": wsid,
-                    "workspaceName": wsname,
-                    "connected": False,
-                    "gitConnectionState": "NotConnected",
-                }
-            )
-        else:
-            results.append(
-                {
-                    "workspaceId": wsid,
-                    "workspaceName": wsname,
-                    "connected": False,
-                    "error": f"unexpected_status ({r.status_code})",
-                }
-            )
+        results.append(read_connection(wsid, wsname, headers))
         if i % 25 == 0:
             print(f"  ... {i}/{len(workspaces)}")
 

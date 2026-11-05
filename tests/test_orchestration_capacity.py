@@ -470,6 +470,23 @@ class CapacitySourceTests(unittest.TestCase):
             self.select()
         self.assertFalse((self.directory / (RUN + ".json")).exists())
 
+    def test_failed_selection_can_retry_before_audit_but_completed_selection_cannot_replay(self):
+        config = {**self.config, "CAPACITY_ID_OR_NAME": json.dumps([A, B])}
+        self.query.side_effect = RuntimeError("Temporary source failure")
+        with self.assertRaisesRegex(RuntimeError, "Temporary source failure"):
+            self.select(config)
+        self.assertFalse((self.directory / (RUN + ".json")).exists())
+
+        self.query.side_effect = self.sql_rows
+        result = self.select(config)
+        self.assertGreater(result["workspace_count"], 0)
+        saved = self.audit()
+        calls = self.query.call_count
+        with self.assertRaisesRegex(RuntimeError, "automatic replay"):
+            self.select(config)
+        self.assertEqual(self.query.call_count, calls)
+        self.assertEqual(self.audit(), saved)
+
     def test_separator_only_allowlist_fails_without_persisting_broadened_selection(self):
         for selector in ("", A, "Empty"):
             with self.subTest(selector=selector), self.assertRaisesRegex(ValueError, "WORKSPACE_IDS"):

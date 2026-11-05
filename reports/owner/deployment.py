@@ -254,10 +254,12 @@ def _verify_report_binding(
 def access_notebook(
     repo_dir: Path, workspace_id: str, lakehouse_id: str, lakehouse_name: str,
     model_id: str,
+    *, environment_library: str = "FAR_Environment",
 ) -> dict[str, Any]:
     """Embed the deployed sync implementation, not a mutable branch download."""
     workspace_id, lakehouse_id, model_id = map(guid, (workspace_id, lakehouse_id, model_id))
     runtime = (repo_dir / "reports" / "owner" / "access.py").read_text(encoding="utf-8")
+    authentication = (repo_dir / "orchestration" / "notebook_auth.py").read_text(encoding="utf-8")
     execute = (
         "import notebookutils\n"
         "from pyspark.sql import SparkSession\n"
@@ -276,7 +278,8 @@ def access_notebook(
         "               r['refreshed_at'], r['expires_at']) for r in rows]\n"
         "    (spark.createDataFrame(values, schema).write.format('delta')\n"
         "        .mode('overwrite').saveAsTable('owner_access'))\n"
-        "token = lambda: notebookutils.credentials.getToken('pbi')\n"
+        f"provider = notebook_token_provider(notebookutils, {environment_library!r})\n"
+        "token = lambda: provider.get_token(POWERBI_SCOPE)\n"
         "refresh = lambda: refresh_owner_model(REPORTING_WORKSPACE_ID, OWNER_MODEL_ID, token)\n"
         "workspaces = [r['workspace_id'] for r in\n"
         "              spark.table('owner_workspaces').select('workspace_id').distinct().collect()]\n"
@@ -315,6 +318,8 @@ def access_notebook(
                 "Configure the owner's fixed-identity connection before running. "
                 "The admin API is paced at 20 seconds per workspace (200 requests/hour service limit).\n",
             ]},
+            {"cell_type": "code", "id": "owner-access-auth", "metadata": {},
+             "execution_count": None, "outputs": [], "source": authentication.splitlines(keepends=True)},
             {"cell_type": "code", "id": "owner-access-runtime", "metadata": {},
              "execution_count": None, "outputs": [], "source": runtime.splitlines(keepends=True)},
             {"cell_type": "code", "id": "owner-access-execute", "metadata": {},
@@ -327,6 +332,7 @@ def deploy_owner_reporting(
     client: FabricClient, *, repo_dir: Path, workspace_id: str, lakehouse_id: str,
     lakehouse_name: str, notebook_prefix: str, model_name: str, report_name: str,
     spark: Any,
+    environment_library: str = "FAR_Environment",
 ) -> dict[str, str]:
     from reports.owner.fabric_runtime import bootstrap_owner_tables
     from reports.owner.model import build_bim
@@ -367,7 +373,10 @@ def deploy_owner_reporting(
                 "payloadType": "InlineBase64",
             })
     report_id = client.upsert_item(workspace_id, report_name, "Report", {"parts": parts})
-    notebook = access_notebook(repo_dir, workspace_id, lakehouse_id, lakehouse_name, model_id)
+    notebook = access_notebook(
+        repo_dir, workspace_id, lakehouse_id, lakehouse_name, model_id,
+        environment_library=environment_library,
+    )
     notebook_id = client.upsert_item(
         workspace_id, notebook_prefix + "_07_OwnerAccessSync", "Notebook",
         {"format": "ipynb", "parts": [definition_part("notebook-content.ipynb", notebook)]},

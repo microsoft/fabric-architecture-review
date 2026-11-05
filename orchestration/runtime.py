@@ -12,8 +12,10 @@ import os
 from pathlib import Path
 from typing import Any
 
+from collectors.workspace_scope import source_workspace_scope
 from orchestration.completion import prepare_owner_emails, validate_report_url
 from orchestration.fabric_api import FabricClient, guid
+from orchestration.notebook_auth import FABRIC_SCOPE, POWERBI_SCOPE, notebook_token_provider
 from orchestration.ranking import METRICS, rank_workspaces, selection_payload
 from orchestration.review_history import cooldown_days, get_recently_reviewed_workspace_ids, record_completed_review
 from orchestration.sources import capacity_selector, validate_capacity_scope
@@ -34,6 +36,11 @@ def validate_config(config: dict[str, Any]) -> None:
     if not 1 <= int(config["TOP_N"]) <= 100:
         raise ValueError("TOP_N must be between 1 and 100.")
     cooldown_days(config.get("SKIP_REVIEWED_WITHIN_DAYS", "0"))
+    source_ids = config.get("SOURCE_WORKSPACE_IDS", "")
+    if not isinstance(source_ids, str):
+        raise ValueError("SOURCE_WORKSPACE_IDS must be a comma-separated GUID string.")
+    for value in source_ids.replace(",", " ").split():
+        guid(value)
     if config.get("SOURCE_MODE", "fuam") != "fuam":
         raise ValueError("Only FUAM is supported; no unsupported Capacity Metrics queries.")
     validate_notifications(config)
@@ -61,7 +68,9 @@ def select_workspaces(
             "Inspect the native FAR activity before recovery; automatic replay is disabled."
         )
 
-    result = read_source(config)
+    # Selection applies the live Connections exclusions below, not a prior review's source scope.
+    with source_workspace_scope(()):
+        result = read_source(config)
     source, rows = result
     capacity_scope = getattr(result, "capacity_scope", {
         "requested": "", "capacity_id": "", "capacity_name": "",
@@ -78,11 +87,14 @@ def select_workspaces(
     )
     selected = rank_workspaces(
         rows, top_n=int(config["TOP_N"]), allowlist=allowlist,
-        excluded_workspace_ids=(config["CHILD_WORKSPACE_ID"], config["FUAM_WORKSPACE_ID"], *recently_reviewed),
+        excluded_workspace_ids=(
+            config["CHILD_WORKSPACE_ID"], config["FUAM_WORKSPACE_ID"], *recently_reviewed,
+            *config.get("SOURCE_WORKSPACE_IDS", "").replace(",", " ").split(),
+        ),
     )
     if days:
         print(f"Targeted-review cooldown: days={days}, recently_reviewed_workspaces={len(recently_reviewed)}; excluded before top-N.")
-    print("FUAM selection excludes Capacity Metrics app workspaces, the FAR hosting workspace and the configured FUAM workspace before top-N.")
+    print("FUAM selection excludes Capacity Metrics app workspaces, the FAR hosting workspace and enabled FUAM/FCA source workspaces before top-N.")
     print(
         f"FUAM selection: source_rows={len(rows)}, "
         f"allowlist={'set' if allowlist.strip() else 'blank'}, selected_workspaces={len(selected)}."
@@ -92,6 +104,10 @@ def select_workspaces(
         "parent_run_id": parent_run_id,
         "selected_at": selected_at.isoformat(),
         "review_cooldown": {"days": days, "excluded_workspace_ids": sorted(recently_reviewed)},
+        "excluded_source_workspace_ids": sorted({
+            guid(config["FUAM_WORKSPACE_ID"]),
+            *(guid(value) for value in config.get("SOURCE_WORKSPACE_IDS", "").replace(",", " ").split()),
+        }),
         "lookback_days": int(config["LOOKBACK_DAYS"]),
         "capacity_scope": capacity_scope,
         "unattributed_workspace_groups": getattr(result, "unattributed_workspace_groups", 0),
@@ -204,14 +220,19 @@ def prepare_notifications(
 
 
 def run_selection(config: dict[str, Any]) -> dict[str, Any]:
+    print("FAR startup: validating selection configuration", flush=True)
     validate_config(config)
     import notebookutils
 
     from orchestration.sources import read_source
-    client = FabricClient(lambda: notebookutils.credentials.getToken("pbi"))
+    provider = notebook_token_provider(notebookutils, config.get("FAR_ENVIRONMENT_LIBRARY", ""), sql=True)
+    client = FabricClient(lambda: provider.get_token(FABRIC_SCOPE))
+    print("FAR startup: selecting workspaces", flush=True)
     return select_workspaces(
         config, config["PARENT_RUN_ID"],
-        read_source=lambda options: read_source(options, client),
+        read_source=lambda options: read_source(
+            options, client, token_provider=provider,
+        ),
         state_dir=Path("/lakehouse/default/Files/far-orchestration/runs"),
     )
 
@@ -222,7 +243,8 @@ def run_notifications(config: dict[str, Any]) -> dict[str, Any]:
         return {"notifications": "disabled", "messages": []}
     import notebookutils
 
-    client = FabricClient(lambda: notebookutils.credentials.getToken("pbi"))
+    provider = notebook_token_provider(notebookutils, config.get("FAR_ENVIRONMENT_LIBRARY", ""))
+    client = FabricClient(lambda: provider.get_token(POWERBI_SCOPE))
     return prepare_notifications(
         config, config["PARENT_RUN_ID"], config["CHILD_RUN_ID"],
         prepare=lambda options, state: prepare_owner_emails(options, state, client),

@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from collectors._http import Headers, HttpError, request
+from collectors._http import Headers, HttpError, definition_error, request, wait
 from collectors._common import get_scope_workspace_ids, load_complete_raw, record_collection_failure
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
@@ -59,6 +59,8 @@ def _get_definition(
     try:
         return _get_definition_impl(headers, workspace_id, dataset_id)
     except HttpError as exc:
+        if exc.error_code == "RetryDeadlineExceeded":
+            raise
         return None, f"http_{exc.status_code or 'error'}"
 
 
@@ -73,12 +75,8 @@ def _get_definition_impl(
 
     if r.status_code == 200 and r.content:
         return r.json(), None
-    if r.status_code in (401, 403):
-        return None, f"http_{r.status_code}"
-    if r.status_code == 404:
-        return None, "not_found"
     if r.status_code != 202:
-        return None, f"http_{r.status_code}"
+        return None, definition_error(r)
 
     op_url = r.headers.get("Location")
     if not op_url:
@@ -87,10 +85,10 @@ def _get_definition_impl(
     delay = min(retry_after, LRO_FIRST_POLL_DELAY)
 
     for _ in range(LRO_MAX_POLLS):
-        time.sleep(max(1, delay))
+        wait(max(1, delay))
         pr = request("GET", op_url, headers)
         if pr.status_code in (401, 403):
-            return None, f"http_{pr.status_code}"
+            return None, definition_error(pr)
         if pr.status_code != 200 or not pr.content:
             return None, f"lro_poll_http_{pr.status_code}"
         body = pr.json()

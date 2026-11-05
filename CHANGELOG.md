@@ -4,6 +4,50 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.11.0
+
+### Service-principal reviews
+
+- Configure one service principal for evidence collection, FUAM/FCA source reads,
+  targeted selection, owner-email preparation and owner-access sync.
+- Keep notebook-identity authentication when SP settings are empty. Incomplete
+  settings or authentication failures stop the operation; FAR does not switch identities.
+- Required SP notebook dependencies are installed automatically.
+
+### Temporary workspace access
+
+- Choose `declared_models` for declared RLS/OLS models, or `required_evidence`
+  for those models and other supported evidence needed by the review.
+- A Fabric administrator executing Collect can temporarily authorize the configured
+  SP to read refused evidence. Evidence reads remain under the SP.
+- Preserve existing workspace assignments, including Viewer. Remove only the
+  temporary assignments FAR creates; failed cleanup fails the run.
+- Temporary access is off by default. Fully SP-executed reviews require
+  preprovisioned access. Run temporary-grant reviews one at a time.
+
+### Collection reliability and scope
+
+- Keep successful evidence and retry only failed items, with bounded permission
+  retries. Unsupported operations do not trigger repeated access changes.
+- Use enabled FUAM/FCA workspaces as sources only, not review targets. Their
+  source data remains available without requesting temporary review access.
+- Exclude source workspaces before targeted Top-N selection so the next eligible
+  workspaces fill the slots, even when source workspaces are allow-listed.
+- Targeted setup validates the connected sources without exposing source-workspace
+  exclusions as pipeline parameters; selection reads the current Connections library.
+- Improve SQL source reliability during long reviews.
+
+### Upgrade
+
+Pause schedules and finish active runs. Rerun setup with `RELEASE_TAG="v2026.11.0"`,
+then rerun **all cells of 06** if using targeted reviews. Existing configuration
+values are preserved; the new access scope defaults to `declared_models`.
+
+Verify notebook connections and permissions, then run general and targeted reviews
+sequentially. Check evidence completeness and temporary-access cleanup before resuming
+schedules. See the [authentication guide](docs/auth-setup.md) for identity settings,
+permissions and testing.
+
 ## 2026.10.2
 
 ### Targeted-review cooldown

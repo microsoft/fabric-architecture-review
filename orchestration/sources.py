@@ -5,12 +5,14 @@
 from __future__ import annotations
 
 from datetime import date, timedelta, timezone, datetime
+from collections.abc import Callable
 import json
 from typing import Any, TypedDict
 
 from collectors._http import collect_workspace_groups
 from collectors.workspace_scope import is_excluded_workspace
 from orchestration.fabric_api import FabricClient, guid
+from orchestration.notebook_auth import POWERBI_SCOPE, SQL_SCOPE, NotebookTokenProvider
 
 
 METRIC_COLUMNS = {"cu_seconds": "TotalCUs", "recorded_throttling_minutes": "ThrottlingInMin"}
@@ -58,7 +60,9 @@ def capacity_selector(value: Any = None) -> str:
 
 def resolve_capacity(
     selector: str, workspace_id: str, lakehouse: dict[str, Any],
+    *, read_rows: Callable[[str, dict[str, Any], str], list[dict[str, Any]]] | None = None,
 ) -> CapacityScope:
+    read_rows = read_rows or query_rows
     requested = capacity_selector(selector)
     is_set = requested.startswith("[")
     members = json.loads(requested) if is_set else [requested]
@@ -71,7 +75,7 @@ def resolve_capacity(
                 scope["capacity_id"] = guid(member)
             except ValueError:
                 if rows is None:
-                    rows = query_rows(
+                    rows = read_rows(
                         workspace_id, lakehouse,
                         "SELECT CapacityId AS capacity_id, displayName AS capacity_name FROM dbo.capacities",
                     )
@@ -166,11 +170,12 @@ class SourceResult(tuple):
 
 def match_current_workspaces(
     rows: list[dict[str, Any]], client: FabricClient,
+    *, powerbi_token: Callable[[], str] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Match FUAM identities against complete current metadata before ranking."""
     groups = collect_workspace_groups(
         "https://api.powerbi.com/v1.0/myorg/admin/groups",
-        lambda: {"Authorization": "Bearer " + client.token()},
+        lambda: {"Authorization": "Bearer " + (powerbi_token or client.token)()},
     )
     current = {guid(group["id"]): group for group in groups}
     unmatched: set[str] = set()
@@ -283,6 +288,7 @@ LEFT JOIN (
 
 
 def query_rows(workspace_id: str, lakehouse: dict[str, Any], query: str) -> list[dict[str, Any]]:
+    print("FAR startup: reading FUAM rows with the Spark SQL connector", flush=True)
     import com.microsoft.spark.fabric  # noqa: F401 - registers the supported connector
     from com.microsoft.spark.fabric.Constants import Constants
     from pyspark.sql import SparkSession
@@ -300,10 +306,30 @@ def query_rows(workspace_id: str, lakehouse: dict[str, Any], query: str) -> list
     return rows
 
 
-def read_source(config: dict[str, Any], client: FabricClient) -> SourceResult:
+def read_source(
+    config: dict[str, Any], client: FabricClient, *, token_provider: NotebookTokenProvider | None = None,
+) -> SourceResult:
+    print("FAR startup: resolving FUAM lakehouse", flush=True)
     lakehouse = resolve_lakehouse(config, client)
     workspace_id = guid(config["FUAM_WORKSPACE_ID"])
-    scope = resolve_capacity(capacity_selector(config.get("CAPACITY_ID_OR_NAME")), workspace_id, lakehouse)
+    read_rows = query_rows
+    if token_provider is not None and token_provider.is_service_principal:
+        from orchestration.config_deployment import endpoint, sql_connection, sql_rows
+        print("FAR startup: resolving FUAM SQL endpoint", flush=True)
+        server, database = endpoint(client, workspace_id, guid(lakehouse["id"]), "lakehouses")
+
+        def read_rows(workspace: str, source: dict[str, Any], statement: str) -> list[dict[str, Any]]:
+            print("FAR startup: acquiring FUAM SQL token", flush=True)
+            token = token_provider.get_token(SQL_SCOPE)
+            print("FAR startup: opening FUAM SQL connection", flush=True)
+            with sql_connection(server, database, token) as connection:
+                print("FAR startup: reading FUAM SQL rows", flush=True)
+                return sql_rows(connection, statement, max_rows=MAX_WORKSPACES)
+
+    print("FAR startup: resolving capacity selection", flush=True)
+    scope = resolve_capacity(
+        capacity_selector(config.get("CAPACITY_ID_OR_NAME")), workspace_id, lakehouse, read_rows=read_rows,
+    )
     days = int(config["LOOKBACK_DAYS"])
     end_date = datetime.now(timezone.utc).date()
     resolved = scope["capacities"] if "capacities" in scope else [scope]
@@ -320,7 +346,7 @@ def read_source(config: dict[str, Any], client: FabricClient) -> SourceResult:
         f"window_start={(end_date - timedelta(days=days)).isoformat()}, "
         f"window_end_exclusive={end_date.isoformat()}."
     )
-    rows = query_rows(workspace_id, lakehouse, query)
+    rows = read_rows(workspace_id, lakehouse, query)
     if any(row["invalid_values"] for row in rows):
         raise ValueError("FUAM contains null or negative monitoring values; correct the source before ranking.")
     attributed = []
@@ -341,7 +367,11 @@ def read_source(config: dict[str, Any], client: FabricClient) -> SourceResult:
             "zero-CU groups; these values are potentially incomplete and do not identify "
             "which workload caused capacity overload."
         )
-    matched, inventory = match_current_workspaces(attributed if unattributed else rows, client)
+    print("FAR startup: matching current workspace inventory", flush=True)
+    matched, inventory = match_current_workspaces(
+        attributed if unattributed else rows, client,
+        powerbi_token=(lambda: token_provider.get_token(POWERBI_SCOPE)) if token_provider is not None else None,
+    )
     return SourceResult(
         matched, scope, unattributed_workspace_groups=unattributed, workspace_inventory=inventory,
     )

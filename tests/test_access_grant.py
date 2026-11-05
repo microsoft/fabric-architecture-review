@@ -115,6 +115,12 @@ def declared(*ids):
     return frozenset(ids)
 
 
+def retry_collection(grant, producer, workspace_ids, collector):
+    return grant.retry_collection(
+        producer, workspace_ids, collector, retry=lambda path, ids, deadline: producer(),
+    )
+
+
 # --- settings ---------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("values, expected", [
@@ -125,7 +131,7 @@ def declared(*ids):
     ({"enabled": "false", "role": "MEMBER"}, {"enabled": False, "role": "Member"}),
 ])
 def test_settings_are_normalized(values, expected):
-    assert validate_access_grant(values) == expected
+    assert validate_access_grant(values) == {**expected, "scope": "declared_models"}
 
 
 @pytest.mark.parametrize("values", [{"enabled": "yes", "role": "auto"}, {"enabled": "true", "role": "Admin"},
@@ -139,20 +145,209 @@ def test_an_environment_library_from_before_the_setting_means_disabled():
     class Library:
         def getVariable(self, name):
             raise KeyError(name)
-    assert fabric_access_grant(lambda _: Library(), "Env") == {"enabled": False, "role": "auto"}
+    assert fabric_access_grant(lambda _: Library(), "Env") == {"enabled": False, "role": "auto", "scope": "declared_models"}
 
     class Set:
         def getVariable(self, name):
             return {"access_grant__enabled": "true", "access_grant__role": "Member"}[name]
     settings = fabric_access_grant(lambda _: Set(), "Env")
-    assert access_grant_environment(settings) == {"ACCESS_GRANT_ENABLED": "true", "ACCESS_GRANT_ROLE": "Member"}
+    assert access_grant_environment(settings) == {
+        "ACCESS_GRANT_ENABLED": "true", "ACCESS_GRANT_ROLE": "Member", "ACCESS_GRANT_SCOPE": "declared_models",
+    }
     assert settings_from_environment(access_grant_environment(settings)) == Settings(True, "Member")
     assert settings_from_environment({}) == Settings(False, "auto")
 
 
 def test_the_default_deployment_has_the_setting_off():
     from orchestration.review_config import ROOT, read_yaml
-    assert read_yaml(ROOT / "config" / "environment.yaml")["access_grant"] == {"enabled": "false", "role": "auto"}
+    assert read_yaml(ROOT / "config" / "environment.yaml")["access_grant"] == {
+        "enabled": "false", "role": "auto", "scope": "declared_models",
+    }
+
+
+def test_required_evidence_scope_is_explicit_and_validated():
+    settings = settings_from_environment({
+        "ACCESS_GRANT_ENABLED": "true", "ACCESS_GRANT_ROLE": "auto", "ACCESS_GRANT_SCOPE": "required_evidence",
+    })
+    assert settings == Settings(True, "auto", "required_evidence")
+    for bad in ("all", "admin", True, ["required_evidence"]):
+        with pytest.raises(ValueError):
+            validate_access_grant({"enabled": True, "role": "auto", "scope": bad})
+
+
+def test_app_token_cannot_act_as_the_admin_grant_authority():
+    with pytest.raises(AccessGrantError, match="delegated Fabric administrator"):
+        AdminApi(Provider(jwt(oid=OID, idtyp="app")))
+
+
+def test_separate_admin_authority_is_same_tenant_and_never_changes_reviewer(tmp_path):
+    reviewer = Provider(jwt(oid=OID, idtyp="app", tid=WS))
+    operator = Provider(jwt(upn=UPN, oid=M1, tid=WS))
+    seen = []
+    grant = AccessGrant(
+        Settings(True), tmp_path / "ledger.json", provider_factory=lambda: reviewer,
+        admin_provider_factory=lambda: operator, api_factory=lambda provider: seen.append(provider) or "admin",
+    )
+    assert grant._admin() == "admin"
+    assert grant._provider_() is reviewer
+    assert seen == [operator]
+    operator.token = jwt(upn=UPN, tid=WS2)
+    grant._api = None
+    with pytest.raises(AccessGrantError, match="same tenant"):
+        grant._admin()
+
+
+def test_required_evidence_grants_only_refused_in_scope_workspaces_and_removes(tmp_path):
+    grant, holder, sleeps, _ = make(tmp_path, settings=Settings(True, "auto", "required_evidence"))
+    path = tmp_path / "inventory.json"
+    reads = []
+
+    def produce():
+        present = holder.get("api") is not None and holder["api"].present
+        reads.append(present)
+        errors = [{"workspaceId": WS2, "statusCode": 401}]
+        if not present:
+            errors.append({"workspaceId": WS, "statusCode": 401})
+        path.write_text(json.dumps({"inventoryErrors": errors}))
+        return path
+
+    assert retry_collection(grant, produce, {WS}, "collectors.pipelines_notebooks") == path
+    assert reads == [False, True] and sleeps == []
+    assert holder["api"].calls == [("listed", WS), ("add", WS, "Contributor"), ("remove", WS)]
+    assert grant.ledger.entries() == [] and grant.failures == []
+    assert grant.audit[0]["status"] == "read_after_grant" and grant.audit[0]["removed"] is True
+    assert json.loads(path.read_text())["inventoryErrors"] == [{"workspaceId": WS2, "statusCode": 401}]
+
+
+@pytest.mark.parametrize("enabled,scope,status", [
+    (False, "required_evidence", 401), (True, "declared_models", 403),
+    (True, "required_evidence", 500), (True, "required_evidence", 429),
+])
+def test_required_evidence_never_grants_for_disabled_or_non_access_errors(tmp_path, enabled, scope, status):
+    grant, holder, _, provider = make(tmp_path, settings=Settings(enabled, "auto", scope))
+    path = tmp_path / "inventory.json"
+    path.write_text(json.dumps({"collectionErrors": [{"workspaceId": WS, "statusCode": status}]}))
+    retry_collection(grant, lambda: path, {WS}, "collectors.onelake_roles")
+    assert not holder and not provider.scopes and not grant.audit
+
+
+@pytest.mark.parametrize("error", [
+    "http_401", "http_403", "http_404", "not_found",
+    "insufficient_permissions (401)", "insufficient_permissions (403)",
+])
+def test_required_evidence_handles_model_access_refusals(tmp_path, error):
+    grant, holder, _, _ = make(tmp_path, settings=Settings(True, "auto", "required_evidence"))
+
+    def produce():
+        readable_now = holder.get("api") is not None and holder["api"].present
+        return definitions(tmp_path, model(M1, error=None if readable_now else error))
+
+    path = retry_collection(grant, produce, {WS}, "collectors.semantic_model_definitions")
+    assert json.loads(path.read_text())["errors"] == 0
+    assert grant.audit[0]["removed"] is True
+
+
+def test_required_evidence_escalates_only_after_propagation_retries_and_removal(tmp_path):
+    grant, holder, sleeps, _ = make(
+        tmp_path, settings=Settings(True, "auto", "required_evidence"), delays=(3, 7),
+    )
+
+    def produce():
+        api = holder.get("api")
+        allowed = api is not None and ("add", WS, "Member") in api.calls
+        return definitions(tmp_path, model(M1, error=None if allowed else "http_403"))
+
+    retry_collection(grant, produce, {WS}, "collectors.semantic_model_definitions")
+    assert holder["api"].calls == [
+        ("listed", WS), ("add", WS, "Contributor"), ("remove", WS),
+        ("listed", WS), ("add", WS, "Member"), ("remove", WS),
+    ]
+    assert sleeps == [3, 7]
+    assert grant.ledger.entries() == []
+    assert [r["status"] for r in grant.audit] == ["still_refused", "read_after_grant"]
+
+
+def test_required_evidence_preserves_existing_membership(tmp_path):
+    grant, holder, _, _ = make(
+        tmp_path, settings=Settings(True, "auto", "required_evidence"), present=True,
+    )
+    path = definitions(tmp_path, model(M1))
+    retry_collection(grant, lambda: path, {WS}, "collectors.semantic_model_definitions")
+    assert holder["api"].calls == [("listed", WS)]
+    assert grant.audit[0]["status"] == "role_already_present"
+    assert grant.ledger.entries() == []
+
+
+def test_required_evidence_keeps_successful_grants_until_other_workspace_escalation_finishes(tmp_path):
+    memberships = {}
+    snapshots = []
+
+    class BatchApi:
+        def listed(self, workspace_id, principal):
+            return workspace_id in memberships
+
+        def add(self, workspace_id, principal, role):
+            assert any(row["workspace_id"] == workspace_id for row in grant.ledger.entries())
+            memberships[workspace_id] = role
+            return 200
+
+        def remove(self, workspace_id, principal):
+            memberships.pop(workspace_id)
+            return 200
+
+    grant = AccessGrant(
+        Settings(True, "auto", "required_evidence"), tmp_path / "ledger.json",
+        provider_factory=lambda: Provider(jwt(upn=UPN, oid=OID)), api_factory=lambda _: BatchApi(), delays=(),
+    )
+
+    def produce():
+        snapshots.append(dict(memberships))
+        return definitions(
+            tmp_path, model(M1, error=None if WS in memberships else "http_403"),
+            model(M2, workspace=WS2, error=None if memberships.get(WS2) == "Member" else "http_403"),
+        )
+
+    path = retry_collection(grant, produce, {WS, WS2}, "collectors.semantic_model_definitions")
+    assert snapshots == [{}, {WS: "Contributor", WS2: "Contributor"}, {WS: "Contributor", WS2: "Member"}]
+    assert json.loads(path.read_text())["errors"] == 0
+    assert not memberships and grant.ledger.entries() == [] and not grant.failures
+    assert all(row["removed"] for row in grant.audit)
+
+
+@pytest.mark.parametrize("exception", [RuntimeError("read failed"), KeyboardInterrupt()])
+def test_required_evidence_cleanup_survives_read_failure_or_interrupt(tmp_path, exception):
+    grant, holder, _, _ = make(tmp_path, settings=Settings(True, "auto", "required_evidence"))
+
+    def produce():
+        if holder.get("api") is not None and holder["api"].present:
+            raise exception
+        return definitions(tmp_path, model(M1))
+
+    with pytest.raises(type(exception)):
+        retry_collection(grant, produce, {WS}, "collectors.semantic_model_definitions")
+    assert grant.audit[0]["removed"] is True and grant.ledger.entries() == []
+
+
+def test_required_evidence_cleanup_failure_blocks_more_grants_and_retains_ledger(tmp_path):
+    grant, holder, _, _ = make(
+        tmp_path, settings=Settings(True, "auto", "required_evidence"), remove=403,
+    )
+    path = definitions(tmp_path, model(M1))
+    retry_collection(grant, lambda: path, {WS}, "collectors.semantic_model_definitions")
+    assert grant.failures == [WS]
+    assert grant.ledger.entries()[0]["workspace_id"] == WS
+    calls = len(holder["api"].calls)
+    retry_collection(grant, lambda: path, {WS}, "collectors.semantic_model_definitions")
+    assert len(holder["api"].calls) == calls
+
+
+def test_required_evidence_run_budget_is_shared_across_collectors(tmp_path):
+    grant, holder, _, _ = make(tmp_path, settings=Settings(True, "auto", "required_evidence"))
+    grant._grant_attempts = access_grant.MAX_WORKSPACES
+    path = definitions(tmp_path, model(M1))
+    retry_collection(grant, lambda: path, {WS}, "collectors.semantic_model_definitions")
+    assert holder["api"].calls == []
+    assert grant.audit[0]["status"] == "deferred_run_limit"
 
 
 # --- who is granted ------------------------------------------------------------------------------
@@ -330,12 +525,13 @@ def test_a_removal_answered_with_an_error_is_accepted_only_when_the_identity_is_
     assert grant.failures == [] and Ledger(tmp_path / "ledger.json").entries() == []
 
 
-def test_the_not_found_error_the_collector_really_returns_counts_as_a_refusal(tmp_path):
+def test_not_found_allows_one_role_but_does_not_justify_member_escalation(tmp_path):
     grant, holder, _, _ = make(tmp_path)
     grant.remediate(definitions(tmp_path, model(M1, error="not_found")), declared(M1), [workspace()],
-                    lambda row: {**row, "error": "not_found"} if ("add", WS, "Member") not in holder["api"].calls else readable(row))
-    assert [c for c in holder["api"].calls if c[0] == "add"] == [("add", WS, "Contributor"), ("add", WS, "Member")]
-    assert grant.audit[0]["status"] == "read_after_grant"
+                    lambda row: {**row, "error": "not_found"})
+    assert [c for c in holder["api"].calls if c[0] == "add"] == [("add", WS, "Contributor")]
+    assert grant.audit[0]["status"] == "still_refused"
+    assert grant.audit[0]["removed"] is True
 
 
 def test_only_the_workspace_limit_of_grants_is_made_per_run(tmp_path, monkeypatch):

@@ -46,7 +46,8 @@ depends on where you run:
 
 ## Unattended mode: service principal (optional)
 
-Use this when scheduled runs must not depend on a person.
+Use an SP as the review identity. Fully SP-executed runs need workspace access
+provisioned in advance; optional temporary grants require an administrator user.
 
 1. Create an app registration. Grant it the [collector roles](#what-you-need-in-the-client-tenant)
    below and, for tenant-wide admin endpoints, allow service principals to use the
@@ -60,11 +61,21 @@ Use this when scheduled runs must not depend on a person.
 4. **Locally**, provide `TENANT_ID`, `CLIENT_ID` and `CLIENT_SECRET` through your
    approved secret-management mechanism. Never commit the secret.
 
-The secret is read into process memory at run time. It is not stored in a notebook,
-pipeline definition, Variable Library or repository. Do not print environment
-variables. This identity does not change the identity used by FUAM selection or
-the Outlook sender. Not every Fabric API supports service principals: validate the
-enabled collectors with the intended identity before scheduling.
+Keep the secret in Key Vault, not in notebooks, pipeline parameters, Variable
+Libraries or the repository. The configured SP reads evidence and FUAM/FCA sources,
+selects targeted workspaces, prepares owner-email recipients and synchronizes owner
+access. Authentication or Key Vault errors stop the operation; FAR does not fall
+back to your user identity. Not every Fabric API supports service principals:
+validate evidence coverage before scheduling.
+
+The notebook execution identity still retrieves the Key Vault secret, reads
+Variable Libraries and performs Spark/OneLake operations. Configure the Notebook
+activity's Service principal connection separately if the notebook itself must
+run as an application. Grant that execution identity access to the libraries,
+runtime files, FAR output Lakehouse and Key Vault (including network access).
+The Environment library does not change the Outlook sender, notebook run-as
+connection, deployment identity or model's fixed-identity connection. Setup and
+Agent deployment remain operator-initiated operations.
 
 ## What you need in the client tenant
 
@@ -97,22 +108,62 @@ Only collectors that an enabled rule needs run; see
 
 ## Additional permissions for optional targeted reviews
 
-The [targeted parent](targeted-review.md) uses the execution identity of its
-selection and Completion notebooks. The service-principal settings of the
-Environment library do not change the selection identity or Outlook sender.
+The [targeted parent](targeted-review.md) and generated owner sync read the same
+Environment library as Collect. Empty SP settings preserve notebook-identity
+authentication. Complete SP settings use that application for API and FUAM SQL
+reads. Partial settings are rejected. A Notebook activity connection does not
+populate the Environment library's SP settings.
+
+User mode means the identity actually executing the notebook, not automatically
+the person who deployed FAR. To run as your tenant-admin account, leave the SP
+settings empty and execute under that account with its Fabric admin role active.
+An SP-backed Notebook connection remains an SP execution context even if the
+library is empty; it does not switch back to your user account. Configure the
+library's SP credentials when using application execution.
 
 | Operation | Required access |
 | --- | --- |
 | Deploy | Create/update notebooks and pipelines in the review workspace; write the runtime package to the attached Lakehouse |
 | Execute | Read the runtime, run and monitor the review, and write parent-run audit records |
-| Rank FUAM workspaces | Read the [documented tables](targeted-review.md#supported-fuam-source-contract) through the FUAM Lakehouse SQL analytics endpoint |
+| Rank FUAM workspaces | Read FUAM Lakehouse metadata and the [documented tables](targeted-review.md#supported-fuam-source-contract) through its SQL analytics endpoint; no FUAM writes |
+| Validate selected workspace identities | Access to the Power BI tenant admin groups API, separately from FUAM workspace access |
 | Prepare email | Read workspace administrator assignments through the Power BI admin group-users API after the review succeeds |
 | Send email | Use an authorized Office 365 Outlook connection and sender mailbox |
 | Read the report | Recipient access to the report and its data, including applicable RLS |
 
-The [Spark SQL connector](https://learn.microsoft.com/fabric/data-engineering/spark-data-warehouse-connector#authentication)
-supports interactive Microsoft Entra user authentication, not service-principal
-authentication. Validate source access with the intended scheduled identity.
+**FUAM permissions:** workspace **Viewer** supplies SQL CONNECT/ReadData and is
+sufficient for these source reads under the standard workspace-role model;
+Contributor/Member are not required on the FUAM workspace. A narrower alternative
+is Lakehouse/SQL endpoint item Read plus SELECT on the documented tables (or
+Read all with SQL analytics endpoint). Validate any additional SQL/OneLake
+security policies. Tenant admin API access is separate: an active Fabric admin
+user, or an appropriately enabled SP in the tenant setting's allowed group.
+Membership in that group alone does not grant FUAM SQL access.
+See [workspace roles](https://learn.microsoft.com/fabric/data-warehouse/workspace-roles)
+and [Lakehouse sharing](https://learn.microsoft.com/fabric/data-engineering/lakehouse-sharing).
+
+Both identity modes read the same supported FUAM data and report access or
+inventory errors rather than silently skipping them.
+
+### Notebook runtime requirements and updates
+
+Required notebook packages are installed automatically. Restricted-network
+environments need an approved package source and may preinstall `msal>=1.23,<2`
+and `mssql-python>=1.15,<2` in the attached Fabric Environment. An installation
+failure stops the operation.
+
+1. Pause schedules and finish active runs.
+2. Rerun setup using the release tag, keeping the existing artifact names and library prefix.
+3. Rerun **all cells of 06** if using targeted reviews.
+4. Verify Notebook activity connections and Environment identity settings.
+5. Run general and targeted reviews sequentially, then repeat. Check source reads,
+   evidence completeness, Gold, successful-review history, temporary-access cleanup
+   and any enabled owner sync or notifications before resuming schedules.
+
+Admin-assisted grants require Collect to execute under a delegated Fabric
+administrator; fully SP execution requires preprovisioned access. Test with the
+identity that will operate the deployment. Changing a GitHub tag or library alone
+does not update deployed notebooks.
 
 For user OAuth, create the Outlook connection through the parent's **Email
 workspace administrator** activity in **Settings**. The service-principal-only
@@ -239,44 +290,61 @@ An environment library created before this setting existed behaves as `false`; a
 
 ## Additional permissions for temporary workspace access (optional)
 
-Off by default, and the only part of the review that **writes**. It exists for one situation: you declared models in
-`policy__rls_required_model_ids` or `policy__ols_required_model_ids`, the review identity is a **Fabric Administrator**,
-and it has no write access to those models, so their roles cannot be read. Turn it on in the `<prefix>_Environment`
-Variable Library (locally in `.env.far`):
+Off by default. A Fabric administrator can temporarily authorize evidence reads
+when the review identity lacks workspace access. Configure it in the
+`<prefix>_Environment` Variable Library (locally in `.env.far`):
 
 | Setting | Meaning |
 | --- | --- |
 | `access_grant__enabled` (`ACCESS_GRANT_ENABLED`) | `true` or `false`. Default `false` |
-| `access_grant__role` (`ACCESS_GRANT_ROLE`) | `auto` (default) tries **Contributor** and uses **Member** only if the read is still refused. Or `Contributor` / `Member` to try only that role |
+| `access_grant__role` (`ACCESS_GRANT_ROLE`) | `auto` (default) tries **Contributor**; **Member** is considered only for continuing permission denials (HTTP 403). Or `Contributor` / `Member` to try only that role |
+| `access_grant__scope` (`ACCESS_GRANT_SCOPE`) | `declared_models` (default): declared RLS/OLS models only. `required_evidence`: those models plus other supported evidence needed by the review |
 
 What it does, and what it will not do:
 
-- It acts only on a workspace that holds a **declared** model whose definition read was refused (HTTP 403 or 404). It never
-  grants access to the rest of the estate, so models you did not declare are not re-read.
-- It never changes or removes a role the identity already has. If the identity is already in the workspace in any role, the
-  workspace is skipped and reported. Current membership is checked through the admin API, not inferred from cached FUAM
-  membership. If that check fails, no access is granted. It removes only what it added.
-- For each such workspace it adds the identity (admin API `POST …/admin/groups/{workspaceId}/users`), re-reads the
-  declared models, and removes the identity again (`DELETE …/admin/groups/{workspaceId}/users/{user}`), before
-  moving to the next workspace. Removal also runs after an error or an interrupt. A new role can take a short while to take
-  effect, so the first read is retried for up to about two minutes per role.
-- The identity is the one signed in: its user principal name for a person, or its object ID for a service principal. A
-  service principal needs the tenant setting that lets it call the admin APIs and must not hold admin-consent Power BI
-  permissions.
-- A **ledger** (`_access_grants/ledger.json` beside the run folders in the FAR Lakehouse; `access_grants_ledger.json` beside
-  the output folder locally) lists a grant *before* it is made and clears it after removal. A run that is killed cannot
-  remove its grant, so the **next run removes whatever the ledger lists first**, even if the setting has since been turned
-  off. Keep the ledger administrator-only: it names the identity that was granted. You can also run
-  `python -m collectors.access_grant` to remove leftovers without a review.
-- **A removal that fails fails the run**, so it is noticed, and the ledger keeps the entry for the next attempt. A grant
-  or removal answer that is not a clean success is confirmed against the workspace's users before the ledger forgets it, because
-  a request that is retried after a network error can have been applied.
-- Limits: the admin APIs allow 200 requests an hour, so one run handles at most 40 workspaces and reports the rest as
-  deferred. Each grant, removal and retry is a Fabric audit event under the executing identity.
-- While it holds Contributor or Member the identity can edit content in that workspace, for as long as the read takes.
-  Use it only where that is acceptable; owners who object keep their models as missing evidence.
-- `raw/access_grants.json` records per workspace the status, the role used and whether it was removed, and totals. It holds
-  no identity and nothing from inside a model.
+- **Grant, read, remove:** FAR first tries existing permissions. Only a refused,
+  required read in an in-scope workspace can trigger a grant. It removes the new
+  assignment after the relevant reads finish, including when a read fails.
+- **Successful evidence is kept.** Only failed items or inventory endpoints are
+  retried, not the entire collector. Each role allows an immediate retry and up to
+  two more, with 5- and 15-second waits. Additional evidence retries share a
+  120-second budget per collector; access changes and cleanup can take longer.
+  Unfinished items remain missing evidence rather than becoming a pass.
+- **Failures are treated separately.** Throttling and temporary service errors use
+  bounded request retries, not permission escalation. Known unsupported operations
+  and invalid-token errors do not trigger grants. Persistent 401 or not-found
+  responses do not justify escalating from Contributor to Member.
+- **Existing access is preserved.** FAR never changes or removes an existing direct
+  workspace assignment. Viewer is not automatically upgraded, so some definitions
+  may remain unreadable. If current membership cannot be verified, no grant is made.
+  Inherited group memberships are not expanded.
+- **Choose one scope.** `required_evidence` includes declared RLS/OLS models within
+  the review scope; there is no need to specify both. It also covers supported
+  pipeline/notebook inventories and definitions, OneLake roles, workspace networking
+  and Git integration. Neither setting overrides exclusions or disabled checks,
+  grants tenant-wide access, or authorizes FUAM/FCA source SQL reads.
+- **The SP still reads the evidence.** For Fabric SP reviews, Collect must execute
+  under a Fabric administrator in the same tenant. That user manages temporary
+  assignments and needs delegated `Tenant.ReadWrite.All` authorization for Power BI
+  [AddUserAsAdmin](https://learn.microsoft.com/rest/api/power-bi/admin/groups-add-user-as-admin) and
+  [DeleteUserAsAdmin](https://learn.microsoft.com/rest/api/power-bi/admin/groups-delete-user-as-admin).
+  The read-only admin API allowance does not let the SP grant itself access.
+  Fully SP-executed and local SP reviews need preprovisioned workspace access.
+- **Cleanup failures fail the run.** After a forced termination, the next run
+  attempts to remove recorded leftovers, even if temporary grants have since been
+  disabled. Keep `_access_grants/ledger.json` in the FAR Lakehouse administrator-only;
+  do not delete it to bypass recovery. Locally, use `python -m collectors.access_grant`
+  under an authorized administrator to recover without a review.
+- **Run one review at a time.** Do not overlap general and targeted temporary-grant
+  reviews or change workspace assignments while they run.
+- **Access remains limited.** FAR never grants Admin. Contributor/Member cannot
+  overcome unsupported SP APIs or sensitivity-label restrictions. These roles
+  temporarily allow content edits, although FAR uses them to read evidence.
+- **Limits and audit:** declared-model scope handles up to 40 workspaces;
+  required-evidence scope allows up to 40 grant attempts per run, including escalation.
+  Remaining work is reported as deferred; service rate limits still apply.
+  Check `raw/access_grants.json` for grant and removal results, and the collection
+  plan for missing evidence.
 
 ## Footprint in the client's audit log
 

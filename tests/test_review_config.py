@@ -5,17 +5,42 @@ import base64
 import json
 from types import SimpleNamespace
 import sys
+from unittest.mock import Mock
 
 import pytest
 
 from orchestration.config_deployment import SETTINGS_SCHEMA, ensure_library, library_definition, sql_connection
 from orchestration.review_config import (
-    ROOT, activate, capture, fabric_configuration, local_configuration, read_snapshot, read_yaml,
+    ROOT, SOURCE_KEYS, activate, capture, fabric_configuration, local_configuration, read_snapshot, read_yaml,
     targeting_source, validate_configuration,
 )
 
 WORKSPACE = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 CAPACITY = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+
+@pytest.mark.parametrize("setting", [
+    None, *(f"{source}__{key}" for source in ("fuam", "fca") for key in sorted(SOURCE_KEYS)),
+])
+def test_targeting_startup_markers_preserve_library_failure_without_values(setting, capsys):
+    failure = RuntimeError("synthetic-private-value")
+
+    def read(name):
+        if name == setting:
+            raise failure
+        return "synthetic-private-value"
+
+    get_library = Mock(return_value=SimpleNamespace(getVariable=read))
+    if setting is None:
+        get_library.side_effect = failure
+    with pytest.raises(RuntimeError) as exc:
+        targeting_source(get_library, "synthetic-private-library")
+    assert exc.value is failure
+    output = capsys.readouterr().out
+    expected = "loading Connections library" if setting is None else f"reading Connections setting {setting}"
+    assert output.rstrip().endswith("FAR startup: " + expected)
+    assert "synthetic-private" not in output
+    assert "validating Connections settings" not in output
 
 
 @pytest.fixture
@@ -145,6 +170,7 @@ def test_targeting_reads_current_connection_library(config):
     values = libraries(config)
     assert targeting_source(values.__getitem__, "connections") == {
         "FUAM_WORKSPACE_ID": WORKSPACE, "FUAM_LAKEHOUSE_ID": CAPACITY,
+        "SOURCE_WORKSPACE_IDS": WORKSPACE,
     }
     values["connections"].values["fuam__enabled"] = False
     with pytest.raises(ValueError, match="requires an enabled"):
@@ -352,6 +378,50 @@ def test_far_targeting_uses_library_and_removes_source_pipeline_parameters():
     code = "".join(notebook["cells"][1]["source"])
     assert "config.update(targeting_source(" in code
     assert code.index("targeting_source(") < code.index("result = run_selection(config)")
+
+
+@pytest.mark.parametrize("fca_enabled", [False, True])
+def test_targeted_provision_keeps_library_source_scope_out_of_pipeline_defaults(
+    config, monkeypatch, tmp_path, fca_enabled,
+):
+    from orchestration import deployment
+    from orchestration.fabric_api import FabricClient
+    from orchestration.setup import provision
+
+    config["sources"]["fuam"].update(enabled=True, workspace_id=WORKSPACE, lakehouse_id=CAPACITY)
+    config["sources"]["fca"].update(enabled=fca_enabled, workspace_id=CAPACITY, lakehouse_id=WORKSPACE)
+    values = libraries(config)
+    monkeypatch.setitem(sys.modules, "notebookutils", SimpleNamespace(
+        variableLibrary=SimpleNamespace(getLibrary=values.__getitem__),
+    ))
+    monkeypatch.setattr(deployment, "package_runtime", lambda *args: tmp_path / "runtime.zip")
+    client = Mock(spec=FabricClient)
+    client.list_items.return_value = []
+    client.pipeline_definition.return_value = {"properties": {"parameters": {
+        "WORKSPACE_IDS": {"type": "string", "defaultValue": ""},
+    }}}
+    client.upsert_item.side_effect = [WORKSPACE, CAPACITY, WORKSPACE]
+
+    result = provision(
+        client, workspace_id=WORKSPACE, lakehouse_id=CAPACITY, child_pipeline_id=CAPACITY,
+        repo_dir=ROOT, name="Targeted", defaults={"TOP_N": "2"},
+        context={"defaultLakehouseId": CAPACITY, "defaultLakehouseWorkspaceId": WORKSPACE},
+        connections_library="connections",
+    )
+
+    assert result["pipeline_id"] == WORKSPACE
+    assert client.upsert_item.call_count == 3
+    parent = json.loads(base64.b64decode(client.upsert_item.call_args_list[2].args[3]["parts"][0]["payload"]))
+    parameters = parent["properties"]["parameters"]
+    assert not {"SOURCE_WORKSPACE_IDS", "FUAM_WORKSPACE_ID", "FUAM_LAKEHOUSE_ID"} & parameters.keys()
+    assert parameters["TOP_N"]["defaultValue"] == "2"
+    runner = json.loads(base64.b64decode(client.upsert_item.call_args_list[0].args[3]["parts"][0]["payload"]))
+    assert "SOURCE_WORKSPACE_IDS" not in "".join(runner["cells"][0]["source"])
+    assert 'config.update(targeting_source(notebookutils.variableLibrary.getLibrary, "connections"))' in "".join(
+        runner["cells"][1]["source"],
+    )
+    expected = {WORKSPACE, CAPACITY} if fca_enabled else {WORKSPACE}
+    assert set(targeting_source(values.__getitem__, "connections")["SOURCE_WORKSPACE_IDS"].split(",")) == expected
 
 
 def test_gold_uses_same_frozen_workspace_profile(config, monkeypatch, tmp_path):

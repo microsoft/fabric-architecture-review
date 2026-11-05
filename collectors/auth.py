@@ -11,14 +11,14 @@ client secret leaves your machine.
 For a standing, unattended governance deployment you can instead run as a
 dedicated read-only **service principal**: set CLIENT_ID + CLIENT_SECRET (the
 secret comes from Key Vault, never code) and the same provider authenticates
-headless. In Fabric this is configured in the Environment Variable Library. Leave CLIENT_SECRET unset for the default
+headless. Fabric notebooks instead use the shared MSAL provider configured in the
+Environment Variable Library. Leave CLIENT_SECRET unset for the default local
 interactive behaviour.
 
 Credential chain (first that works wins):
   0. ClientSecretCredential   — ONLY when CLIENT_ID + CLIENT_SECRET are set
      (a dedicated read-only service principal). This is the unattended /
-     scheduled mode; in Fabric the secret is read from Key Vault at run time and
-     surfaces here as CLIENT_SECRET. When no secret is present the framework stays
+     scheduled local mode. When no secret is present the framework stays
      fully interactive (below).
   1. AzureCliCredential       — if you've already run `az login --tenant <id>`
   2. InteractiveBrowserCredential — opens a browser window for the first run,
@@ -33,7 +33,7 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Protocol
 
 # NOTE: azure.identity is imported lazily inside TokenProvider.__init__ (not at
 # module top). In the Fabric Spark runtime the pre-installed azure-identity and
@@ -145,10 +145,22 @@ class TokenProvider:
         }
 
 
-_default_provider: TokenProvider | None = None
+class AccessTokenProvider(Protocol):
+    def get_token(self, scope: str = FABRIC_SCOPE) -> str: ...
+
+    def headers(self, scope: str = FABRIC_SCOPE) -> Dict[str, str]: ...
 
 
-def get_default_provider() -> TokenProvider:
+_default_provider: AccessTokenProvider | None = None
+_grant_provider: AccessTokenProvider | None = None
+
+
+def get_access_grant_provider() -> AccessTokenProvider | None:
+    """Explicit notebook authority for grant/cleanup calls, never for evidence reads."""
+    return _grant_provider
+
+
+def get_default_provider() -> AccessTokenProvider:
     global _default_provider
     if _default_provider is None:
         _default_provider = TokenProvider()

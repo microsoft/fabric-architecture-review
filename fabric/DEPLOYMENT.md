@@ -34,7 +34,7 @@ after a successful scoped review. No workstation installation is required.
    | --- | --- |
    | `WORKSPACE_ID` | Leave blank to use the notebook's workspace |
    | `GITHUB_REPO_URL` | Repository containing your selected release |
-   | `RELEASE_TAG` | Release tag, such as `v2026.10.1`; leave blank only to use `GITHUB_BRANCH` |
+   | `RELEASE_TAG` | Release tag, such as `v2026.11.0`; leave blank only to use `GITHUB_BRANCH` |
    | Artifact names | Keep defaults for a new installation; retain existing names when upgrading |
    | `DEPLOY_GOLD_REPORT` | `"true"` |
    | `DEPLOY_WORKSPACE_OWNER_REPORT` | `"false"` unless you need restricted owner reporting |
@@ -63,6 +63,14 @@ Setup preserves your values and adds new settings with their defaults.
 `FAR_CONFIG_PREFIX` changes the library-name prefix. Follow the
 [FAR policy guide](../docs/far-policy-configuration.md) for examples.
 
+For SP-backed scheduled reviews, configure all four `identity__*` values in
+`FAR_Environment`. The shared MSAL provider covers Collect REST/SQL, targeted
+selection/email preparation and owner access sync. The Notebook activity's
+connection separately controls Spark/OneLake execution and Key Vault access.
+Follow the
+[dependency, redeployment and multi-run validation checklist](../docs/auth-setup.md#notebook-runtime-requirements-and-updates);
+old generated runtime ZIPs do not pick up local code or library-only changes.
+
 ### Workspace folders
 
 FAR organizes reports, pipelines, ontology, Agents and notebooks into corresponding
@@ -80,7 +88,7 @@ If a folder step fails, correct the reported permission or service issue and rer
    and evidence coverage before interpreting the score.
 
 **Blank `WORKSPACE_IDS` includes every eligible workspace the identity can access.**
-The FAR hosting workspace and Capacity Metrics app workspaces are excluded,
+The FAR hosting workspace, enabled FUAM/FCA source workspaces and Capacity Metrics app workspaces are excluded,
 even when explicitly listed. Capacity Metrics is identified from its standard
 linked report and semantic-model metadata, not its workspace name.
 Missing evidence means a check could not be established, not that it passed.
@@ -148,7 +156,7 @@ Use an existing, populated FUAM Lakehouse that the review identity can read.
 
 The capacity filter applies before ranking; `TOP_N` is across the selected capacities.
 An empty selection skips the review and notifications. Source errors stop the run.
-FAR/FUAM hosting workspaces and Capacity Metrics app workspaces are excluded
+The FAR hosting workspace, enabled FUAM/FCA source workspaces and Capacity Metrics app workspaces are excluded
 before `TOP_N`; the next eligible workspaces fill the available slots.
 Optionally set `SKIP_REVIEWED_WITHIN_DAYS="7"` to exclude workspaces from
 successful targeted reviews in the past seven days before taking `TOP_N`.
@@ -210,6 +218,15 @@ Optional temporary workspace access for Fabric administrators and role details a
 off by default in `FAR_Environment`. Enable them only after reviewing the
 [permissions](../docs/auth-setup.md#additional-permissions-for-temporary-workspace-access-optional)
 and [policy guidance](../docs/far-policy-configuration.md#model-security-rls-and-ols).
+
+For admin-assisted SP evidence collection, explicitly set `access_grant__enabled=true`,
+`access_grant__role=auto` and `access_grant__scope=required_evidence`. Execute Collect
+under a delegated Fabric administrator: that identity manages temporary roles while
+the configured SP performs evidence reads. Existing roles are preserved, not upgraded;
+fully SP notebook execution requires preprovisioned access. `required_evidence`
+includes declared RLS/OLS models within the review scope; use `declared_models` for
+those models only. Follow the upgrade steps above and check the access-grant audit
+and missing evidence, not just pipeline success.
 Role names are visible in the reports, app and Agents when role details are enabled.
 
 ### Owner model upgrade

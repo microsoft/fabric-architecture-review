@@ -494,7 +494,8 @@ def test_generated_notebook_is_clean_pinned_and_reads_all_reviewed_workspaces():
     assert "synchronize_access(workspaces" in source
     assert "GITHUB" not in source and "TOP_N" not in source
     assert "NOTIFICATIONS_ENABLED" not in source
-    assert "getToken('pbi')" in source
+    assert "provider.get_token(POWERBI_SCOPE)" in source
+    assert "notebook_token_provider(notebookutils, 'FAR_Environment')" in source
 
 
 @pytest.mark.parametrize("unavailable", [False, True])
@@ -553,7 +554,9 @@ def owner_setup_source(filename="setup.ipynb"):
 
 
 @pytest.mark.parametrize("enabled", ["true", " TRUE ", "false", "invalid"])
-@pytest.mark.parametrize("filename", ["setup.ipynb", "setup_private_test_DISPOSABLE.ipynb"])
+@pytest.mark.parametrize("filename", [
+    "setup.ipynb", "setup_private_test_DISPOSABLE.ipynb", "setup_private_far_DISPOSABLE.ipynb",
+])
 def test_setup_owner_deployment_is_independent_and_passes_current_context(monkeypatch, enabled, filename):
     import orchestration.fabric_api
     import reports.owner.deployment
@@ -577,6 +580,7 @@ def test_setup_owner_deployment_is_independent_and_passes_current_context(monkey
         "SEMANTIC_MODEL_NAME": "Governance model", "REPORT_NAME": "Governance report",
         "REPO_DIR": str(ROOT), "wid": WORKSPACE, "lhid": LAKEHOUSE,
         "LAKEHOUSE_NAME": "review_output", "NOTEBOOK_PREFIX": "TestFAR",
+        "_far_bindings": {"FAR_ENVIRONMENT_LIBRARY": "TestFAR_Environment"},
         "notebookutils": SimpleNamespace(credentials=SimpleNamespace(getToken=get_token)),
         "pid": WORKSPACE, "pipeline_id": WORKSPACE, "PIPELINE_NAME": "Test FAR",
         "GITHUB_REPO_URL": "https://github.com/example/synthetic", "GITHUB_BRANCH": "main",
@@ -600,6 +604,7 @@ def test_setup_owner_deployment_is_independent_and_passes_current_context(monkey
             client.return_value, repo_dir=ROOT, workspace_id=WORKSPACE, lakehouse_id=LAKEHOUSE,
             lakehouse_name="review_output", notebook_prefix="TestFAR",
             model_name="Owner model", report_name="Owner report", spark=spark,
+            environment_library="TestFAR_Environment",
         )
         assert context["owner_artifacts"] == deploy.return_value
         client.call_args.args[0]()

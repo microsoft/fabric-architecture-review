@@ -94,8 +94,18 @@ governance model.
 ## Daily entitlement sync
 
 `07_OwnerAccessSync` processes every owner-projected workspace, not only the latest review selection or the
-email recipients. Its identity needs admin group-user lookup, entitlement-write and owner-model refresh
-permission. Reader permissions are separate.
+email recipients. Its API identity needs admin group-user lookup and owner-model refresh
+permission; its notebook execution identity needs entitlement-write permission.
+Reader permissions are separate.
+
+The generated notebook reads the same Environment library as Collect. Complete
+service-principal settings use that application for Power BI admin lookups
+and model refresh; empty settings retain notebook-identity authentication. This does
+not change Spark writes, the notebook's run-as connection or the semantic model's
+fixed source connection. The execution identity still needs Variable Library and
+Key Vault access. Required packages are installed automatically.
+Rerun setup when updating FAR; follow the
+[runtime requirements and update checklist](auth-setup.md#notebook-runtime-requirements-and-updates).
 
 Each sync:
 

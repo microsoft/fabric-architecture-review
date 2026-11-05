@@ -42,9 +42,15 @@ to run a review. The sections below describe what those runs may read.
 Off by default (`access_grant__enabled`). See [auth setup](auth-setup.md#additional-permissions-for-temporary-workspace-access-optional).
 These are the only calls that change anything, and they change only workspace membership, never content.
 
+The default `declared_models` scope covers refused reads of declared RLS/OLS model
+definitions. `required_evidence` also covers supported workspace evidence needed
+by the review. Both respect review exclusions and preserve existing direct
+assignments. Enabled FUAM/FCA source workspaces are not review targets, and temporary
+grants do not authorize their SQL source reads.
+
 | Endpoint | Purpose |
 |---|---|
-| `POST https://api.powerbi.com/v1.0/myorg/admin/groups/{wsId}/users` | Adds the review identity as Contributor (or Member) to a workspace that holds a declared model it could not read, and only when it has no role there |
+| `POST https://api.powerbi.com/v1.0/myorg/admin/groups/{wsId}/users` | Adds the review identity as Contributor (or Member) for refused evidence within the selected scope, only when it has no direct workspace assignment |
 | `DELETE https://api.powerbi.com/v1.0/myorg/admin/groups/{wsId}/users/{user}` | Removes exactly what was added, directly after the read, after a failure, or at the start of the next run |
 
 The ledger names the identity that was granted so it can be removed. It is kept outside the review output and must be

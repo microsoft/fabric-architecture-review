@@ -35,6 +35,34 @@ def _load_workspaces(raw_dir: Path) -> List[Tuple[str, str]]:
             for w in filter_workspaces_by_scope(load_workspace_inventory(raw_dir)) if w.get("id")]
 
 
+def read_inventory(wsid: str, wsname: str, item_type: str, headers: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    endpoint = {"DataPipeline": "dataPipelines", "Notebook": "notebooks"}[item_type]
+    items: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    try:
+        items.extend(paginate_value(f"{FAB}/workspaces/{wsid}/{endpoint}", headers))
+    except HttpError as exc:
+        if exc.error_code == "RetryDeadlineExceeded":
+            raise
+        error = {
+            "workspaceId": wsid, "workspaceName": wsname, "itemType": item_type,
+            "statusCode": exc.status_code, "noticeCode": "inventory_request_failed",
+            "collectionStatus": "partial" if items else "unavailable", "observedCount": len(items),
+        }
+        if exc.error_code:
+            error["errorCode"] = exc.error_code
+        errors.append(error)
+        detail = f" ({exc.error_code})" if exc.error_code else ""
+        print(f"  {item_type} inventory incomplete in workspace {wsid}: "
+              f"HTTP {exc.status_code}{detail}; retained {len(items)} item(s); continuing.")
+    for item in items:
+        item["workspaceId"], item["workspaceName"] = wsid, wsname
+        if not item.get("id"):
+            errors.append({"workspaceId": wsid, "itemType": item_type,
+                           "noticeCode": "missing_item_identity", "collectionStatus": "partial"})
+    return items, errors
+
+
 @record_collection_failure("pipelines_notebooks.json")
 def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
@@ -63,38 +91,14 @@ def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
         f"Pipelines/Notebooks: scanning architectural inventory in {len(workspaces)} workspace(s)..."
     )
     for i, (wsid, wsname) in enumerate(workspaces, 1):
-        for endpoint, item_type, inventory in (
-            ("dataPipelines", "DataPipeline", pipelines), ("notebooks", "Notebook", notebooks),
+        for item_type, inventory in (
+            ("DataPipeline", pipelines), ("Notebook", notebooks),
         ):
-            items: List[Dict[str, Any]] = []
-            try:
-                items.extend(paginate_value(f"{FAB}/workspaces/{wsid}/{endpoint}", headers))
-            except HttpError as exc:
+            items, errors = read_inventory(wsid, wsname, item_type, headers)
+            inventory.extend(items)
+            inventory_errors.extend(errors)
+            if errors:
                 failed_workspaces.append(wsid)
-                error = {
-                    "workspaceId": wsid, "workspaceName": wsname, "itemType": item_type,
-                    "statusCode": exc.status_code, "noticeCode": "inventory_request_failed",
-                    "collectionStatus": "partial" if items else "unavailable",
-                    "observedCount": len(items),
-                }
-                if exc.error_code:
-                    error["errorCode"] = exc.error_code
-                inventory_errors.append(error)
-                detail = f" ({exc.error_code})" if exc.error_code else ""
-                print(
-                    f"  {item_type} inventory incomplete in workspace {wsid}: "
-                    f"HTTP {exc.status_code}{detail}; retained {len(items)} item(s); continuing."
-                )
-            for item in items:
-                item["workspaceId"] = wsid
-                item["workspaceName"] = wsname
-                inventory.append(item)
-                if not item.get("id"):
-                    failed_workspaces.append(wsid)
-                    inventory_errors.append({
-                        "workspaceId": wsid, "itemType": item_type,
-                        "noticeCode": "missing_item_identity", "collectionStatus": "partial",
-                    })
 
         if i % 25 == 0:
             print(f"  ... {i}/{len(workspaces)}")

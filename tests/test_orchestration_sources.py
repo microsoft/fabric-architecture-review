@@ -4,7 +4,7 @@
 """Verify fixed monitoring contracts without Spark or customer data."""
 from datetime import date, datetime, timezone
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 from uuid import UUID
 
 from collectors import _http
@@ -110,10 +110,15 @@ class SourceTests(unittest.TestCase):
             WS, {"id": LH, "displayName": "FUAM"},
             fuam_query("cu_seconds", 7, end_date=date(2026, 9, 19)),
         )
-        output.assert_called_once_with(
-            f"FUAM source: workspace_id={WS}, lakehouse_id={LH}, metric=cu_seconds, "
-            "window_start=2026-09-12, window_end_exclusive=2026-09-19."
-        )
+        self.assertEqual(output.call_args_list, [
+            call("FAR startup: resolving FUAM lakehouse", flush=True),
+            call("FAR startup: resolving capacity selection", flush=True),
+            call(
+                f"FUAM source: workspace_id={WS}, lakehouse_id={LH}, metric=cu_seconds, "
+                "window_start=2026-09-12, window_end_exclusive=2026-09-19."
+            ),
+            call("FAR startup: matching current workspace inventory", flush=True),
+        ])
 
     @patch("orchestration.sources.query_rows")
     def test_authoritative_inventory_is_fully_paged_before_matching(self, query):

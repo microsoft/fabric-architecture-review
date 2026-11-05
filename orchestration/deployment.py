@@ -53,6 +53,7 @@ RUNTIME_MODULES = (
     "project.py",
     "__init__.py", "completion.py", "deployment.py", "fabric_api.py",
     "ranking.py", "runtime.py", "setup.py", "sources.py", "review_config.py", "review_history.py",
+    "notebook_auth.py", "config_deployment.py",
 )
 RUNTIME_COLLECTOR_MODULES = ("__init__.py", "_http.py", "workspace_scope.py")
 
@@ -110,6 +111,7 @@ def runtime_notebook(
     bundle_path: str, workspace_id: str, lakehouse_id: str, *,
     stage: str = "selection", child_pipeline_id: str | None = None,
     connections_library: str = "",
+    environment_library: str = "FAR_Environment",
 ) -> dict[str, Any]:
     if stage not in ("selection", "notifications"):
         raise ValueError("Unknown targeted-review notebook stage.")
@@ -125,23 +127,28 @@ def runtime_notebook(
     entrypoint = "completion" if stage == "notifications" else stage
     code = [
         "import json, sys\n",
+        "print('FAR startup: loading notebook runtime', flush=True)\n",
         "import notebookutils\n",
         "for module in [key for key in sys.modules if key == 'orchestration' or key.startswith('orchestration.')]:\n",
         "    del sys.modules[module]\n",
         f"sys.path.insert(0, {json.dumps(bundle_path)})\n",
         "from orchestration.deployment import read_notebook_parameters\n",
         f"from orchestration.runtime import run_{entrypoint}\n",
+        "print('FAR startup: reading pipeline parameters', flush=True)\n",
         f"config = read_notebook_parameters(globals(), {names!r})\n",
         f"config['CHILD_WORKSPACE_ID'] = {json.dumps(guid(workspace_id))}\n",
     ]
     code.append(f"config['CHILD_PIPELINE_ID'] = {json.dumps(child_pipeline_id)}\n")
+    code.append(f"config['FAR_ENVIRONMENT_LIBRARY'] = {json.dumps(environment_library)}\n")
     if connections_library and stage == "selection":
         code.extend([
             "from orchestration.review_config import targeting_source\n",
             f"config.update(targeting_source(notebookutils.variableLibrary.getLibrary, {json.dumps(connections_library)}))\n",
         ])
     code.extend([
+        f"print('FAR startup: running {entrypoint}', flush=True)\n",
         f"result = run_{entrypoint}(config)\n",
+        "print('FAR startup: returning notebook result', flush=True)\n",
         "notebookutils.notebook.exit(json.dumps(result))\n",
     ])
     return {
@@ -259,6 +266,7 @@ def build_parent_pipeline(
         }
 
     selection = notebook_activity(SELECT_ACTIVITY, notebook_id, selection_parameters)
+    selection["policy"]["retry"] = 1
     prepare = notebook_activity(PREPARE_ACTIVITY, notification_notebook_id, NOTIFICATION_PARAMETERS)
     prepare["typeProperties"]["parameters"]["CHILD_RUN_ID"] = notebook_parameter(
         f"@variables('{CHILD_RUN_VARIABLE}')"
@@ -439,6 +447,7 @@ def deploy(
     defaults: dict[str, str],
     owner_access_notebook_id: str | None = None,
     connections_library: str = "",
+    environment_library: str = "FAR_Environment",
 ) -> dict[str, str]:
     if owner_access_notebook_id is not None:
         owner_access_notebook_id = guid(owner_access_notebook_id)
@@ -470,6 +479,7 @@ def deploy(
     notebook = runtime_notebook(
         str(bundle), workspace_id, lakehouse_id, child_pipeline_id=child_pipeline_id,
         connections_library=connections_library,
+        environment_library=environment_library,
     )
     notebook_id = client.upsert_item(workspace_id, name + " - Runner", "Notebook", {
         "format": "ipynb", "parts": [definition_part("notebook-content.ipynb", notebook)],
@@ -477,6 +487,7 @@ def deploy(
     completion = runtime_notebook(
         str(bundle), workspace_id, lakehouse_id,
         stage="notifications", child_pipeline_id=child_pipeline_id,
+        environment_library=environment_library,
     )
     completion_id = client.upsert_item(workspace_id, name + " - Completion", "Notebook", {
         "format": "ipynb", "parts": [definition_part("notebook-content.ipynb", completion)],

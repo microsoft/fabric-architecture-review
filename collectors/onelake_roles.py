@@ -35,6 +35,22 @@ def _lakehouses(workspace: Dict[str, Any]) -> List[str]:
                   if isinstance(item, dict) and item.get("type") == "Lakehouse" and item.get("id"))
 
 
+def read_roles(wsid: str, item_id: str, headers: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    try:
+        roles = collect_value(f"{FAB}/workspaces/{wsid}/items/{item_id}/dataAccessRoles", headers)
+    except HttpError as exc:
+        if exc.error_code == "RetryDeadlineExceeded":
+            raise
+        return {"workspaceId": wsid, "id": item_id, "status": "unavailable"}, [{
+            "workspaceId": wsid, "id": item_id, "component": "data_access_roles",
+            "statusCode": exc.status_code, "errorCode": exc.error_code,
+            "message": "The data access roles could not be read.",
+        }]
+    custom = [role for role in roles if str(role.get("name") or "").casefold() != DEFAULT_ROLE]
+    return {"workspaceId": wsid, "id": item_id, "status": "collected",
+            "roleCount": len(roles), "customRoleCount": len(custom)}, []
+
+
 @record_collection_failure("onelake_roles.json")
 def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
@@ -47,16 +63,9 @@ def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     for workspace in workspaces:
         wsid = workspace["id"]
         for item_id in _lakehouses(workspace):
-            try:
-                roles = collect_value(f"{FAB}/workspaces/{wsid}/items/{item_id}/dataAccessRoles", headers)
-            except HttpError as exc:
-                results.append({"workspaceId": wsid, "id": item_id, "status": "unavailable"})
-                errors.append({"workspaceId": wsid, "component": "data_access_roles",
-                               "statusCode": exc.status_code, "message": "The data access roles could not be read."})
-                continue
-            custom = [role for role in roles if str(role.get("name") or "").casefold() != DEFAULT_ROLE]
-            results.append({"workspaceId": wsid, "id": item_id, "status": "collected",
-                            "roleCount": len(roles), "customRoleCount": len(custom)})
+            row, failures = read_roles(wsid, item_id, headers)
+            results.append(row)
+            errors.extend(failures)
     target = raw_dir / "onelake_roles.json"
     target.write_text(json.dumps({"lakehouses": results, "collectionComplete": not errors, "collectionErrors": errors},
                                  indent=2, ensure_ascii=False), encoding="utf-8")

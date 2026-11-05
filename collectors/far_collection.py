@@ -16,7 +16,8 @@ from analyzers.far_profile import ACTIVE_RULE_IDS, PROFILE_ID, PROFILE_SHA256, T
 from collectors import fuam_inventory, fuam_sourced, tenant_settings, workspace_inventory
 from collectors._common import RUN_SCOPE_ENV, collection_incomplete, load_workspace_inventory
 from collectors.fuam_sql import Session
-from orchestration.review_config import read_snapshot
+from orchestration.review_config import enabled_source_workspace_ids, read_snapshot
+from collectors.workspace_scope import SOURCE_WORKSPACES_ENV, source_workspace_scope
 from orchestration.rule_policy import evidence_demanded, resolve_rule
 
 DEMAND = {
@@ -48,6 +49,8 @@ ARTIFACTS = {
 
 
 def plan(snapshot: dict[str, Any], workspaces: list[dict[str, Any]]) -> dict[str, Any]:
+    source_ids = enabled_source_workspace_ids(snapshot["configuration"]["sources"])
+    workspaces = [ws for ws in workspaces if str(ws.get("id") or "").lower() not in source_ids]
     required: set[str] = set()
     rules: set[str] = set()
     applicable: set[str] = set()
@@ -97,6 +100,7 @@ def plan(snapshot: dict[str, Any], workspaces: list[dict[str, Any]]) -> dict[str
         "evidence_rule_ids": sorted(rules),
         "configuration_captured_at_utc": snapshot["captured_at_utc"],
         "workspace_ids": sorted({str(ws["id"]).lower() for ws in workspaces if ws.get("id")}),
+        "excluded_source_workspace_ids": sorted(source_ids),
         "collectors": ["collectors." + module for module in DEMAND if module in required],
         "source_resolutions": resolutions, "enrichment_sources": enabled_sources,
         "collection_mode": "architecture_plus_optional_enrichment",
@@ -116,7 +120,8 @@ def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     try:
         # Access an earlier run left behind is removed first, whether or not the setting is still on.
         grant.recover()
-        target = _collect(output_dir, grant)
+        with source_workspace_scope(()):
+            target = _collect(output_dir, grant)
     finally:
         grant.finish()
         grant.write_audit(raw_dir)
@@ -145,6 +150,9 @@ def _collect(output_dir: str | os.PathLike, grant: Any) -> Path:
     if not config_path:
         raise ValueError("Collection requires a frozen FAR_CONFIG_SNAPSHOT.")
     snapshot = read_snapshot(Path(config_path))
+    os.environ[SOURCE_WORKSPACES_ENV] = ",".join(sorted(
+        enabled_source_workspace_ids(snapshot["configuration"]["sources"]),
+    ))
     raw_dir = Path(output_dir)
     raw_dir.mkdir(parents=True, exist_ok=True)
     # The raw folder belongs to one collection: nothing from an earlier run may be read as current evidence.
@@ -155,10 +163,11 @@ def _collect(output_dir: str | os.PathLike, grant: Any) -> Path:
     # Provenance records the scope of the whole run, not the narrower per-collector demand.
     run_scope = os.environ.get("WORKSPACE_IDS", "")
 
-    def execute(module: str, producer: Callable[[], Path] | None = None) -> None:
+    def execute(module: str, producer: Callable[[], Path] | None = None, access_scope: set[str] | None = None) -> None:
         name = module.removeprefix("collectors.")
         try:
-            path = producer() if producer else importlib.import_module(module).collect(output_dir=str(raw_dir))
+            produce = producer or (lambda: importlib.import_module(module).collect(output_dir=str(raw_dir)))
+            path = grant.retry_collection(produce, access_scope, module) if access_scope else produce()
             payload = json.loads(Path(path).read_text(encoding="utf-8-sig"))
             incomplete = collection_incomplete(payload, include_errors=True)
             if isinstance(payload, dict):
@@ -187,12 +196,18 @@ def _collect(output_dir: str | os.PathLike, grant: Any) -> Path:
             failures.append(module)
             outcomes.append({"collector": module, "status": "failed"})
 
-    # One read-only session serves the inventory, the tenant settings and every other FUAM or FCA read.
-    sql = Session(snapshot)
+    def inventory_read(ids: Any) -> Any:
+        with Session(snapshot) as sql:
+            return fuam_inventory.read(snapshot, sql.query, ids, datetime.now(timezone.utc))
+
+    def source_read(name: str) -> Path:
+        with Session(snapshot) as sql:
+            return fuam_sourced.collect(name, raw_dir, snapshot, sql.query, api_fetch=tenant_settings.fetch_sanitized)
+
     execute("collectors.scanner_api")
     inventory = (lambda: workspace_inventory.collect(
         output_dir=str(raw_dir),
-        fuam_reader=lambda ids: fuam_inventory.read(snapshot, sql.query, ids, datetime.now(timezone.utc)),
+        fuam_reader=inventory_read,
     )) if fuam_inventory.supplies(snapshot) else None
     execute("collectors.workspace_inventory", inventory)
     try:
@@ -207,27 +222,26 @@ def _collect(output_dir: str | os.PathLike, grant: Any) -> Path:
             (raw_dir / filename).unlink(missing_ok=True)
     from analyzers.model_security_rules import required_models
     declared_models = required_models(snapshot["configuration"], "SEC-024") | required_models(snapshot["configuration"], "SEC-025")
-    try:
-        for module in execution_plan["collectors"]:
-            scope = next(row["workspace_ids"] for row in execution_plan["source_resolutions"]
-                         if "collectors." + row["collector"] == module)
-            name = module.removeprefix("collectors.")
-            producer = ((lambda name=name: fuam_sourced.collect(
-                             name, raw_dir, snapshot, sql.query, api_fetch=tenant_settings.fetch_sanitized))
-                        if fuam_sourced.supplies(snapshot, name) else None)
-            if name == "semantic_model_definitions" and producer is None and grant.settings.enabled and declared_models:
-                producer = lambda: _definitions_with_access(raw_dir, grant, declared_models, workspaces)
-            original_scope = os.environ.get("WORKSPACE_IDS")
-            try:
-                os.environ["WORKSPACE_IDS"] = ",".join(scope)
-                execute(module, producer)
-            finally:
-                if original_scope is None:
-                    os.environ.pop("WORKSPACE_IDS", None)
-                else:
-                    os.environ["WORKSPACE_IDS"] = original_scope
-    finally:
-        sql.close()
+    for module in execution_plan["collectors"]:
+        scope = next(row["workspace_ids"] for row in execution_plan["source_resolutions"]
+                     if "collectors." + row["collector"] == module)
+        name = module.removeprefix("collectors.")
+        producer = (lambda name=name: source_read(name)) if fuam_sourced.supplies(snapshot, name) else None
+        if name == "semantic_model_definitions" and producer is None and grant.settings.enabled and declared_models:
+            producer = lambda: _definitions_with_access(raw_dir, grant, declared_models, workspaces)
+        original_scope = os.environ.get("WORKSPACE_IDS")
+        try:
+            os.environ["WORKSPACE_IDS"] = ",".join(scope)
+            access_scope = set(scope) if name in {
+                "semantic_model_definitions", "pipelines_notebooks", "pipeline_definitions",
+                "onelake_roles", "workspace_network", "git_integration",
+            } and not fuam_sourced.supplies(snapshot, name) else None
+            execute(module, producer, access_scope)
+        finally:
+            if original_scope is None:
+                os.environ.pop("WORKSPACE_IDS", None)
+            else:
+                os.environ["WORKSPACE_IDS"] = original_scope
     # Connected modules are bounded context reads, not scoring/optimization inputs.
     execute("collectors.far_evidence")
     incomplete = any(outcome["status"] == "incomplete" for outcome in outcomes)

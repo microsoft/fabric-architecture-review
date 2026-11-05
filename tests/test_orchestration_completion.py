@@ -477,7 +477,9 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(result, {
                 "parent_run_id": RUN, "status": "selected", "workspace_ids": WS, "workspace_count": 1,
             })
-            source.assert_called_once_with(config, self.client)
+            self.assertEqual(source.call_args.args, (config, self.client))
+            self.assertFalse(source.call_args.kwargs["token_provider"].is_service_principal)
+            self.assertEqual(source.call_count, 1)
             with self.assertRaisesRegex(RuntimeError, "automatic replay"):
                 run_selection(config)
             source.assert_called_once()
@@ -497,7 +499,9 @@ class RuntimeTests(unittest.TestCase):
                 with self.assertRaises(type(error)) as raised:
                     run_selection(config)
                 self.assertIs(raised.exception, error)
-                source.assert_called_once_with(config, self.client)
+                self.assertEqual(source.call_args.args, (config, self.client))
+                self.assertEqual(source.call_count, 1)
+                self.assertFalse(source.call_args.kwargs["token_provider"].is_service_principal)
                 self.assertFalse(self.path.exists())
                 self.assertFalse(self.marker.exists())
                 self.assertEqual(self.client.method_calls, [])
@@ -744,7 +748,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(credentials.getToken.call_args_list, [call("pbi"), call("pbi")])
         self.assertEqual(self.client.method_calls, [])
         self.assertEqual(self.audit()["prepared_message_count"], 3)
-        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(output.getvalue(), "FAR startup: authentication provider ready\n")
 
     def test_native_pipeline_run_id_is_not_queried_as_a_scheduler_job(self):
         self.select()

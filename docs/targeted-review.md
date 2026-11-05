@@ -196,7 +196,7 @@ schedule overrides, and the source/selection logs:
   to the source or date window; nonzero rows with no `selected_workspaces` point
   to zero metrics, exclusions or a restrictive `WORKSPACE_IDS` allow-list.
 - Clear the parent's allow-list for automatic top-N selection. The review hosting
-  workspace and FUAM workspace are always excluded, even if allow-listed.
+  workspace and enabled FUAM/FCA source workspaces are excluded, even if allow-listed.
 
 ### Select capacities
 
@@ -224,7 +224,7 @@ aggregation and ranking**, for either metric. A workspace that moved capacities
 contributes only the usage recorded on the selected capacities during the window.
 Usage is summed per workspace across the selected set, then one global `TOP_N`
 is taken; it is not `TOP_N` per capacity.
-`WORKSPACE_IDS` remains an additional candidate allow-list; hosting/FUAM
+`WORKSPACE_IDS` remains an additional candidate allow-list; hosting/FUAM/FCA
 exclusions, positive-metric ranking, tie-breaking and `TOP_N` still apply.
 The child reviews the selected workspaces normally; capacity targeting does not
 restrict individual items collected within them.
@@ -265,7 +265,8 @@ parent run.
 
 The native invocation needs no additional Fabric connection, service principal,
 or workspace identity. Selection finishes before the review starts. The generated
-activity timeout is 12 hours with zero automatic retries.
+activity timeout is 12 hours. **Select workspaces** retries once after 120 seconds;
+downstream activities retain zero automatic retries.
 Inspect the parent's **Invoke FAR** activity in monitoring after
 timeout or cancellation rather than assuming the child stopped.
 
@@ -276,9 +277,17 @@ successful-review history is still recorded and no recipients are resolved.
 
 ## Supported FUAM source contract
 
-The adapter uses the documented
-[Fabric Spark SQL connector](https://learn.microsoft.com/fabric/data-engineering/spark-data-warehouse-connector)
-to query the configured FUAM Lakehouse SQL analytics endpoint across workspaces.
+Selection reads the configured FUAM Lakehouse through its SQL analytics endpoint.
+It uses the same Environment identity as Collect: the configured SP, or the notebook
+identity when SP settings are empty. Required notebook packages are installed
+automatically; see [authentication and runtime requirements](auth-setup.md#notebook-runtime-requirements-and-updates).
+
+FUAM workspace Viewer is sufficient for standard source reads; item-level Read plus
+the necessary SQL SELECT permissions is also supported. Tenant admin API access is
+a separate requirement. Temporary evidence grants apply to child collection, not
+FUAM source access or selection, and require Collect to execute under a delegated
+Fabric administrator even when the review identity is an SP.
+
 It reads only:
 
 - `dbo.capacity_metrics_by_item_by_operation_by_day`: `CapacityId`, `WorkspaceId`, `Date`,
@@ -312,7 +321,7 @@ first or run the standard review.
 ## Selection and failure behavior
 
 - Before ranking, match FUAM workspace GUIDs against the complete current Power BI
-  admin workspace inventory (`$top`/`$skip` pagination). The execution identity
+  admin workspace inventory (`$top`/`$skip` pagination). The configured API identity
   needs permission to read this tenant inventory; there is no member-scope fallback.
   Unmatched IDs are excluded with an explicit warning, **not classified as deleted**.
   The selection audit's `workspace_inventory` records the source, completeness,
@@ -324,12 +333,12 @@ first or run the standard review.
   the review and email are safely skipped. Inventory authentication, service, malformed
   response, or pagination errors stop selection rather than fabricating emptiness.
 - Exclude the review hosting workspace (`CHILD_WORKSPACE_ID`) and the configured
-  FUAM workspace (`FUAM_WORKSPACE_ID`) by GUID before ranking and taking `TOP_N`.
+  enabled FUAM/FCA source workspaces by GUID before ranking and taking `TOP_N`.
   Capacity Metrics app workspaces are also excluded, identified by their standard
   linked report and semantic-model metadata, not the workspace name.
   These exclusions override the candidate allow-list and apply to both metrics;
   remaining eligible workspaces fill the available slots. No additional parameter
-  is needed. The FAR hosting workspace and Capacity Metrics app workspaces are
+  is needed. The FAR hosting workspace, enabled FUAM/FCA source workspaces and Capacity Metrics app workspaces are
   also excluded from standard reviews, even when explicitly listed in `WORKSPACE_IDS`.
 - Rank by a positive metric, descending, with workspace GUID as a deterministic
   tie-breaker. Aggregate multiple rows for the same workspace.
@@ -359,8 +368,8 @@ first or run the standard review.
   run after correction rather than bypassing the notification replay guard.
 - Avoid overlapping scheduled runs. Test on the intended capacity before
   scheduling, including source access and the existing review stages.
-- Automatic activity retries are disabled. A saved selection blocks re-execution
-  of the selection stage for the same parent ID. An email-preparation replay
+- Only selection retries automatically, once after 120 seconds. A saved selection
+  still blocks re-execution for the same parent ID. An email-preparation replay
   guard blocks re-preparation for that parent run. These safeguards are
   **not** an exactly-once guarantee: manually rerunning from the native child
   activity can bypass selection. Inspect monitoring before manual recovery.
@@ -376,7 +385,7 @@ the complete parameter dictionary, tokens, or raw source operation rows.
 Audit `emails_prepared` means records were prepared, **not that mail was
 delivered**. Inspect native mail activity outcomes and actual delivery before
 retrying. A new parent run can duplicate messages; do not bypass the replay guard
-or enable automatic retries.
+or enable automatic retries for email activities.
 
 ## 3. Optionally configure native Outlook owner email
 

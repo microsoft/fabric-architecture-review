@@ -135,7 +135,9 @@ def test_only_connected_fuam_supplies_tenant_settings():
 
 def test_the_plan_says_how_tenant_settings_are_sourced():
     def resolution(enabled):
-        return next(row for row in far_collection.plan(snapshot(enabled), [{"id": WORKSPACE}])["source_resolutions"]
+        return next(row for row in far_collection.plan(
+            snapshot(enabled), [{"id": "cccccccc-cccc-cccc-cccc-cccccccccccc"}],
+        )["source_resolutions"]
                     if row["collector"] == "tenant_settings")
     assert resolution(True)["resolution"] == "fuam" and "admin API" in resolution(True)["reason"]
     assert resolution(False)["resolution"] == "native_architecture"

@@ -276,18 +276,30 @@ def validate_configuration(config: dict[str, Any]) -> None:
         raise ValueError("Threshold environment overrides are not supported; thresholds come from configuration files.")
 
 
-def targeting_source(get_library: Callable[[str], Any], name: str) -> dict[str, str]:
-    library = get_library(name)
-    sources = {
-        source: {key: library.getVariable(f"{source}__{key}") for key in sorted(SOURCE_KEYS)}
-        for source in ("fuam", "fca")
+def enabled_source_workspace_ids(sources: dict[str, Any]) -> set[str]:
+    return {
+        canonical_id(source["workspace_id"], f"{name}.workspace_id")
+        for name, source in sources.items() if source["enabled"]
     }
+
+
+def targeting_source(get_library: Callable[[str], Any], name: str) -> dict[str, str]:
+    print("FAR startup: loading Connections library", flush=True)
+    library = get_library(name)
+    sources = {}
+    for source in ("fuam", "fca"):
+        sources[source] = {}
+        for key in sorted(SOURCE_KEYS):
+            print(f"FAR startup: reading Connections setting {source}__{key}", flush=True)
+            sources[source][key] = library.getVariable(f"{source}__{key}")
+    print("FAR startup: validating Connections settings", flush=True)
     validate_sources(sources)
     if not sources["fuam"]["enabled"]:
         raise ValueError("Targeted review requires an enabled FUAM connection.")
     return {
         "FUAM_WORKSPACE_ID": sources["fuam"]["workspace_id"],
         "FUAM_LAKEHOUSE_ID": sources["fuam"]["lakehouse_id"],
+        "SOURCE_WORKSPACE_IDS": ",".join(sorted(enabled_source_workspace_ids(sources))),
     }
 
 
@@ -332,6 +344,7 @@ def capture(out_dir: Path, config: dict[str, Any], *, replace: bool = False) -> 
 
 
 def activate(path: Path) -> dict[str, Any]:
+    from collectors.workspace_scope import SOURCE_WORKSPACES_ENV
     snapshot = read_snapshot(path)
     config = snapshot["configuration"]
     directory = path.parent / "review_config"
@@ -340,6 +353,7 @@ def activate(path: Path) -> dict[str, Any]:
     target.write_text(yaml.safe_dump(config["thresholds"], sort_keys=False), encoding="utf-8")
     os.environ["THRESHOLDS_CONFIG"] = str(target.resolve())
     os.environ["FAR_CONFIG_SNAPSHOT"] = str(path.resolve())
+    os.environ[SOURCE_WORKSPACES_ENV] = ",".join(sorted(enabled_source_workspace_ids(config["sources"])))
     return snapshot
 
 

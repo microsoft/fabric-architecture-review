@@ -17,7 +17,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from orchestration.deployment import (
     CHILD_RUN_VARIABLE, DEFAULTS, EMPTY_CAPABLE_PARAMETERS, NOTIFICATION_PARAMETERS,
@@ -230,6 +230,7 @@ class DeploymentTests(unittest.TestCase):
                     "SEMANTIC_MODEL_NAME": "Governance model", "REPORT_NAME": "Governance report",
                     "REPO_DIR": str(ROOT), "wid": WS, "lhid": WS2, "pid": ITEM,
                     "LAKEHOUSE_NAME": "Review", "NOTEBOOK_PREFIX": "FAR", "PIPELINE_NAME": "FAR",
+                    "_far_bindings": {"FAR_ENVIRONMENT_LIBRARY": "FAR_Environment"},
                     "GITHUB_REPO_URL": "https://example.invalid/repo", "GITHUB_BRANCH": "main", "GITHUB_REF": "",
                     "notebookutils": SimpleNamespace(credentials=Mock()),
                     "stamp_parameters": stamp_parameters,
@@ -307,10 +308,10 @@ class DeploymentTests(unittest.TestCase):
 import sys
 from unittest.mock import patch
 sys.path.insert(0, sys.argv[1])
-from orchestration import sources, completion, runtime
+from orchestration import sources, completion, runtime, notebook_auth, config_deployment
 from orchestration.fabric_api import FabricClient
 from collectors import _http, workspace_scope
-for module in (sources, completion, runtime, _http, workspace_scope):
+for module in (sources, completion, runtime, notebook_auth, config_deployment, _http, workspace_scope):
     assert module.__file__.startswith(sys.argv[1])
 wid = "11111111-1111-1111-1111-111111111111"
 rows = [{"workspace_id": wid, "metric_value": 1}]
@@ -418,7 +419,7 @@ assert "collectors.capacity_metrics" not in sys.modules
         self.assertIn('GITHUB_REPO_URL = "https://github.com/example/far.git"', parameters)
         self.assertEqual(deployed["metadata"]["dependencies"]["lakehouse"]["default_lakehouse"], ITEM)
 
-    def test_pipeline_preserves_defaults_and_disables_automatic_retry(self):
+    def test_pipeline_preserves_defaults_and_retries_only_selection(self):
         child = {"properties": {"parameters": {
             "WORKSPACE_IDS": {"type": "string", "defaultValue": ""},
             "CLIENT_NAME": {"type": "string", "defaultValue": "Customer"},
@@ -429,7 +430,8 @@ assert "collectors.capacity_metrics" not in sys.modules
         properties = parent["properties"]
         self.assertEqual(properties["parameters"]["CLIENT_NAME"], child["properties"]["parameters"]["CLIENT_NAME"])
         self.assertEqual(properties["parameters"]["NOTIFICATIONS_ENABLED"]["defaultValue"], "false")
-        self.assertEqual(properties["activities"][0]["policy"]["retry"], 0)
+        self.assertEqual(properties["activities"][0]["policy"]["retry"], 1)
+        self.assertEqual(properties["activities"][0]["policy"]["retryIntervalInSeconds"], 120)
         self.assertNotIn("TOP_N", child["properties"]["parameters"])
         self.assertNotIn("SOURCE_MODE", properties["parameters"])
         selection, review, notification, send = properties["activities"]
@@ -465,6 +467,7 @@ assert "collectors.capacity_metrics" not in sys.modules
         self.assertEqual(record["typeProperties"]["value"], expression("@activity('Invoke FAR').output.pipelineRunId"))
         self.assertEqual(record["dependsOn"], [{"activity": invoke["name"], "dependencyConditions": ["Succeeded"]}])
         self.assertEqual(history["name"], RECORD_REVIEW_ACTIVITY)
+        self.assertEqual(history["policy"]["retry"], 0)
         self.assertEqual(history["dependsOn"], [{"activity": record["name"], "dependencyConditions": ["Succeeded"]}])
         self.assertEqual(notification["dependsOn"], [{"activity": review["name"], "dependencyConditions": ["Succeeded"]}])
         self.assertEqual(
@@ -620,12 +623,21 @@ assert "collectors.capacity_metrics" not in sys.modules
                         "run_completion" if stage == "notifications" else "run_selection": runtime,
                     }),
                 }
-                with patch("builtins.__import__", side_effect=lambda name, *args, **kwargs: modules[name]):
+                with patch("builtins.__import__", side_effect=lambda name, *args, **kwargs: modules[name]), \
+                        patch("builtins.print") as progress:
                     exec("".join(notebook["cells"][1]["source"]), namespace)
                 runtime.assert_called_once_with({
                     **values, "CHILD_WORKSPACE_ID": WS, "CHILD_PIPELINE_ID": ITEM,
+                    "FAR_ENVIRONMENT_LIBRARY": "FAR_Environment",
                 })
                 exit_notebook.assert_called_once_with('{"status": "tested"}')
+                entrypoint = "completion" if stage == "notifications" else stage
+                self.assertEqual(progress.call_args_list, [
+                    call("FAR startup: loading notebook runtime", flush=True),
+                    call("FAR startup: reading pipeline parameters", flush=True),
+                    call(f"FAR startup: running {entrypoint}", flush=True),
+                    call("FAR startup: returning notebook result", flush=True),
+                ])
 
     def test_generated_notebook_missing_injection_fails_before_runtime(self):
         notebook = runtime_notebook("runtime.zip", WS, WS2, child_pipeline_id=ITEM)

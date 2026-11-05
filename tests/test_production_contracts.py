@@ -84,7 +84,29 @@ def test_release_version_is_consistent_across_tracked_surfaces() -> None:
     assert f'version: "{npm_version}"' in _text("fabric/app/src/lib/data-agent-factory.ts")
     assert yaml.safe_load(_text("fabric/app/rayfin/rayfin.yml"))["version"] == npm_version
     assert _text("CHANGELOG.md").splitlines().count(f"## {version}") == 1
+    assert f"[{version} release notes](CHANGELOG.md#{version.replace('.', '')})" in _text("README.md")
     assert f"<code>{version}</code>" in _text("samples/report.md")
+
+
+@pytest.mark.parametrize("filename", ["setup_private_far_DISPOSABLE.ipynb", "setup_private_test_DISPOSABLE.ipynb"])
+def test_private_setup_pins_current_release_when_present(filename: str) -> None:
+    path = ROOT / "fabric" / filename
+    if not path.exists():
+        pytest.skip("Private disposable setup is not published.")
+    notebook = json.loads(path.read_text(encoding="utf-8"))
+    parameters = next(
+        cell for cell in notebook["cells"]
+        if "parameters" in cell.get("metadata", {}).get("tags", [])
+    )
+    assignments = {
+        target.id: node.value.value
+        for node in ast.parse("".join(parameters["source"])).body
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    assert assignments["RELEASE_TAG"] == "v" + _text("VERSION").strip()
+    code = "\n".join("".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code")
+    assert '"/zipball/" + DEPLOY_SHA)' in code
 
 
 def test_report_describes_evidence_gaps_and_source_collection(tmp_path: Path) -> None:

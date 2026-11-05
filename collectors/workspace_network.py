@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from collectors._common import filter_workspaces_by_scope, load_workspace_inventory, record_collection_failure
-from collectors._http import HttpError, collect_value, request
+from collectors._http import HttpError, collect_value, request, response_error_code
 from collectors.auth import FABRIC_SCOPE, get_default_provider
 
 FAB = "https://api.fabric.microsoft.com/v1"
@@ -83,6 +83,20 @@ def _managed_endpoints(wsid: str, headers: Any) -> Dict[str, Any]:
         return {}
 
 
+def read_policy(wsid: str, headers: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    response = request("GET", f"{FAB}/workspaces/{wsid}/networking/communicationPolicy", headers)
+    payload = response.json() if response.status_code == 200 and response.content else None
+    inbound, outbound = _action(payload, "inbound"), _action(payload, "outbound")
+    if inbound is None or outbound is None:
+        return {"workspaceId": wsid, "status": "unavailable"}, [{
+            "workspaceId": wsid, "component": "communication_policy", "statusCode": response.status_code,
+            "errorCode": response_error_code(response), "message": "The workspace network policy could not be read.",
+        }]
+    return {"workspaceId": wsid, "status": "collected", "inbound": inbound, "outbound": outbound,
+            **_firewall(wsid, headers), **_outbound_protection(wsid, headers),
+            **_managed_endpoints(wsid, headers)}, []
+
+
 @record_collection_failure("workspace_network.json")
 def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
     raw_dir = Path(output_dir)
@@ -96,17 +110,9 @@ def collect(output_dir: str | os.PathLike = "output/far/raw") -> Path:
         print(f"Workspace network: reading {len(workspaces)} workspace(s)...")
     for workspace in workspaces:
         wsid = workspace["id"]
-        response = request("GET", f"{FAB}/workspaces/{wsid}/networking/communicationPolicy", headers)
-        payload = response.json() if response.status_code == 200 and response.content else None
-        inbound, outbound = _action(payload, "inbound"), _action(payload, "outbound")
-        if inbound is None or outbound is None:
-            results.append({"workspaceId": wsid, "status": "unavailable"})
-            errors.append({"workspaceId": wsid, "component": "communication_policy", "statusCode": response.status_code,
-                           "message": "The workspace network policy could not be read."})
-            continue
-        results.append({"workspaceId": wsid, "status": "collected", "inbound": inbound, "outbound": outbound,
-                        **_firewall(wsid, headers), **_outbound_protection(wsid, headers),
-                        **_managed_endpoints(wsid, headers)})
+        row, failures = read_policy(wsid, headers)
+        results.append(row)
+        errors.extend(failures)
     target = raw_dir / "workspace_network.json"
     target.write_text(json.dumps({"workspaces": results, "collectionComplete": not errors, "collectionErrors": errors},
                                  indent=2, ensure_ascii=False), encoding="utf-8")

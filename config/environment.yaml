@@ -20,6 +20,9 @@
 #   2. Store its client secret in an Azure Key Vault secret.
 #   3. Allow the notebook identity to read that secret (Key Vault Secrets User).
 #   4. Fill the values below. The secret itself is never stored here.
+#   Applies to Collect REST/SQL, targeted selection/completion and owner access sync.
+#   SP mode uses MSAL; it does not change Spark/OneLake execution or the Outlook sender.
+#   Generated notebooks must be redeployed after an authentication runtime update.
 
 identity:
   tenant_id: ""                     # Example: "33333333-3333-3333-3333-333333333333"
@@ -43,6 +46,7 @@ identity:
 access_grant:
   enabled: "false"
   role: "auto"
+  scope: "declared_models"  # Or required_evidence: retry denied, demanded workspace metadata with temporary access.
 
 # SEMANTIC MODEL ROLE DETAIL (optional, off by default)
 #   By default the review keeps only counts of a model's row-level and object-level security. When enabled

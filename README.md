@@ -22,7 +22,7 @@ Optional workspace-owner reports restrict each reader to their authorized worksp
 Start with one test workspace. **An empty workspace scope includes all workspaces
 the review identity can access.**
 
-See the [2026.10.2 release notes](CHANGELOG.md#2026102) for this version.
+See the [2026.11.0 release notes](CHANGELOG.md#2026110) for this version.
 
 ## What FAR reviews
 

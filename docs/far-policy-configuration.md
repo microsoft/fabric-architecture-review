@@ -54,6 +54,13 @@ identity read access to each Lakehouse. A module that is disabled never triggers
 collection of its monitoring or financial data; an enabled module that cannot be read
 is shown as an evidence gap, not hidden.
 
+Enabled FUAM and FCA connections are sources only: their entire configured
+workspaces are excluded from standard and targeted reviews, even if allow-listed.
+Their Lakehouse data remains available to enrich reviews of other workspaces.
+Viewer access remains sufficient for standard source reads; FAR does not request
+temporary review access to these workspaces. Disabled connections do not exclude
+their workspaces.
+
 ## 3. Thresholds (Thresholds library)
 
 Global defaults for the signals and for GOV-001. Variable names are

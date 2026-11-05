@@ -104,7 +104,7 @@ def ensure_library(client: FabricClient, workspace_id: str, name: str, groups: d
     return guid(result["id"])
 
 
-def sql_connection(server: str, database: str, token: str) -> Any:
+def sql_connection(server: str, database: str, token: str, *, autocommit: bool = False) -> Any:
     from mssql_python import connect
     if not re.fullmatch(r"[A-Za-z0-9.-]+\.fabric\.microsoft\.com", server):
         raise ValueError("Expected a Fabric SQL endpoint hostname.")
@@ -117,6 +117,7 @@ def sql_connection(server: str, database: str, token: str) -> Any:
         f"Server={server};Database={database};Encrypt=yes;TrustServerCertificate=no;",
         attrs_before={1256: struct.pack("<I", len(encoded)) + encoded},
         timeout=60,
+        autocommit=autocommit,
     )
 
 
@@ -132,12 +133,15 @@ def endpoint(client: FabricClient, workspace_id: str, item_id: str, item_type: s
     return server, result["displayName"]
 
 
-def sql_rows(connection: Any, query: str) -> list[dict[str, Any]]:
+def sql_rows(connection: Any, query: str, *, max_rows: int | None = None) -> list[dict[str, Any]]:
     cursor = connection.cursor()
     try:
         cursor.execute(query)
         columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        rows = cursor.fetchall() if max_rows is None else cursor.fetchmany(max_rows + 1)
+        if max_rows is not None and len(rows) > max_rows:
+            raise RuntimeError("SQL result exceeds the safety limit; results were not truncated.")
+        return [dict(zip(columns, row)) for row in rows]
     finally:
         cursor.close()
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import logging
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional
 
 import requests
@@ -22,6 +24,7 @@ DEFAULT_TIMEOUT = 60
 MAX_RETRIES = 5
 BACKOFF_BASE = 2.0
 Headers = Dict[str, str] | Callable[[], Dict[str, str]]
+_deadline: ContextVar[float | None] = ContextVar("collector_request_deadline", default=None)
 
 
 class HttpError(Exception):
@@ -29,6 +32,54 @@ class HttpError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.error_code = error_code
+
+
+@contextmanager
+def request_deadline(deadline: float):
+    token = _deadline.set(deadline)
+    try:
+        yield
+    finally:
+        _deadline.reset(token)
+
+
+def remaining_time() -> float | None:
+    deadline = _deadline.get()
+    if deadline is None:
+        return None
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise HttpError("Evidence retry time limit reached", error_code="RetryDeadlineExceeded")
+    return remaining
+
+
+def wait(seconds: float) -> None:
+    remaining = remaining_time()
+    if remaining is not None and seconds >= remaining:
+        raise HttpError("Evidence retry time limit reached", error_code="RetryDeadlineExceeded")
+    time.sleep(seconds)
+
+
+def response_error_code(response: requests.Response) -> str | None:
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        code = payload.get("errorCode") or (error.get("code") if isinstance(error, dict) else None)
+        if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", code):
+            return code
+    return None
+
+
+def definition_error(response: requests.Response) -> str:
+    code = (response_error_code(response) or "").lower()
+    if "unsupported" in code or "notsupported" in code:
+        return "unsupported_operation"
+    if code in {"invalidtoken", "tokenexpired", "invalidauthenticationtoken", "invalidaudience"}:
+        return "authentication_failed"
+    return "not_found" if response.status_code == 404 else f"http_{response.status_code}"
 
 
 def request(
@@ -42,6 +93,7 @@ def request(
 ) -> requests.Response:
     """Issue an HTTP request with simple retry on 429 / 5xx."""
     for attempt in range(1, MAX_RETRIES + 1):
+        remaining = remaining_time()
         try:
             r = requests.request(
                 method,
@@ -49,21 +101,21 @@ def request(
                 headers=headers() if callable(headers) else headers,
                 params=params,
                 json=json_body,
-                timeout=timeout,
+                timeout=min(timeout, remaining) if remaining is not None else timeout,
             )
         except requests.RequestException as exc:
             if attempt == MAX_RETRIES:
                 raise HttpError(f"{method} {url} failed after {attempt} attempts: {exc}") from exc
-            time.sleep(BACKOFF_BASE ** attempt)
+            wait(BACKOFF_BASE ** attempt)
             continue
 
         if r.status_code == 429:
-            wait = int(r.headers.get("Retry-After", BACKOFF_BASE ** attempt))
-            log.warning("429 from %s; sleeping %ss", url, wait)
-            time.sleep(wait)
+            delay = int(r.headers.get("Retry-After", BACKOFF_BASE ** attempt))
+            log.warning("429 from %s; sleeping %ss", url, delay)
+            wait(delay)
             continue
         if 500 <= r.status_code < 600 and attempt < MAX_RETRIES:
-            time.sleep(BACKOFF_BASE ** attempt)
+            wait(BACKOFF_BASE ** attempt)
             continue
         return r
     raise HttpError(f"{method} {url} exhausted retries", status_code=429)
@@ -83,17 +135,7 @@ def get_json(
     """
     r = request("GET", url, headers, params=params)
     if r.status_code not in allow or not 200 <= r.status_code < 300:
-        error_code = None
-        try:
-            payload = r.json()
-        except ValueError:
-            payload = None
-        if isinstance(payload, dict):
-            error = payload.get("error")
-            candidate = payload.get("errorCode") or (error.get("code") if isinstance(error, dict) else None)
-            # Service messages can contain tenant data; retain only a bounded machine code.
-            if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", candidate):
-                error_code = candidate
+        error_code = response_error_code(r)
         detail = f" ({error_code})" if error_code else ""
         raise HttpError(
             f"GET {url} returned HTTP {r.status_code}{detail}",

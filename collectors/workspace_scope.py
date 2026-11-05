@@ -6,13 +6,38 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
+from uuid import UUID
 from collectors._http import HttpError
 
 _CAPACITY_METRICS_NAMES = frozenset({
     "fabric capacity metrics", "microsoft fabric capacity metrics", "power bi premium capacity metrics",
 })
+SOURCE_WORKSPACES_ENV = "FAR_SOURCE_WORKSPACE_IDS"
+
+
+def source_workspace_ids() -> set[str]:
+    return {str(UUID(value)) for value in os.environ.get(SOURCE_WORKSPACES_ENV, "").replace(",", " ").split()}
+
+
+@contextmanager
+def source_workspace_scope(workspace_ids: Iterable[str]) -> Iterator[None]:
+    previous = os.environ.get(SOURCE_WORKSPACES_ENV)
+    os.environ[SOURCE_WORKSPACES_ENV] = ",".join(sorted({str(UUID(value)) for value in workspace_ids}))
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop(SOURCE_WORKSPACES_ENV, None)
+        else:
+            os.environ[SOURCE_WORKSPACES_ENV] = previous
+
+
+def is_source_workspace(workspace: dict) -> bool:
+    identity = str(workspace.get("id") or workspace.get("objectId") or "").strip().lower()
+    return workspace.get("isSourceWorkspace") is True or identity in source_workspace_ids()
 
 
 def review_workspace_id() -> str:
@@ -64,7 +89,9 @@ def is_excluded_workspace(workspace: dict, capacity_ids=(), *, operational: bool
     state = str(workspace.get("state") or "").strip().casefold()
     return (
         is_review_workspace(workspace)
-        or (not operational and (is_admin_workspace(workspace) or is_capacity_metrics_workspace(workspace)))
+        or (not operational and (
+            is_admin_workspace(workspace) or is_capacity_metrics_workspace(workspace) or is_source_workspace(workspace)
+        ))
         or state in {"deleted", "removing", "deleting", "inactive", "notactive"}
         or workspace.get("isOnDedicatedCapacity") is False
         or workspace.get("isOnPremiumPerUserCapacity") is True
@@ -124,10 +151,12 @@ def excluded_capacity_ids(raw_dir: Path) -> set[str]:
 
 def _persist_scope(raw_dir: Path, workspaces: list[dict], capacities: list[dict]) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
-    fields = ("id", "objectId", "type", "state", "capacityId", "capacitySku", "isCapacityMetricsWorkspace",
+    fields = ("id", "objectId", "type", "state", "capacityId", "capacitySku", "isCapacityMetricsWorkspace", "isSourceWorkspace",
               "isOnDedicatedCapacity", "isOnPremiumPerUserCapacity")
     identities: dict[str, dict] = {}
     for w in workspaces:
+        if is_source_workspace(w):
+            w = {**w, "isSourceWorkspace": True}
         if "datasets" in w or "reports" in w:
             w = {**w, "isCapacityMetricsWorkspace": is_capacity_metrics_workspace(w)}
         identity = w.get("id") or w.get("objectId")
@@ -182,6 +211,7 @@ def excluded_workspace_identities(workspaces: Iterable[dict]) -> list[dict]:
     return [
         {"id": workspace.get("id") or workspace.get("objectId"),
          **({"isCapacityMetricsWorkspace": True} if is_capacity_metrics_workspace(workspace) else {}),
+         **({"isSourceWorkspace": True} if is_source_workspace(workspace) else {}),
          **{key: workspace[key] for key in fields if key in workspace}}
         for workspace in workspaces
         if is_excluded_workspace(workspace) and (workspace.get("id") or workspace.get("objectId"))
@@ -199,6 +229,8 @@ def excluded_workspace_ids(raw_dir: Path, *, operational: bool = False) -> set[s
                 and (w.get("id") or w.get("objectId"))}
     if own := review_workspace_id():
         excluded.add(own)
+    if not operational:
+        excluded.update(source_workspace_ids())
     return excluded
 
 

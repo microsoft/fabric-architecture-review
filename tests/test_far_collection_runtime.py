@@ -17,6 +17,7 @@ from collectors import (
     semantic_model_definitions, semantic_models,
 )
 from collectors.definition_safety import metadata_only, model_summary, notebook_summary, pipeline_summary
+from collectors.access_grant import AccessGrant
 from collectors.pipeline_definitions import _normalise
 
 WORKSPACE = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -35,6 +36,8 @@ def definition(path, body):
 def snapshot():
     from orchestration.review_config import local_configuration, digest
     configuration = local_configuration(ROOT / "config")
+    for index, source in enumerate(configuration["sources"].values(), 1):
+        source.update(workspace_id=f"eeeeeeee-0000-4000-8000-{index:012d}", lakehouse_id=ITEM)
     return {"configuration": configuration, "sha256": digest(configuration),
             "captured_at_utc": "2026-10-12T12:00:00+00:00"}
 
@@ -173,6 +176,14 @@ def test_shared_runtime_scopes_demand_stamps_evidence_and_removes_stale_files(mo
         (tmp_path / filename).write_text(SOURCE_LITERAL)
     calls = []
     run_scopes = set()
+    access_scopes = {}
+    retry_collection = AccessGrant.retry_collection
+
+    def retry(grant, producer, workspace_ids, collector):
+        access_scopes[collector] = workspace_ids
+        return retry_collection(grant, producer, workspace_ids, collector)
+
+    monkeypatch.setattr(AccessGrant, "retry_collection", retry)
 
     def module(name):
         def collect(output_dir):
@@ -206,6 +217,13 @@ def test_shared_runtime_scopes_demand_stamps_evidence_and_removes_stale_files(mo
                 for name in result["collectors"]}
     assert "collectors.git_integration" in expected
     assert {name: scope for name, scope in calls if name in result["collectors"]} == expected
+    assert access_scopes == {
+        name: set(expected[name].split(",")) for name in (
+            "collectors.semantic_model_definitions", "collectors.pipelines_notebooks",
+            "collectors.pipeline_definitions", "collectors.onelake_roles",
+            "collectors.workspace_network", "collectors.git_integration",
+        )
+    }
     assert set(result["collectors"]) <= {name for name, _ in calls}
     if gap:
         assert {"collector": gap, "status": "incomplete"} in result["outcomes"]
