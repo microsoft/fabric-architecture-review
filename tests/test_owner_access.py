@@ -218,8 +218,23 @@ def test_refresh_waits_until_completed_without_following_arbitrary_urls():
 
 
 @pytest.mark.parametrize("location", [
+    "https://wabi-west-europe-d-primary-redirect.analysis.windows.net/v1.0/myorg/groups/"
+    f"{WORKSPACE}/datasets/{MODEL}/refreshes/{REFRESH}",
+    f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE.upper()}/datasets/{MODEL.upper()}/refreshes/{REFRESH.upper()}",
+])
+def test_refresh_accepts_regional_location_but_polls_public_base(location):
+    base = f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE}/datasets/{MODEL}/refreshes"
+    transport = Mock(side_effect=[response({}, 202, {"Location": location}), response({"status": "Completed"})])
+    refresh_owner_model(WORKSPACE, MODEL, lambda: "token", transport=transport)
+    assert transport.call_args_list[1].args[1] == base + "/" + REFRESH
+
+
+@pytest.mark.parametrize("location", [
     "https://attacker.example/refreshes/" + REFRESH,
     f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE}/datasets/{MODEL}/refreshes/{REFRESH}?token=x",
+    f"https://wabi-x.analysis.windows.net.attacker.test/v1.0/myorg/groups/{WORKSPACE}/datasets/{MODEL}/refreshes/{REFRESH}",
+    f"http://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE}/datasets/{MODEL}/refreshes/{REFRESH}",
+    f"https://api.powerbi.com/v1.0/myorg/groups/{WORKSPACE}/datasets/{REFRESH}/refreshes/{REFRESH}",
     "",
 ])
 def test_refresh_rejects_untrusted_poll_locations(location):

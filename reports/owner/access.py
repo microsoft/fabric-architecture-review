@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import logging
 import time
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import requests
@@ -129,6 +130,22 @@ def synchronize_access(
     return len(rows)
 
 
+def _refresh_id(location: str, workspace_id: str, model_id: str) -> str:
+    """Accept the public or regional Power BI host; polling always uses the fixed public base.
+
+    The bearer token is never sent to the returned URL, only the refresh ID is taken from it.
+    """
+    parsed = urlsplit(location if isinstance(location, str) else "")
+    host = (parsed.hostname or "").lower()
+    trusted = host == "api.powerbi.com" or (host.startswith("wabi-") and host.endswith(".analysis.windows.net"))
+    parts = parsed.path.strip("/").split("/")
+    expected = ["v1.0", "myorg", "groups", canonical_id(workspace_id), "datasets", canonical_id(model_id), "refreshes"]
+    if (parsed.scheme != "https" or not trusted or parsed.port or parsed.username or parsed.query
+            or parsed.fragment or len(parts) != 8 or [p.lower() for p in parts[:7]] != expected):
+        raise RuntimeError("Owner model refresh returned an unexpected polling location.")
+    return canonical_id(parts[7])
+
+
 def refresh_owner_model(
     workspace_id: str, model_id: str, token: Callable[[], str], *,
     transport: Callable[..., Any] = requests.request,
@@ -148,11 +165,7 @@ def refresh_owner_model(
     )
     if response.status_code != 202:
         raise RuntimeError(f"Owner model refresh was not accepted: HTTP {response.status_code}.")
-    # Do not follow a returned arbitrary URL with a bearer token.
-    location = response.headers.get("Location", "")
-    if not location.startswith(base + "/"):
-        raise RuntimeError("Owner model refresh returned an unexpected polling location.")
-    refresh_id = canonical_id(location.removeprefix(base + "/"))
+    refresh_id = _refresh_id(response.headers.get("Location", ""), workspace_id, model_id)
     deadline = clock() + timeout_seconds
     while clock() < deadline:
         response = transport(

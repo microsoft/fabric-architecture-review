@@ -4,6 +4,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.11.1
+
+### Fix
+
+- Owner access sync no longer fails with "Owner model refresh returned an unexpected
+  polling location" when Power BI returns a regional or differently cased refresh-status
+  URL. FAR still polls only the fixed `api.powerbi.com` endpoint for the configured model.
+
+### Upgrade
+
+Rerun setup with `RELEASE_TAG="v2026.11.1"` and `DEPLOY_WORKSPACE_OWNER_REPORT="true"` to
+regenerate **07_OwnerAccessSync**, then rerun the sync.
+
 ## 2026.11.0
 
 ### Service-principal reviews
