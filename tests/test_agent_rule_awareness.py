@@ -74,6 +74,7 @@ def test_the_ontology_holds_the_static_rule_catalogue_but_no_decisions():
     assert {prop.name for prop in rule.props} >= {"Id", "RunId", "Name", "Dimension", "Kind", "Severity"}
     assert not any(entity.name in {"Finding", "TenantSetting"} for entity in ENTITIES)
     assert not any(rel.source == "Rule" or rel.target == "Rule" for rel in RELATIONSHIPS)
-    source = LakehouseSource("11111111-1111-4111-8111-111111111111", "ws", "22222222-2222-4222-8222-222222222222", "lh", "server.example")
+    source = LakehouseSource("11111111-1111-4111-8111-111111111111", "ws", "22222222-2222-4222-8222-222222222222", "lh", "server.example",
+                             "33333333-3333-4333-8333-333333333333")
     parts = build_definition(source, name="FAR")["parts"]
     assert any(part["path"].startswith("entities/") for part in parts)

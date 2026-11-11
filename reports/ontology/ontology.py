@@ -6,10 +6,12 @@ Historical decisions stay behind model RLS: entities are the estate and the stat
 never a finding. Every entity is backed by a Gold table through DirectLake and identified by one
 key column that joins the run to the ID (a Gold table holds one row per entity per run).
 
-The Lakehouse binding is written in the form the Fabric portal writes: one shared ``AzureStorage.DataLake``
-expression on the Lakehouse's OneLake root, and ``ONT_*`` annotations on every table partition that name the
-item. A ``Sql.Database`` expression without them is accepted by the API but the graph is not built from it, so
-the nodes and relationships do not populate.
+The Lakehouse binding is one shared ``DatabaseQuery`` expression on the Lakehouse's SQL analytics endpoint
+(``Sql.Database``), plus the eight ``ONT_*`` annotations on every table partition that name the item. The graph
+is built only when every partition keeps all eight annotations. Since late October 2026 the service strips all but
+``ONT_PinnedAtUtc`` from partitions bound to the portal's ``AzureStorage.DataLake`` OneLake expression, leaving
+every entity "Unsupported Data Source"; the ``Sql.Database`` form keeps them
+(https://github.com/microsoft/skills-for-fabric/issues/107).
 """
 from __future__ import annotations
 import base64
@@ -23,7 +25,6 @@ from reports.powerbi.schema import GOLD_TABLES_BY_NAME
 _NS = uuid.UUID("9c4e2f1b-7a63-4d58-8e21-3f0a5b6c7d81")
 _TMDL_TYPES = {"string": "string", "int64": "int64", "double": "double", "boolean": "boolean", "dateTime": "dateTime"}
 _FORMATS = {"int64": "0", "dateTime": "General Date"}
-_ONELAKE = "https://onelake.dfs.fabric.microsoft.com"
 _GUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 _LAKEHOUSE_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 
@@ -36,10 +37,11 @@ class LakehouseSource(NamedTuple):
     lakehouse_id: str
     lakehouse_name: str
     sql_endpoint_server: str
+    sql_endpoint_id: str
 
     @property
     def expression(self) -> str:
-        return f"DirectLake - {self.lakehouse_name}"
+        return "DatabaseQuery"
 
     def annotations(self, pinned_at: str) -> list[tuple[str, str]]:
         return [("ONT_WorkspaceId", self.workspace_id), ("ONT_ItemId", self.lakehouse_id), ("ONT_ItemKind", "Lakehouse"),
@@ -52,6 +54,8 @@ class LakehouseSource(NamedTuple):
             raise ValueError("The ontology needs the Gold Lakehouse SQL endpoint server.")
         if not _GUID.match(self.workspace_id or "") or not _GUID.match(self.lakehouse_id or ""):
             raise ValueError("The ontology needs the workspace and Lakehouse IDs.")
+        if not _GUID.match(self.sql_endpoint_id or ""):
+            raise ValueError("The ontology needs the Gold Lakehouse SQL endpoint ID.")
         if not _LAKEHOUSE_NAME.match(self.lakehouse_name or ""):
             raise ValueError("The ontology needs the Lakehouse name (letters, digits and underscores).")
         if not self.workspace_name or re.search(r"[\x00-\x1f]", self.workspace_name):
@@ -240,11 +244,10 @@ def model_tmdl() -> str:
 
 
 def expressions_tmdl(source: LakehouseSource) -> str:
-    """The shared Direct Lake expression: the Lakehouse's OneLake root, exactly as the portal writes it."""
-    root = f"{_ONELAKE}/{source.workspace_id}/{source.lakehouse_id}"
+    """The shared Direct Lake expression: the Lakehouse's SQL analytics endpoint."""
     return (f"expression {_quoted(source.expression)} =\n\t\tlet\n"
-            f'\t\t    Source = AzureStorage.DataLake("{root}", [HierarchicalNavigation=true])\n'
-            "\t\tin\n\t\t    Source\n"
+            f'\t\t    database = Sql.Database("{source.sql_endpoint_server}", "{source.sql_endpoint_id}")\n'
+            "\t\tin\n\t\t    database\n"
             f"\tlineageTag: {_guid('expression', source.expression)}\n")
 
 

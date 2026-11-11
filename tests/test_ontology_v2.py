@@ -14,7 +14,8 @@ from reports.powerbi.schema import GOLD_TABLES_BY_NAME, KEY_COLUMNS, ONTOLOGY_KE
 SERVER = "abc.datawarehouse.fabric.microsoft.com"
 WORKSPACE = "a4c58626-1e3c-42c5-af73-573f18bb1251"
 LAKEHOUSE = "8960f3a7-13d5-45e6-ad9f-43ae62090fe9"
-SOURCE = LakehouseSource(WORKSPACE, "FAR", LAKEHOUSE, "fabric_arch_review_lh", SERVER)
+ENDPOINT = "c6160d9e-af0c-439d-b5f0-8ba04e74ea70"
+SOURCE = LakehouseSource(WORKSPACE, "FAR", LAKEHOUSE, "fabric_arch_review_lh", SERVER, ENDPOINT)
 PINNED = "2026-10-19T08:00:00.000Z"
 
 # Layout of the "WindFarm" sample in the Microsoft Learn article "Ontology (new) item definition",
@@ -66,7 +67,7 @@ def test_the_item_is_a_version_2_ontology_with_the_required_parts():
         assert required in files
     assert files["database.tmdl"] == "database\n\tcompatibilityLevel: 1000000\n"
     assert files["namespaces/default.tmdl"].startswith("namespace default\n")
-    assert "Sql.Database" not in files["expressions.tmdl"]
+    assert "AzureStorage.DataLake" not in files["expressions.tmdl"]
     assert not any(path.startswith(("EntityTypes/", "RelationshipTypes/")) for path in files) and "definition.json" not in files
 
 
@@ -137,16 +138,18 @@ def test_lineage_tags_are_stable_between_builds():
     assert parts() == parts()
 
 
-def test_every_table_is_bound_to_the_lakehouse_the_way_the_portal_writes_it():
+def test_every_table_is_bound_to_the_sql_endpoint_with_all_eight_annotations():
+    """The service keeps the ONT_* annotations, and so builds the graph, only for the Sql.Database form."""
     files = parts()
     expression = files["expressions.tmdl"]
-    assert expression.startswith("expression 'DirectLake - fabric_arch_review_lh' =\n")
-    assert f'AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/{WORKSPACE}/{LAKEHOUSE}", [HierarchicalNavigation=true])' in expression
+    assert expression.startswith("expression DatabaseQuery =\n")
+    assert f'database = Sql.Database("{SERVER}", "{ENDPOINT}")' in expression
+    assert "AzureStorage.DataLake" not in expression and "onelake" not in expression
     tables = {path: text for path, text in files.items() if path.startswith("tables/")}
     assert len(tables) == len(ENTITIES)
     for text in tables.values():
-        assert "\t\t\texpressionSource: 'DirectLake - fabric_arch_review_lh'\n" in text
-        assert "DatabaseQuery" not in text
+        assert "\t\t\texpressionSource: DatabaseQuery\n" in text
+        assert "DirectLake - " not in text
         assert re.findall(r"annotation (ONT_\w+) = (.*)", text) == [
             ("ONT_WorkspaceId", WORKSPACE), ("ONT_ItemId", LAKEHOUSE), ("ONT_ItemKind", "Lakehouse"),
             ("ONT_ItemName", "fabric_arch_review_lh"), ("ONT_WorkspaceName", "FAR"), ("ONT_SqlEndpoint", SERVER),
@@ -161,6 +164,7 @@ def test_the_binding_is_pinned_at_deployment_time_when_no_time_is_given():
 @pytest.mark.parametrize("field, value, message", [
     ("sql_endpoint_server", "", "SQL endpoint"), ("sql_endpoint_server", "a b", "SQL endpoint"),
     ("workspace_id", "not-a-guid", "IDs"), ("lakehouse_id", "", "IDs"),
+    ("sql_endpoint_id", "", "SQL endpoint ID"), ("sql_endpoint_id", "not-a-guid", "SQL endpoint ID"),
     ("lakehouse_name", "", "Lakehouse name"), ("lakehouse_name", "a'b", "Lakehouse name"), ("lakehouse_name", "a b", "Lakehouse name"),
     ("workspace_name", "", "workspace name"), ("workspace_name", "a\nb", "workspace name"),
 ])

@@ -4,6 +4,19 @@
 
 All notable changes to this project are documented in this file.
 
+## 2026.11.2
+
+### Fix
+
+- The estate ontology materializes again. Since late October 2026, Fabric keeps the ontology's data-source
+  annotations only when entities are bound through the Lakehouse SQL analytics endpoint, so entities bound
+  through the OneLake expression showed "Unsupported Datasource" and the graph could not be built. The ontology
+  now binds through the SQL analytics endpoint.
+
+### Upgrade
+
+Rerun setup with `RELEASE_TAG="v2026.11.2"` and `DEPLOY_ONTOLOGY="true"`, then open the ontology and choose **Manage graph > Materialize**.
+
 ## 2026.11.1
 
 ### Fix

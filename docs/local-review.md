@@ -19,7 +19,7 @@ the Data Agent. For those, use [Fabric deployment](../fabric/DEPLOYMENT.md).
 ## 2. Install
 
 Clone the repository, then choose your shell. To use a published release, replace
-the branch with its tag, such as `v2026.11.1`.
+the branch with its tag, such as `v2026.11.2`.
 
 ```text
 git clone --branch main https://github.com/microsoft/fabric-architecture-review.git

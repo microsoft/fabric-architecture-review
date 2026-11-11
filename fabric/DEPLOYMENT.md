@@ -34,7 +34,7 @@ after a successful scoped review. No workstation installation is required.
    | --- | --- |
    | `WORKSPACE_ID` | Leave blank to use the notebook's workspace |
    | `GITHUB_REPO_URL` | Repository containing your selected release |
-   | `RELEASE_TAG` | Release tag, such as `v2026.11.1`; leave blank only to use `GITHUB_BRANCH` |
+   | `RELEASE_TAG` | Release tag, such as `v2026.11.2`; leave blank only to use `GITHUB_BRANCH` |
    | Artifact names | Keep defaults for a new installation; retain existing names when upgrading |
    | `DEPLOY_GOLD_REPORT` | `"true"` |
    | `DEPLOY_WORKSPACE_OWNER_REPORT` | `"false"` unless you need restricted owner reporting |
